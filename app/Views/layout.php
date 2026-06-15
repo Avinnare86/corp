@@ -1,0 +1,192 @@
+<?php
+use App\Core\Auth;
+use App\Services\NotificationService;
+use App\Controllers\ChatController;
+
+$role = Auth::role();
+$uid = Auth::id();
+$unread = $uid ? NotificationService::unreadCount((int) $uid) : 0;
+$chatUnread = $uid ? ChatController::unreadCount((int) $uid) : 0;
+$docsInbox = $uid ? \App\Controllers\DocumentController::inboxCount((int) $uid) : 0;
+$ordersInbox = $uid ? \App\Controllers\OrderController::inboxCount((int) $uid) : 0;
+$vacInbox = $uid ? \App\Controllers\VacationController::inboxCount((int) $uid) : 0;
+// ---- меню по НАБОРУ ролей; группы-проекты управляют видимостью разделов ----
+$can = fn(string ...$s) => Auth::has(...$s);
+$isAdmin = $role === 'admin';
+$menu = [];
+if ($uid) {
+    // менеджмент кадровых разделов: админ или менеджеры проектов
+    $isMgr = $can('anketa_manager', 'visa_manager');
+    $isTimekeeper = $isAdmin || $can('timekeeper', 'dept_head') || !empty($authUser['timekeeper_dept_id'])
+        || \App\Core\Database::scalar('SELECT 1 FROM departments WHERE head_id = ?', [$uid]);
+    $isHrAcc = $isAdmin || $can('hr', 'accountant');
+    // менеджеры проектов (админ имеет все роли автоматически)
+    $isHrMgr   = $can('hr_manager', 'hr');   // менеджер проекта кадры или кадровик
+    $isFinMgr  = $can('finance_manager');    // менеджер проекта финансы
+    $isDocsMgr = $can('docs_manager');       // менеджер проекта документы
+
+    $menu[''][] = ['/', 'Главная', 0];
+    if ($isAdmin)             { $menu[''][] = ['/admin', 'Админ-панель', 0]; }
+
+    // Группы модулей открываются ПО РОЛЯМ (проекты упразднены).
+    if ($can('anketa_worker', 'anketa_manager', 'controller')) {
+        $g = [];
+        if ($can('anketa_worker')) { $g[] = ['/dossiers', 'Проверка досье', 0]; }
+        if ($can('controller'))    { $g[] = ['/inspect', 'Контроль анкет', 0]; }
+        if ($can('anketa_manager')) { $g[] = ['/manager', 'Распределение', 0]; $g[] = ['/manager/report', 'Отчёт', 0]; }
+        $g[] = ['/rating', 'Рейтинг', 0];
+        // настройки менеджера проекта по квоте
+        if ($can('anketa_manager')) {
+            $g[] = ['/admin/countries', 'Страны', 0];
+            $g[] = ['/admin/comments', 'Причины', 0];
+            $g[] = ['/admin/errors', 'Ошибки', 0];
+        }
+        if ($g) { $menu['Квота'] = $g; }
+    }
+    if ($can('visa_worker', 'visa_manager', 'piecework_worker')) {
+        $g = [];
+        $visaInbox = \App\Controllers\VisaController::inboxCount((int) $uid);
+        if ($can('visa_worker')) {
+            $g[] = ['/visas', 'Проверка виз', $visaInbox];
+            $g[] = ['/visas/done', 'Отработанное', 0];
+        }
+        if ($can('visa_manager')) {
+            $g[] = ['/visas/manage', 'Загрузка и распределение', 0];
+            $g[] = ['/visas/opis', 'Формирование описей', 0];
+            $g[] = ['/visas/opis/list', 'Описи / Указания', 0];
+            $g[] = ['/visas/rework', 'МИД: на доработке', \App\Controllers\VisaOpisController::reworkCount()];
+            $g[] = ['/visas/report', 'Отчёт', 0];
+        }
+        if ($can('visa_worker', 'visa_manager')) { $g[] = ['/visas/rating', 'Рейтинг', 0]; }
+        if ($can('piecework_worker')) { $g[] = ['/piecework', 'Визы/операции (учёт)', 0]; }
+        if ($can('visa_manager'))     { $g[] = ['/admin/operations', 'Каталог операций', 0]; }
+        if ($g) { $menu['Визы'] = $g; }
+    }
+    // Кадры — по ролям. Бухгалтерия/директор/руководители тоже видят «Сотрудники» (для надбавок/просмотра).
+    $canSeeStaff = $isHrMgr || $can('accountant', 'director', 'deputy_director');
+    if ($isHrMgr || $isTimekeeper || $canSeeStaff || $can('dept_head')) {
+        $g = [];
+        if ($isTimekeeper || $isHrMgr || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacations', 'Отпуска', $vacInbox]; }
+        if ($isTimekeeper) { $g[] = ['/timesheet2', 'Эл. табель', 0]; }
+        if ($isHrAcc) { $g[] = ['/timesheet2/coverage', 'Покрытие табелями', 0]; }
+        if ($canSeeStaff) { $g[] = ['/admin/employees', 'Сотрудники', 0]; }
+        // управление оргструктурой/должностями/табелем — только менеджер проекта кадры или кадровик
+        if ($isHrMgr) {
+            $g[] = ['/admin/org', 'Оргструктура', 0];
+            $g[] = ['/admin/positions', 'Должности', 0];
+            $g[] = ['/admin/timesheet', 'Табель (месяц)', 0];
+        }
+        if ($g) { $menu['Кадры'] = $g; }
+    }
+    // Служебки о стимуле — начальники/замы/директор/бухгалтерия (вне привязки к проектам)
+    if ($can('dept_head', 'deputy_director', 'director', 'accountant')) {
+        $memoInbox = \App\Controllers\StimulusController::inboxCount((int) $uid);
+        $menu['Стимул'] = [['/memos', 'Служебки о стимуле', $memoInbox]];
+    }
+    // Финансы — только менеджер проекта финансы
+    if ($isFinMgr) {
+        $menu['Финансы'] = [
+            ['/budget', 'Бюджет ФОТ', 0],
+            ['/admin/grounds', 'Основания стимула', 0],
+            ['/admin/pricing', 'Тарифы', 0],
+            ['/admin/extras', 'Доплаты', 0],
+        ];
+    }
+    // Документы — доступны всем пользователям; поручения входят в этот блок
+    $gd = [
+        ['/docs', 'Документы', $docsInbox],
+        ['/orders', 'Поручения', $ordersInbox],
+    ];
+    $appealsInbox = \App\Controllers\AppealController::inboxCount((int) $uid);
+    if ($isDocsMgr || $appealsInbox) { $gd[] = ['/appeals', 'Обращения граждан', $appealsInbox]; }
+    if ($isDocsMgr) { // менеджер проекта документы
+        $gd[] = ['/docs/deputies', 'Замещение (СЭД)', 0];
+        $gd[] = ['/nomenclature', 'Номенклатура дел', 0];
+        $gd[] = ['/nomenclature/archive', 'Архив дел', 0];
+    }
+    $menu['Документы'] = $gd;
+    // Админ — только системный администратор (журнал действий — тоже только админ)
+    if ($isAdmin) {
+        $menu['Админ'] = [
+            ['/admin/settings', 'Настройки', 0],
+            ['/audit', 'Журнал', 0],
+        ];
+    }
+    // всегда
+    $menu[''][] = ['/certs', 'Моя ЭП', 0];
+    $menu[''][] = ['/chat', 'Чат', $chatUnread];
+    $menu[''][] = ['/notifications', 'Уведомления', $unread];
+}
+?>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><?= e($title ?? '') ?> — <?= e($appName) ?></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<header class="topbar">
+    <a class="brand" href="/">
+        <span class="mark">
+            <svg width="24" height="13" viewBox="0 0 52 26" fill="none"><path d="M4 18 C 11 4, 19 4, 26 13 C 33 22, 41 22, 48 8" stroke="#fff" stroke-width="6" stroke-linecap="round"/></svg>
+        </span>
+        <span class="brand-text"><?= e($appName) ?></span>
+    </a>
+    <?php if (Auth::check()): ?>
+    <nav class="nav">
+        <?php
+        $badge = fn($n) => $n ? ' <span class="badge">' . (int) $n . '</span>' : '';
+        // одиночные пункты (группа '')
+        foreach ($menu[''] ?? [] as [$href, $label, $cnt]) {
+            echo '<a href="' . e($href) . '">' . e($label) . $badge($cnt) . '</a>';
+        }
+        // группы-проекты
+        foreach ($menu as $group => $items) {
+            if ($group === '' || !$items) { continue; }
+            $sum = array_sum(array_column($items, 2));
+            echo '<div class="nav-group"><button type="button" class="nav-gbtn" onclick="navToggle(this)">'
+                . e($group) . $badge($sum) . ' <span class="caret">▾</span></button><div class="nav-drop">';
+            foreach ($items as [$href, $label, $cnt]) {
+                echo '<a href="' . e($href) . '">' . e($label) . $badge($cnt) . '</a>';
+            }
+            echo '</div></div>';
+        }
+        ?>
+    </nav>
+    <script>
+    function navToggle(btn){
+        var g = btn.parentElement, was = g.classList.contains('open');
+        document.querySelectorAll('.nav-group.open').forEach(function(x){ x.classList.remove('open'); });
+        if (!was) g.classList.add('open');
+    }
+    document.addEventListener('click', function(e){
+        if (!e.target.closest('.nav-group')) document.querySelectorAll('.nav-group.open').forEach(function(x){ x.classList.remove('open'); });
+    });
+    </script>
+    <div class="user">
+        <span><?= e($authUser['full_name'] ?? '') ?></span>
+        <a class="btn-logout" href="/logout">Выход</a>
+    </div>
+    <?php endif; ?>
+</header>
+
+<main class="container">
+    <?php if (!empty($flashMsg)): ?>
+        <div class="flash flash-<?= e($flashMsg['type']) ?>"><?= nl2br(e($flashMsg['message'])) ?></div>
+    <?php endif; ?>
+
+    <?= $content ?>
+</main>
+
+<footer class="footer">
+    <?= e($appName) ?> · <?= date('Y') ?>
+</footer>
+
+<?php if (Auth::check()) { include __DIR__ . '/partials/widget.php'; } ?>
+</body>
+</html>

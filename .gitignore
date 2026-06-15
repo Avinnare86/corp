@@ -1,0 +1,47 @@
+# ─── Секреты и ключи (НИКОГДА не коммитить) ───
+/storage/secret.key
+*.bas
+*.cer
+*.pem
+.env
+
+# ─── Рабочие данные (создаются миграцией/работой приложения) ───
+/storage/database.sqlite
+/storage/database.sqlite-shm
+/storage/database.sqlite-wal
+/storage/database.sqlite-journal
+/storage/uploads/*
+/storage/tmp/*
+# но сами папки сохраняем в репозитории:
+!/storage/uploads/.gitkeep
+!/storage/uploads/docs/.gitkeep
+!/storage/tmp/.gitkeep
+
+# ─── Крупные архивы и собранный пакет (не часть приложения) ───
+*.rar
+*.zip
+*.7z
+
+# ─── Документы-образцы в корне (содержат персональные данные клиентов) ───
+/*.docx
+/*.xls
+/*.xlsx
+/*.pdf
+
+# ─── Артефакты исследования/прототипы ───
+/rat_extract.txt
+/grant-ined-prototype*.html
+
+# ─── Вынесенные исходники сторонних программ (большие, не нужны приложению) ───
+/Извлекатель данных из Word (визы)/
+/Разделитель EXCEL по странам/
+
+# ─── Локальные конфиги редактора/IDE ───
+/.claude/
+/.vscode/
+/.idea/
+*.code-workspace
+
+# ─── Прочее ───
+Thumbs.db
+desktop.ini
