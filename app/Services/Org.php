@@ -45,6 +45,23 @@ class Org
         return $dept ? self::isSuperiorOfDept($uid, (int) $dept) : false;
     }
 
+    /** Начальники сотрудника вверх по иерархии: head_id/curator_id его отдела и всех вышестоящих (для эскалации). */
+    public static function superiorUserIds(int $uid): array
+    {
+        $deptId = (int) Database::scalar('SELECT department_id FROM users WHERE id=?', [$uid]);
+        $out = []; $guard = 0;
+        while ($deptId && $guard++ < 20) {
+            $d = Database::one('SELECT head_id, curator_id, parent_id FROM departments WHERE id=?', [$deptId]);
+            if (!$d) { break; }
+            foreach (['head_id', 'curator_id'] as $k) {
+                $boss = (int) ($d[$k] ?? 0);
+                if ($boss && $boss !== $uid) { $out[$boss] = true; }
+            }
+            $deptId = $d['parent_id'] ? (int) $d['parent_id'] : null;
+        }
+        return array_keys($out);
+    }
+
     /** Отделы, где $uid — начальник (head_id). */
     public static function headedDeptIds(int $uid): array
     {

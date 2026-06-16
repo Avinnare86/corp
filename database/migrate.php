@@ -222,6 +222,17 @@ $tables['order_due_log'] = "CREATE TABLE IF NOT EXISTS order_due_log (
     created_at TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
+// Лента событий поручения (создано/принято/отчёт/возврат/перенос/переадресация/контроль…).
+$tables['order_events'] = "CREATE TABLE IF NOT EXISTS order_events (
+    id $ID,
+    order_id   INT NOT NULL,
+    user_id    INT NULL,
+    user_name  VARCHAR(200) DEFAULT '',
+    event      VARCHAR(40) NOT NULL,
+    detail     TEXT NULL,
+    created_at TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
 // Шаблоны маршрутов согласования.
 $tables['route_templates'] = "CREATE TABLE IF NOT EXISTS route_templates (
     id $ID,
@@ -657,6 +668,31 @@ foreach ([
     if (!columnExists('orders', $col)) {
         $pdo->exec($ddlFix("ALTER TABLE orders ADD COLUMN $col $ddl"));
         echo "OK  колонка orders.$col добавлена\n";
+    }
+}
+// МосЭДО: вид поручения, № пункта резолюции, запрос продления срока.
+foreach ([
+    'kind'           => "VARCHAR(20) NOT NULL DEFAULT 'order'", // order|control|request|info
+    'res_point'      => 'VARCHAR(8) NULL',                       // № пункта многопунктовой резолюции
+    'ext_req_date'   => 'DATE NULL',                             // запрошенный новый срок
+    'ext_req_reason' => 'VARCHAR(300) NULL',
+    'ext_req_by'     => 'INT NULL',
+    'ext_req_at'     => 'DATETIME NULL',
+] as $col => $ddl) {
+    if (!columnExists('orders', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE orders ADD COLUMN $col $ddl"));
+        echo "OK  колонка orders.$col добавлена\n";
+    }
+}
+// Соисполнители со своим исполнением (статус/отчёт по своей части).
+foreach ([
+    'status'  => "VARCHAR(12) NOT NULL DEFAULT 'work'", // work|done
+    'report'  => 'TEXT NULL',
+    'done_at' => 'DATETIME NULL',
+] as $col => $ddl) {
+    if (!columnExists('order_coexecutors', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE order_coexecutors ADD COLUMN $col $ddl"));
+        echo "OK  колонка order_coexecutors.$col добавлена\n";
     }
 }
 // Контроль на уровне документа.

@@ -26,6 +26,11 @@ $today = date('Y-m-d');
     <form method="post" action="/orders" class="grid-form">
         <?= csrf_field() ?>
         <label style="grid-column:span 2">Поручение<input type="text" name="title" required></label>
+        <label>Вид
+            <select name="kind">
+                <?php foreach (OrderController::KIND as $k => $lbl): ?><option value="<?= e($k) ?>"><?= e($lbl) ?></option><?php endforeach; ?>
+            </select>
+        </label>
         <label>Ответственный
             <select name="assignee_id" required>
                 <?php foreach ($subordinates as $sub): ?><option value="<?= (int)$sub['id'] ?>"><?= e($sub['full_name']) ?></option><?php endforeach; ?>
@@ -52,6 +57,7 @@ $today = date('Y-m-d');
         ?>
             <tr>
                 <td><a href="/orders/<?= (int)$o['id'] ?>"><strong><?= e($o['title']) ?></strong></a>
+                    <?php if (($o['kind'] ?? 'order') !== 'order'): ?><span class="tag off"><?= e(OrderController::KIND[$o['kind']] ?? $o['kind']) ?></span><?php endif; ?>
                     <?php if ((int)$o['co_count']): ?><span class="tag">+<?= (int)$o['co_count'] ?> соисп.</span><?php endif; ?>
                     <?php if ((int)$o['child_count']): ?><span class="tag">↳ <?= (int)$o['child_count'] ?></span><?php endif; ?>
                     <?php if ($tab!=='out' && (int)$o['assignee_id']!==$meId): ?><span class="tag">я — соисполнитель</span><?php endif; ?>

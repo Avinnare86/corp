@@ -16,8 +16,13 @@ $active = !in_array($o['status'], ['done','canceled'], true);
     <?php if ($o['body']): ?><div class="doc-body" style="margin-bottom:10px"><?= nl2br(e($o['body'])) ?></div><?php endif; ?>
     <table class="table">
         <tr><td class="muted" style="width:170px">От кого</td><td><?= e($o['author_name']) ?></td></tr>
+        <tr><td class="muted">Вид</td><td><?= e($kindLabels[$o['kind'] ?? 'order'] ?? 'Поручение') ?></td></tr>
         <tr><td class="muted">Ответственный</td><td><strong><?= e($o['assignee_name']) ?></strong></td></tr>
-        <?php if ($cos): ?><tr><td class="muted">Соисполнители</td><td><?= e(implode(', ', array_map(fn($c)=>$c['full_name'], $cos))) ?></td></tr><?php endif; ?>
+        <?php if ($cos): ?><tr><td class="muted">Соисполнители</td><td>
+            <?php foreach ($cos as $c): ?>
+                <div><?= e($c['full_name']) ?> — <?= ($c['status'] ?? 'work')==='done' ? '<span class="plus">✓ готово</span>' : '<span class="muted">в работе</span>' ?><?= !empty($c['report']) ? ' <span class="muted">(' . e($c['report']) . ')</span>' : '' ?></div>
+            <?php endforeach; ?>
+        </td></tr><?php endif; ?>
         <tr><td class="muted">Срок</td><td><?= e($o['due_date'] ?: '—') ?><?= $o['due_date'] && $o['due_date'] < date('Y-m-d') && $active ? ' <span class="minus">⚠ просрочено</span>' : '' ?></td></tr>
         <tr><td class="muted">Контроль</td><td>
             <?php if ((int)$o['on_control']): ?><span class="tag" style="background:#fff3d6;color:#8a5a00">🔍 на контроле</span> (напоминать за <?= (int)$o['remind_days'] ?> дн.)
@@ -73,12 +78,59 @@ $active = !in_array($o['status'], ['done','canceled'], true);
     </form>
     <?php endif; ?>
 
+    <?php if (!empty($myCo) && $active && ($myCo['status'] ?? 'work') !== 'done'): ?>
+    <h3 class="sub">Моя часть (соисполнитель)</h3>
+    <form method="post" action="/orders/<?= (int)$o['id'] ?>/action" class="form-inline"><?= csrf_field() ?>
+        <label class="grow">Отчёт по вашей части<input type="text" name="report"></label>
+        <button class="btn btn-primary" name="act" value="coexec_report">✓ Готово по моей части</button>
+    </form>
+    <?php endif; ?>
+
+    <?php if (($isAssignee || $isCo) && $active && empty($o['ext_req_date'])): ?>
+    <h3 class="sub">Запросить продление срока</h3>
+    <form method="post" action="/orders/<?= (int)$o['id'] ?>/action" class="form-inline"><?= csrf_field() ?>
+        <label>Желаемый срок<input type="date" name="new_date" required></label>
+        <label class="grow">Обоснование<input type="text" name="reason" required></label>
+        <button class="btn" name="act" value="ext_request">Запросить продление</button>
+    </form>
+    <?php endif; ?>
+
+    <?php if (!empty($o['ext_req_date'])): ?>
+    <div class="flash" style="background:#fff3d6;color:#8a5a00;margin-top:10px">
+        Запрошено продление до <strong><?= e($o['ext_req_date']) ?></strong>: <?= e($o['ext_req_reason']) ?>
+        <?php if ($isAuthor): ?>
+        <div class="form-inline" style="margin-top:8px">
+            <form method="post" action="/orders/<?= (int)$o['id'] ?>/action" class="inline"><?= csrf_field() ?>
+                <button class="btn btn-mini btn-primary" name="act" value="ext_approve">Согласовать</button></form>
+            <form method="post" action="/orders/<?= (int)$o['id'] ?>/action" class="row-form inline"><?= csrf_field() ?>
+                <input type="text" name="comment" placeholder="причина отказа" class="narrow">
+                <button class="btn btn-mini" name="act" value="ext_reject">Отклонить</button></form>
+        </div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
     <?php if ($isAuthor && $active): ?>
     <h3 class="sub">Перенос срока</h3>
     <form method="post" action="/orders/<?= (int)$o['id'] ?>/action" class="form-inline"><?= csrf_field() ?>
         <label>Новый срок<input type="date" name="new_date" required></label>
         <label class="grow">Причина<input type="text" name="reason" required></label>
         <button class="btn" name="act" value="postpone">Перенести</button>
+    </form>
+    <?php endif; ?>
+
+    <?php if (!empty($canReassign) && $active): ?>
+    <h3 class="sub">Переадресовать</h3>
+    <form method="post" action="/orders/<?= (int)$o['id'] ?>/action" class="form-inline"><?= csrf_field() ?>
+        <label>Новый исполнитель
+            <select name="assignee_id">
+                <?php foreach ($allUsers as $u2): if ((int)$u2['id'] === (int)$o['assignee_id']) continue; ?>
+                    <option value="<?= (int)$u2['id'] ?>"><?= e($u2['full_name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label class="grow">Причина<input type="text" name="reason"></label>
+        <button class="btn" name="act" value="reassign">Переадресовать</button>
     </form>
     <?php endif; ?>
 </section>
@@ -107,6 +159,17 @@ $active = !in_array($o['status'], ['done','canceled'], true);
     <?php endforeach; ?>
 </section>
 <?php endif; ?>
+
+<section class="panel">
+    <h2>Лента событий</h2>
+    <?php foreach ($events as $ev): ?>
+        <div class="hist-row">
+            <span class="muted mono"><?= e(substr((string)$ev['created_at'],0,16)) ?></span>
+            <span><strong><?= e($eventLabels[$ev['event']] ?? $ev['event']) ?></strong><?= $ev['detail'] ? ' — ' . e($ev['detail']) : '' ?> <span class="muted">(<?= e($ev['user_name'] ?: '—') ?>)</span></span>
+        </div>
+    <?php endforeach; ?>
+    <?php if (!$events): ?><p class="muted">Событий пока нет.</p><?php endif; ?>
+</section>
 </div>
 
 <div>

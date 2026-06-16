@@ -558,14 +558,31 @@ class DocumentController extends Controller
         if (!$doc || !$this->canSee($doc, $me)) { $this->redirect('/docs'); }
         $isBoss = in_array($me['role'], ['admin', 'manager'], true) || Database::scalar('SELECT 1 FROM departments WHERE head_id = ?', [$me['id']]);
         if (!$isBoss) { flash('Резолюции дают руководители.', 'error'); $this->redirect('/docs/' . $id); }
-        $assignee = (int) $this->input('assignee_id');
-        $text = trim((string) $this->input('title'));
-        if (!$assignee || $text === '') { flash('Укажите исполнителя и текст резолюции.', 'error'); $this->redirect('/docs/' . $id); }
-        Database::insert('INSERT INTO orders (author_id, assignee_id, title, body, due_date, doc_id) VALUES (?,?,?,?,?,?)',
-            [$me['id'], $assignee, $text, 'Резолюция по документу «' . $doc['title'] . '»' . ($doc['reg_number'] ? " (№ {$doc['reg_number']})" : ''), $this->input('due_date') ?: null, $id]);
-        NotificationService::create($assignee, 'Поручение по документу', "«{$text}» — документ «{$doc['title']}»");
-        $this->history((int) $id, 'Резолюция: ' . $text . ' → ' . Database::scalar('SELECT full_name FROM users WHERE id=?', [$assignee]));
-        flash('Поручение по документу дано.');
+
+        // Многопунктовая резолюция: res[i][title|assignee|due]; фолбэк на одиночную форму.
+        $points = $_POST['res'] ?? null;
+        if (!is_array($points) || !$points) {
+            $points = [['title' => $this->input('title'), 'assignee' => $this->input('assignee_id'), 'due' => $this->input('due_date')]];
+        }
+        $docOnControl = (int) ($doc['on_control'] ?? 0) === 1;
+        $bodyBase = 'Резолюция по документу «' . $doc['title'] . '»' . ($doc['reg_number'] ? " (№ {$doc['reg_number']})" : '');
+        $created = 0; $n = 0;
+        foreach ($points as $p) {
+            $text = trim((string) ($p['title'] ?? ''));
+            $assignee = (int) ($p['assignee'] ?? 0);
+            if ($text === '' || !$assignee) { continue; }
+            $n++;
+            $oid = Database::insert(
+                'INSERT INTO orders (author_id, assignee_id, title, body, due_date, doc_id, res_point, kind, on_control, controller_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [$me['id'], $assignee, $text, $bodyBase, ($p['due'] ?? '') ?: null, $id, (string) $n,
+                 $docOnControl ? 'control' : 'order', $docOnControl ? 1 : 0, $docOnControl ? $me['id'] : null]);
+            \App\Services\OrderService::event($oid, 'created', 'резолюция п.' . $n . ', исполнитель: ' . (string) Database::scalar('SELECT full_name FROM users WHERE id=?', [$assignee]));
+            NotificationService::create($assignee, 'Поручение по документу', "«{$text}» — документ «{$doc['title']}»");
+            $created++;
+        }
+        if (!$created) { flash('Укажите хотя бы один пункт: исполнитель и текст.', 'error'); $this->redirect('/docs/' . $id); }
+        $this->history((int) $id, 'Резолюция по документу: пунктов — ' . $created);
+        flash($created > 1 ? "Резолюция дана: {$created} поручений." : 'Поручение по документу дано.');
         $this->redirect('/docs/' . $id);
     }
 

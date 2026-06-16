@@ -143,15 +143,32 @@ foreach ($route as $r) { $stages[(int)$r['step_no']][] = $r; }
             </div>
         <?php endforeach; ?>
         <?php if ($isBoss): ?>
-        <form method="post" action="/docs/<?= (int)$doc['id'] ?>/order" class="form-inline" style="margin-top:10px">
+        <form method="post" action="/docs/<?= (int)$doc['id'] ?>/order" style="margin-top:10px">
             <?= csrf_field() ?>
-            <label class="grow">Резолюция<input type="text" name="title" placeholder="Подготовить ответ…" required></label>
-            <label>Исполнитель
-                <select name="assignee_id"><?php foreach ($allUsers as $u2): ?><option value="<?= (int)$u2['id'] ?>"><?= e($u2['full_name']) ?></option><?php endforeach; ?></select>
-            </label>
-            <label>Срок<input type="date" name="due_date"></label>
-            <button class="btn btn-primary">Дать поручение</button>
+            <p class="muted" style="margin:0 0 6px">Резолюция может содержать несколько пунктов — каждый станет отдельным поручением.<?= !empty($doc['on_control']) ? ' Документ на контроле — поручения наследуют контроль.' : '' ?></p>
+            <table class="table" id="resLines">
+                <thead><tr><th>Пункт резолюции</th><th>Исполнитель</th><th>Срок</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div class="form-inline" style="margin-top:8px">
+                <button type="button" class="btn btn-mini" onclick="resAdd()">+ Пункт</button>
+                <button class="btn btn-primary">Дать резолюцию</button>
+            </div>
         </form>
+        <script>
+        var RES_USERS = <?= json_encode(array_map(fn($u)=>['id'=>(int)$u['id'],'name'=>$u['full_name']], $allUsers), JSON_UNESCAPED_UNICODE) ?>;
+        function resOpt(){ return RES_USERS.map(function(u){ return '<option value="'+u.id+'">'+u.name+'</option>'; }).join(''); }
+        function resAdd(){
+          var tb=document.querySelector('#resLines tbody'), i=tb.children.length;
+          var tr=document.createElement('tr');
+          tr.innerHTML='<td><input type="text" name="res['+i+'][title]" placeholder="Подготовить ответ…" style="width:100%"></td>'
+            +'<td><select name="res['+i+'][assignee]"><option value="">—</option>'+resOpt()+'</select></td>'
+            +'<td><input type="date" name="res['+i+'][due]"></td>'
+            +'<td><button type="button" class="btn btn-mini btn-danger" onclick="this.closest(\'tr\').remove()">×</button></td>';
+          tb.appendChild(tr);
+        }
+        resAdd();
+        </script>
         <?php endif; ?>
     </section>
     <?php endif; ?>
