@@ -76,7 +76,9 @@ class VisaController extends Controller
                     (SELECT COUNT(*) FROM visa_rows r WHERE r.assigned_to=u.id AND r.checked_at IS NOT NULL) AS checked
                FROM users u
               WHERE (u.role='employee' OR u.role='admin') AND u.is_active=1 AND COALESCE(u.is_visa_manager,0)=0
-                AND (u.role='admin' OR u.id IN (SELECT user_id FROM user_projects WHERE project_code='visa'))
+                AND (u.role='admin'
+                     OR u.id IN (SELECT user_id FROM user_roles WHERE role_slug='visa_worker')
+                     OR u.id IN (SELECT user_id FROM user_projects WHERE project_code='visa'))
               ORDER BY u.full_name");
         foreach ($specialists as &$s2) { $s2['remaining'] = (int) $s2['assigned'] - (int) $s2['checked']; }
         unset($s2);
