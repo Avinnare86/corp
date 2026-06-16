@@ -105,7 +105,9 @@ $doesOps = (int) ($user['does_operations'] ?? 0) === 1;
         </tr>
         <tr class="payslip-verdict">
             <td>
-                <?php if ($payroll['reached_level']): ?>
+                <?php if (!empty($payroll['norm_model'])): ?>
+                    ✅ Оклад+надбавка (гарантия) + доплата по тарифу за <?= (int)$payroll['anketa_above_count'] ?> анкет сверх норматива
+                <?php elseif ($payroll['reached_level']): ?>
                     ✅ Начислено по заработку — он выше гарантии
                 <?php else: ?>
                     ⓘ Заработок ниже гарантии — начислен гарантированный минимум

@@ -619,6 +619,9 @@ foreach ([
     'deputy_to'          => 'DATE NULL',
     'email'              => "VARCHAR(200) DEFAULT ''", // для email-уведомлений
     'is_visa_manager'    => 'INT NOT NULL DEFAULT 0',  // менеджер проекта по визам
+    // Недельный норматив проверки анкет «за оклад»: NULL = классическая модель max(оклад, сделка);
+    // задан (>=0) = аддитивная модель (оклад+надбавка покрывают норматив, доплата по тарифу только сверх; 0 = чистый сдельщик).
+    'anketa_norm'        => 'INT NULL DEFAULT NULL',
 ] as $col => $ddl) {
     if (!columnExists('users', $col)) {
         $pdo->exec($ddlFix("ALTER TABLE users ADD COLUMN $col $ddl"));

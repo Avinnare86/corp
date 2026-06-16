@@ -55,6 +55,11 @@ $doesOps = (int) ($user['does_operations'] ?? 0) === 1;
 
     <?php if ($doesAnketas || $doesOps): ?>
     <h3 class="sub">Сделка</h3>
+    <?php if (!empty($payroll['norm_model'])): ?>
+        <p class="muted" style="margin:.2rem 0 .4rem">Анкеты — только <strong>сверх норматива</strong>: проверено
+            <?= (int)$payroll['anketa_checked'] ?>, покрыто окладом+надбавкой <?= (int)$payroll['anketa_covered'] ?>,
+            к доплате <?= (int)$payroll['anketa_above_count'] ?> (недельный норматив <?= (int)$payroll['anketa_norm_weekly'] ?>).</p>
+    <?php endif; ?>
     <table class="table">
         <thead><tr><th>Работа</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th></tr></thead>
         <tbody>
@@ -98,7 +103,7 @@ $doesOps = (int) ($user['does_operations'] ?? 0) === 1;
     <h3 class="sub">Сколько начислено</h3>
     <table class="table payslip">
         <tr>
-            <td>Заработано за месяц (сделка<?= $payroll['fix_sum']>0 ? ' + подработки' : '' ?>)</td>
+            <td><?php if (!empty($payroll['norm_model'])): ?>Доплата сверх норматива (по тарифу<?= $doesOps ? ' + операции' : '' ?><?= $payroll['fix_sum']>0 ? ' + подработки' : '' ?>)<?php else: ?>Заработано за месяц (сделка<?= $payroll['fix_sum']>0 ? ' + подработки' : '' ?>)<?php endif; ?></td>
             <td class="num"><?= money($payroll['earned']) ?></td>
         </tr>
         <tr>
@@ -108,7 +113,9 @@ $doesOps = (int) ($user['does_operations'] ?? 0) === 1;
         </tr>
         <tr class="payslip-verdict">
             <td>
-                <?php if ($payroll['reached_level']): ?>
+                <?php if (!empty($payroll['norm_model'])): ?>
+                    ✅ Оклад+надбавка (гарантия) + доплата по тарифу за <?= (int)$payroll['anketa_above_count'] ?> анкет сверх норматива
+                <?php elseif ($payroll['reached_level']): ?>
                     ✅ Начислено по заработку — он выше гарантии
                 <?php else: ?>
                     ⓘ Заработок ниже гарантии — начислен гарантированный минимум

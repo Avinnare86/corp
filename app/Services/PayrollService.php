@@ -32,6 +32,10 @@ class PayrollService
         $rate      = (float) ($user['rate_volume'] ?? 1);
         $allowance = (float) ($user['allowance'] ?? 0);
         $schedule  = $user['schedule_type'] ?? '5_2';
+        // Норматив проверки анкет: NULL = классическая модель max(оклад, сделка);
+        // задан (>=0) = аддитивная (оклад покрывает норматив, доплата по тарифу только сверх).
+        $anketaNorm = $user['anketa_norm'] ?? null;
+        $normModel  = $anketaNorm !== null;
 
         // Табель: норма (админ). Отработано — из учёта явки (открытых дней), иначе из табеля.
         $ts = Database::one('SELECT * FROM timesheets WHERE employee_id = ? AND period = ?', [$employeeId, $period]);
@@ -49,32 +53,45 @@ class PayrollService
         $floor = round($okladGuaranteed + $allowGuaranteed, 2);
 
         // --- Сделка: анкеты (назначенные менеджером и отмеченные проверенными) ---
-        // Группируем по коду страны, цена — по тарифу (неизвестная страна = 70). Затем сводим по тарифу.
-        $countryRows = Database::all(
-            "SELECT country_code, COUNT(*) AS cnt
-               FROM assignment_items
-              WHERE assigned_to = ? AND checked_at IS NOT NULL AND substr(checked_at,1,7) = ?
-              GROUP BY country_code",
-            [$employeeId, $period]
-        );
-        $byTier = []; $anketaCount = 0; $anketaSum = 0.0;
-        foreach ($countryRows as $r) {
-            $cnt = (int) $r['cnt'];
-            $price = \App\Services\Tariff::priceForCountry($r['country_code']);
-            $anketaCount += $cnt;
-            $key = (string) $price;
-            if (!isset($byTier[$key])) { $byTier[$key] = ['price' => $price, 'count' => 0, 'subtotal' => 0.0]; }
-            $byTier[$key]['count'] += $cnt;
-            $byTier[$key]['subtotal'] = round($byTier[$key]['subtotal'] + $cnt * $price, 2);
-        }
-        ksort($byTier, SORT_NUMERIC);
+        $norm = null;
         $anketaBreakdown = [];
-        foreach ($byTier as $t) {
-            $anketaSum += $t['subtotal'];
-            $anketaBreakdown[] = [
-                'group_no' => null, 'title' => 'тариф ' . rtrim(rtrim(number_format($t['price'],2,'.',''), '0'), '.') . ' ₽',
-                'price' => $t['price'], 'count' => $t['count'], 'subtotal' => $t['subtotal'],
-            ];
+        if ($normModel) {
+            // Аддитивная модель: в сделку идут ТОЛЬКО анкеты сверх норматива (NormService — единый источник).
+            $norm = \App\Services\NormService::forEmployee($employeeId, $period);
+            $anketaCount = (int) $norm['above_count'];
+            $anketaSum   = (float) $norm['above_sum'];
+            foreach ($norm['above_breakdown'] as $t) {
+                $anketaBreakdown[] = ['group_no' => null, 'title' => $t['title'],
+                    'price' => $t['price'], 'count' => $t['count'], 'subtotal' => $t['subtotal']];
+            }
+        } else {
+            // Классика: все проверенные анкеты по тарифу страны (неизвестная = 70), свод по тарифу.
+            $countryRows = Database::all(
+                "SELECT country_code, COUNT(*) AS cnt
+                   FROM assignment_items
+                  WHERE assigned_to = ? AND checked_at IS NOT NULL AND substr(checked_at,1,7) = ?
+                  GROUP BY country_code",
+                [$employeeId, $period]
+            );
+            $byTier = []; $anketaCount = 0; $anketaSum = 0.0;
+            foreach ($countryRows as $r) {
+                $cnt = (int) $r['cnt'];
+                $price = \App\Services\Tariff::priceForCountry($r['country_code']);
+                $anketaCount += $cnt;
+                $key = (string) $price;
+                if (!isset($byTier[$key])) { $byTier[$key] = ['price' => $price, 'count' => 0, 'subtotal' => 0.0]; }
+                $byTier[$key]['count'] += $cnt;
+                $byTier[$key]['subtotal'] = round($byTier[$key]['subtotal'] + $cnt * $price, 2);
+            }
+            ksort($byTier, SORT_NUMERIC);
+            foreach ($byTier as $t) {
+                $anketaSum += $t['subtotal'];
+                $anketaBreakdown[] = [
+                    'group_no' => null, 'title' => 'тариф ' . rtrim(rtrim(number_format($t['price'],2,'.',''), '0'), '.') . ' ₽',
+                    'price' => $t['price'], 'count' => $t['count'], 'subtotal' => $t['subtotal'],
+                ];
+            }
+            $anketaSum = round($anketaSum, 2);
         }
 
         // --- Сделка: операции (визы и пр.) ---
@@ -114,11 +131,18 @@ class PayrollService
         $fixSum = round($fixSum, 2);
 
         $earned = round($piecework + $fixSum, 2);
-        $gross  = round(max($floor, $earned), 2);
+        // Аддитивная модель (норматив): оклад+надбавка гарантированы, доплата сверх — сверху.
+        // Классика: max(оклад, сделка). В обоих случаях gross ≥ floor (floor-защита сохраняется).
+        $gross  = $normModel ? round($floor + $earned, 2) : round(max($floor, $earned), 2);
 
         // --- Сделка к 25-му: финализируется в служебку; после 25-го переходит в следующий месяц ---
         $cutoff = 25;
-        $pieceSettled = self::pieceworkSum($employeeId, $period, 1, $cutoff);
+        if ($normModel) {
+            // Анкеты — только сверхнормативные с днём ≤25; операции — как обычно.
+            $pieceSettled = round(($norm['above_sum_to_day25'] ?? 0) + self::opsSum($employeeId, $period, 1, $cutoff), 2);
+        } else {
+            $pieceSettled = self::pieceworkSum($employeeId, $period, 1, $cutoff);
+        }
         $pieceCarry   = round($piecework - $pieceSettled, 2);
 
         // --- Штрафы: зафиксированные после 25-го переносятся в следующий месяц ---
@@ -173,8 +197,16 @@ class PayrollService
             'fix_sum'          => $fixSum,
             'fix_breakdown'    => $fixBreakdown,
             'earned'           => $earned,
-            'reached_oklad'    => $earned >= $okladGuaranteed,
-            'reached_level'    => $earned >= $floor,
+            // В norm-модели база гарантирована, доплата сверху — «достигнуто» по смыслу всегда.
+            'reached_oklad'    => $normModel ? true : ($earned >= $okladGuaranteed),
+            'reached_level'    => $normModel ? true : ($earned >= $floor),
+            // Норматив анкет (аддитивная модель)
+            'norm_model'         => $normModel,
+            'anketa_norm_weekly' => $normModel ? (int) $anketaNorm : null,
+            'anketa_checked'     => $normModel ? (int) $norm['checked'] : $anketaCount,
+            'anketa_covered'     => $normModel ? (int) $norm['covered'] : 0,
+            'anketa_above_count' => $normModel ? (int) $norm['above_count'] : $anketaCount,
+            'anketa_above_sum'   => $normModel ? round((float) $norm['above_sum'], 2) : round($anketaSum, 2),
             'gross'            => $gross,
             'penalties'        => $penalties,
             'penalty_effective'=> $penaltyEffective,
@@ -205,12 +237,17 @@ class PayrollService
                 AND CAST(substr(checked_at,9,2) AS INTEGER) BETWEEN ? AND ?
               GROUP BY country_code", [$employeeId, $period, $dayFrom, $dayTo]);
         foreach ($rows as $r) { $sum += (int)$r['cnt'] * \App\Services\Tariff::priceForCountry($r['country_code']); }
-        $ops = Database::all(
-            "SELECT COALESCE(SUM(pw.quantity*o.unit_price),0) s FROM piecework pw JOIN operations o ON o.id=pw.operation_id
+        $sum += self::opsSum($employeeId, $period, $dayFrom, $dayTo);
+        return round($sum, 2);
+    }
+
+    /** Сумма операций (визы и пр.) за период с фильтром дня DD от..до. */
+    private static function opsSum(int $employeeId, string $period, int $dayFrom, int $dayTo): float
+    {
+        return (float) Database::scalar(
+            "SELECT COALESCE(SUM(pw.quantity*o.unit_price),0) FROM piecework pw JOIN operations o ON o.id=pw.operation_id
               WHERE pw.employee_id=? AND substr(pw.work_date,1,7)=?
                 AND CAST(substr(pw.work_date,9,2) AS INTEGER) BETWEEN ? AND ?", [$employeeId, $period, $dayFrom, $dayTo]);
-        $sum += (float) ($ops[0]['s'] ?? 0);
-        return round($sum, 2);
     }
 
     /**
@@ -220,17 +257,20 @@ class PayrollService
      */
     public static function pieceByKind(int $employeeId, string $period, int $dayFrom = 1, int $dayTo = 31): array
     {
-        $anketa = 0.0;
-        $rows = Database::all(
-            "SELECT country_code, COUNT(*) cnt FROM assignment_items
-              WHERE assigned_to=? AND checked_at IS NOT NULL AND substr(checked_at,1,7)=?
-                AND CAST(substr(checked_at,9,2) AS INTEGER) BETWEEN ? AND ?
-              GROUP BY country_code", [$employeeId, $period, $dayFrom, $dayTo]);
-        foreach ($rows as $r) { $anketa += (int) $r['cnt'] * \App\Services\Tariff::priceForCountry($r['country_code']); }
-        $ops = (float) Database::scalar(
-            "SELECT COALESCE(SUM(pw.quantity*o.unit_price),0) FROM piecework pw JOIN operations o ON o.id=pw.operation_id
-              WHERE pw.employee_id=? AND substr(pw.work_date,1,7)=?
-                AND CAST(substr(pw.work_date,9,2) AS INTEGER) BETWEEN ? AND ?", [$employeeId, $period, $dayFrom, $dayTo]);
+        // В norm-модели в сделку идут только анкеты сверх норматива (за день в диапазоне).
+        $hasNorm = Database::scalar('SELECT anketa_norm FROM users WHERE id = ?', [$employeeId]);
+        if ($hasNorm !== false && $hasNorm !== null) {
+            $anketa = \App\Services\NormService::aboveSumDayRange($employeeId, $period, $dayFrom, $dayTo);
+        } else {
+            $anketa = 0.0;
+            $rows = Database::all(
+                "SELECT country_code, COUNT(*) cnt FROM assignment_items
+                  WHERE assigned_to=? AND checked_at IS NOT NULL AND substr(checked_at,1,7)=?
+                    AND CAST(substr(checked_at,9,2) AS INTEGER) BETWEEN ? AND ?
+                  GROUP BY country_code", [$employeeId, $period, $dayFrom, $dayTo]);
+            foreach ($rows as $r) { $anketa += (int) $r['cnt'] * \App\Services\Tariff::priceForCountry($r['country_code']); }
+        }
+        $ops = self::opsSum($employeeId, $period, $dayFrom, $dayTo);
         return ['anketa' => round($anketa, 2), 'ops' => round($ops, 2), 'total' => round($anketa + $ops, 2)];
     }
 

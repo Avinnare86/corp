@@ -45,6 +45,10 @@ $router->get('/piecework',                [PieceworkController::class, 'index'])
 $router->post('/piecework',               [PieceworkController::class, 'store']);
 $router->post('/piecework/{id}/delete',   [PieceworkController::class, 'destroy']);
 $router->get('/rating',                   [RatingController::class, 'index']);
+// Норматив проверки анкет + недельная выработка
+$router->get('/norm',                     [\App\Controllers\NormController::class, 'mine']);
+$router->get('/norm/report',              [\App\Controllers\NormController::class, 'report']);
+$router->post('/norm/set',                [\App\Controllers\NormController::class, 'set']);
 $router->get('/notifications',            [NotificationController::class, 'index']);
 $router->post('/notifications/{id}/read', [NotificationController::class, 'markRead']);
 
