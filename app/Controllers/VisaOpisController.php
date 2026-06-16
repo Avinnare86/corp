@@ -222,9 +222,8 @@ class VisaOpisController extends Controller
             Database::run("UPDATE visa_rows SET status='instructed' WHERE id IN ($kp)", $keep);
         }
         Database::run(
-            "UPDATE visa_opis SET instruction_no=?, instruction_date=?, status='instructed', instructed_at=" .
-            (Database::driver() === 'mysql' ? 'CURRENT_TIMESTAMP' : "datetime('now','localtime')") . ' WHERE id=?',
-            [$no, $date, (int) $id]);
+            "UPDATE visa_opis SET instruction_no=?, instruction_date=?, status='instructed', instructed_at=? WHERE id=?",
+            [$no, $date, date('Y-m-d H:i:s'), (int) $id]);
         $pdo->commit();
 
         flash('Указание сохранено' . ($refused ? '. На доработку отправлено строк: ' . count($refused) . '.' : '.'));

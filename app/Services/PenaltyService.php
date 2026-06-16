@@ -50,9 +50,9 @@ class PenaltyService
         Database::run(
             'UPDATE inspections
                 SET is_correct = ?, error_type_id = ?, penalty_amount = ?, occurrence = ?,
-                    controller_id = ?, reviewed_at = ' . (Database::driver() === 'mysql' ? 'CURRENT_TIMESTAMP' : "datetime('now','localtime')") . '
+                    controller_id = ?, reviewed_at = ?
               WHERE id = ?',
-            [$isCorrect ? 1 : 0, $isCorrect ? null : $errorTypeId, $penalty, $occurrence, $controllerId, $inspection['id']]
+            [$isCorrect ? 1 : 0, $isCorrect ? null : $errorTypeId, $penalty, $occurrence, $controllerId, date('Y-m-d H:i:s'), $inspection['id']]
         );
 
         // Брак: анкета встаёт в очередь на повторную проверку ДРУГИМ специалистом —

@@ -17,7 +17,10 @@ RUN rm -f /etc/nginx/sites-enabled/default
 
 WORKDIR /var/www/html
 COPY . /var/www/html
-RUN mkdir -p storage/uploads/docs storage/tmp \
+# Резервная копия шаблонов ВНЕ тома storage (том app_storage перекрывает storage/ при монтировании).
+# entrypoint восстановит их в storage/templates, если там пусто.
+RUN cp -a storage/templates /opt/templates-default \
+    && mkdir -p storage/uploads/docs storage/tmp \
     && chown -R www-data:www-data storage
 
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh

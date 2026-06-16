@@ -4,7 +4,9 @@
 set -e
 cd /var/www/html
 
-mkdir -p storage/uploads/docs storage/tmp
+mkdir -p storage/uploads/docs storage/tmp storage/templates
+# Восстановить шаблоны бланков (визы/ГП) в том, если их там нет (том перекрывает образ).
+cp -rn /opt/templates-default/. storage/templates/ 2>/dev/null || true
 export HOME=/tmp   # LibreOffice (headless) требует доступного для записи HOME
 
 if [ "${DB_DRIVER:-sqlite}" = "pgsql" ]; then

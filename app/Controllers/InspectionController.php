@@ -128,10 +128,8 @@ class InspectionController extends Controller
         }
 
         Database::run(
-            'UPDATE sample_batches SET finished_at = ' .
-            (Database::driver() === 'mysql' ? 'CURRENT_TIMESTAMP' : "datetime('now','localtime')") .
-            ' WHERE id = ?',
-            [$batch['id']]
+            'UPDATE sample_batches SET finished_at = ? WHERE id = ?',
+            [date('Y-m-d H:i:s'), $batch['id']]
         );
         NotificationService::notifyBatch((int) $batch['id']);
 
