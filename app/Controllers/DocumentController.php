@@ -713,7 +713,7 @@ class DocumentController extends Controller
         $rows = Database::all(
             "SELECT doc.id, doc.reg_number, doc.title, doc.correspondent_name, doc.created_at, dt.name AS type_name
                FROM documents doc JOIN doc_types dt ON dt.id=doc.type_id
-              WHERE doc.direction=? AND substr(COALESCE(doc.sent_at, doc.created_at),1,10) BETWEEN ? AND ?
+              WHERE doc.direction=? AND substr(" . Database::txt('COALESCE(doc.sent_at, doc.created_at)') . ",1,10) BETWEEN ? AND ?
               ORDER BY doc.reg_number, doc.id", [$dir, $from, $to]);
         $this->view('docs/register', [
             'title' => 'Реестр передачи',
@@ -921,7 +921,7 @@ class DocumentController extends Controller
         $type = Database::one('SELECT * FROM doc_types WHERE id = ?', [$doc['type_id']]);
         $Y = date('Y');
         $n = 1 + (int) Database::scalar(
-            "SELECT COUNT(*) FROM documents WHERE type_id = ? AND reg_number IS NOT NULL AND substr(COALESCE(finished_at, created_at),1,4) = ?",
+            "SELECT COUNT(*) FROM documents WHERE type_id = ? AND reg_number IS NOT NULL AND substr(" . Database::txt('COALESCE(finished_at, created_at)') . ",1,4) = ?",
             [$doc['type_id'], $Y]);
         $idx = trim((string) ($type['journal_index'] ?? ''));
         return $idx !== ''
