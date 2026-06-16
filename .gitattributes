@@ -1,0 +1,12 @@
+# Скрипты для Linux/Docker — ВСЕГДА LF (иначе контейнер не стартует: bad interpreter)
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+docker/**       text eol=lf
+*.yml           text eol=lf
+
+# Windows-скрипты — CRLF
+*.bat           text eol=crlf
+*.ps1           text eol=crlf
+
+# Портативный PHP (Windows) — бинарники, не нормализовать
+tools/php/**    binary
