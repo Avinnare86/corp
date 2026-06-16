@@ -163,6 +163,9 @@ $router->get('/admin/org/departments',      [OrgController::class, 'departments'
 $router->get('/admin/org/staff',            [OrgController::class, 'staff']);
 $router->get('/admin/org/roles',            [OrgController::class, 'rolesPage']);
 $router->get('/admin/org/certs',            [OrgController::class, 'certsPage']);
+$router->get('/admin/org/types',            [OrgController::class, 'types']);
+$router->post('/admin/org/type',            [OrgController::class, 'storeType']);
+$router->post('/admin/org/type/{id}/delete',[OrgController::class, 'deleteType']);
 $router->post('/admin/org/dept',            [OrgController::class, 'storeDept']);
 $router->post('/admin/org/dept/{id}/delete',[OrgController::class, 'deleteDept']);
 $router->post('/admin/org/assign',          [OrgController::class, 'assign']);

@@ -283,6 +283,52 @@ class OrgController extends Controller
         $this->redirect('/admin/org/departments');
     }
 
+    /** Справочник типов документов СЭД: название, префикс № и индекс дела (нумератор). */
+    public function types(): void
+    {
+        Auth::requireRole('admin', 'hr_manager', 'hr', 'docs_manager');
+        $this->view('admin/org_types', [
+            'title' => 'Типы документов',
+            'types' => Database::all('SELECT * FROM doc_types ORDER BY name'),
+            'nav'   => 'types',
+        ]);
+    }
+
+    /** Создать/обновить тип документа. */
+    public function storeType(): void
+    {
+        Auth::requireRole('admin', 'hr_manager', 'hr', 'docs_manager');
+        Auth::verifyCsrf();
+        $id = (int) $this->input('id');
+        $name = trim((string) $this->input('name'));
+        $prefix = trim((string) $this->input('prefix')) ?: 'Д';
+        $journal = trim((string) $this->input('journal_index'));
+        if ($name === '') { flash('Укажите название типа.', 'error'); $this->redirect('/admin/org/types'); }
+        if ($id) {
+            Database::run('UPDATE doc_types SET name=?, prefix=?, journal_index=? WHERE id=?', [$name, $prefix, $journal, $id]);
+            flash('Тип документа обновлён.');
+        } else {
+            Database::insert('INSERT INTO doc_types (name, prefix, journal_index) VALUES (?,?,?)', [$name, $prefix, $journal]);
+            flash('Тип документа добавлен.');
+        }
+        $this->redirect('/admin/org/types');
+    }
+
+    /** Удалить тип документа (если он не используется в документах). */
+    public function deleteType(string $id): void
+    {
+        Auth::requireRole('admin', 'hr_manager', 'hr', 'docs_manager');
+        Auth::verifyCsrf();
+        $used = (int) Database::scalar('SELECT COUNT(*) FROM documents WHERE type_id = ?', [(int) $id]);
+        if ($used > 0) {
+            flash('Нельзя удалить: тип используется в ' . $used . ' документ(ах).', 'error');
+            $this->redirect('/admin/org/types');
+        }
+        Database::run('DELETE FROM doc_types WHERE id = ?', [(int) $id]);
+        flash('Тип документа удалён.');
+        $this->redirect('/admin/org/types');
+    }
+
     /** Привязка сотрудника к подразделению. */
     public function assign(): void
     {
