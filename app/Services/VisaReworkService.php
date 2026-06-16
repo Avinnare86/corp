@@ -48,4 +48,34 @@ class VisaReworkService
                 [$rowId, $opisId ?: null, $checker, round($amount, 2), date('Y-m'), $managerId, $note]);
         }
     }
+
+    /**
+     * Удалить строку из УЖЕ внесённого визового указания → доработка («повторно»).
+     * Равнозначно отказу МИД, но с обязательным комментарием и пометкой об удалении из указания.
+     * Сохраняет исходную (отклонённую) строку source_row_id и исключает первичного проверяющего.
+     */
+    public static function removeFromInstruction(array $row, int $opisId, float $amount, int $managerId, string $comment): void
+    {
+        $rowId = (int) $row['id'];
+        // Исполнитель: текущий assigned_to, иначе ранее исключённый (на instructed-строке исполнитель обычно сохранён).
+        $checker = isset($row['assigned_to']) && (int) $row['assigned_to'] > 0
+            ? (int) $row['assigned_to']
+            : (isset($row['excluded_user']) ? (int) $row['excluded_user'] : 0);
+        $now = date('Y-m-d H:i:s');
+        $note = 'повторно, удалён из визового указания' . ($comment !== '' ? ': ' . $comment : '');
+
+        Database::run(
+            "UPDATE visa_rows
+                SET status='rework', recheck=1, source_row_id=COALESCE(source_row_id, id), excluded_user=?,
+                    mid_refused_at=?, mid_refuse_note=?, rework_note=?,
+                    assigned_to=NULL, checked_at=NULL, opis_id=NULL, credited_at=NULL
+              WHERE id=?",
+            [$checker ?: null, $now, $note, $note, $rowId]);
+
+        if ($checker) {
+            Database::insert(
+                'INSERT INTO visa_deductions (row_id, opis_id, employee_id, amount, period, decided_by, reason) VALUES (?,?,?,?,?,?,?)',
+                [$rowId, $opisId ?: null, $checker, round($amount, 2), date('Y-m'), $managerId, $note]);
+        }
+    }
 }

@@ -8,9 +8,16 @@
         <strong>первоначальному проверяющему ту же строку назначить нельзя</strong>. Повторная проверка оплачивается как новая
         тому, кто её выполнит.</p>
     <div class="xfer-controls">
+        <label>Страна<select id="fCountry">
+            <option value="">— все страны —</option>
+            <?php foreach (($countries ?? []) as $c => $n): ?>
+                <option value="<?= e($c) ?>"><?= e($c) ?> (<?= (int)$n ?>)</option>
+            <?php endforeach; ?>
+        </select></label>
         <label>Поиск (№/фамилия)<input type="text" id="fSearch"></label>
         <label>Размер пачки<input type="number" id="batchSize" value="20" min="1" style="max-width:90px"></label>
     </div>
+    <p class="muted" style="margin:6px 0 0">Чтобы передать <strong>пачку по одной стране</strong>: выберите страну → «все» → «Передать →» на нужного специалиста.</p>
     <div class="xfer">
         <div class="xfer-col">
             <div class="xfer-head"><select id="srcOwner" class="owner-sel"></select><span class="muted" id="srcCount">—</span></div>
@@ -45,7 +52,7 @@ var owners=[{key:'pool',name:'🗑 Не распределено'}<?php foreach(
 var srcSel=document.getElementById('srcOwner'), dstSel=document.getElementById('dstOwner');
 owners.forEach(function(o){ srcSel.add(new Option(o.name,o.key)); dstSel.add(new Option(o.name,o.key)); });
 dstSel.selectedIndex = owners.length>1?1:0;
-function filters(){ return 'q='+encodeURIComponent(document.getElementById('fSearch').value); }
+function filters(){ return 'q='+encodeURIComponent(document.getElementById('fSearch').value)+'&country='+encodeURIComponent(document.getElementById('fCountry').value); }
 function loadPanel(side){
   var owner=(side=='src'?srcSel:dstSel).value, listEl=document.getElementById(side+'List');
   listEl.innerHTML='<div class="muted" style="padding:10px">Загрузка…</div>';
@@ -76,6 +83,7 @@ function vmove(dir){
     .then(r=>r.json()).then(function(d){ if(d&&d.message){ alert(d.message); } loadPanel('src'); loadPanel('dst'); });
 }
 document.getElementById('fSearch').addEventListener('keyup',function(e){ if(e.key==='Enter'){ loadPanel('src'); loadPanel('dst'); }});
+document.getElementById('fCountry').addEventListener('change',function(){ loadPanel('src'); loadPanel('dst'); });
 srcSel.addEventListener('change',function(){ loadPanel('src'); });
 dstSel.addEventListener('change',function(){ loadPanel('dst'); });
 loadPanel('src'); loadPanel('dst');

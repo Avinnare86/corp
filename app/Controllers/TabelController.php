@@ -229,13 +229,13 @@ class TabelController extends Controller
             ['signed', $me['id'], $type, $now, $signHash, $cert['serial'], $id]);
 
         // синхронизация месячного табеля: последняя ПОДПИСАННАЯ ревизия каждой половины
-        $this->syncMonth(substr($t['period'], 0, 7));
+        self::syncMonth(substr($t['period'], 0, 7));
 
         flash('Табель подписан (' . self::SIGN_TYPES[$type] . ').');
         $this->redirect('/timesheet2/' . $id . '/view');
     }
 
-    private function syncMonth(string $month): void
+    public static function syncMonth(string $month): void
     {
         $byEmp = [];
         foreach (['1', '2'] as $h) {

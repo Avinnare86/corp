@@ -162,11 +162,16 @@ class VisaOpisController extends Controller
         $opis = Database::one('SELECT * FROM visa_opis WHERE id=?', [(int) $id]);
         if (!$opis) { flash('Опись не найдена.', 'error'); $this->redirect('/visas/opis/list'); }
         $rows = Database::all('SELECT * FROM visa_rows WHERE opis_id=? ORDER BY surname_lat, surname_ru, id', [(int) $id]);
+        $editorName = '';
+        if (!empty($opis['instruction_edited_by'])) {
+            $editorName = (string) Database::scalar('SELECT full_name FROM users WHERE id=?', [(int) $opis['instruction_edited_by']]);
+        }
         $this->view('visas/opis_show', [
             'title' => 'Опись — ' . $opis['country'],
             'opis' => $opis,
             'rows' => $rows,
             'price' => VisaReworkService::checkPrice(),
+            'editorName' => $editorName,
             'csrf' => Auth::csrf(),
         ]);
     }
@@ -232,6 +237,52 @@ class VisaOpisController extends Controller
         $this->redirect('/visas/opis/' . (int) $id);
     }
 
+    /** Редактировать № и дату УЖЕ внесённого визового указания (с логированием — кто/когда). */
+    public function editInstruction(string $id): void
+    {
+        $me = $this->guard();
+        Auth::verifyCsrf();
+        $opis = Database::one('SELECT * FROM visa_opis WHERE id=?', [(int) $id]);
+        if (!$opis) { flash('Опись не найдена.', 'error'); $this->redirect('/visas/opis/list'); }
+        if ($opis['status'] !== 'instructed') { flash('Редактировать можно только уже внесённое указание.', 'error'); $this->redirect('/visas/opis/' . (int) $id); }
+
+        $no = trim((string) $this->input('instruction_no'));
+        $date = trim((string) $this->input('instruction_date'));
+        // Старые значения — в журнал действий (кто/когда фиксирует автолог POST).
+        \App\Services\Audit::log(
+            'Визы: правка указания (было)',
+            'Визы: правка визового указания (опись #' . (int) $id . ', ' . $opis['country'] . ')',
+            ['opis_id' => (int) $id, 'country' => $opis['country'],
+             'было_№' => $opis['instruction_no'], 'стало_№' => $no,
+             'было_дата' => $opis['instruction_date'], 'стало_дата' => $date]);
+        Database::run(
+            'UPDATE visa_opis SET instruction_no=?, instruction_date=?, instruction_edited_by=?, instruction_edited_at=? WHERE id=?',
+            [$no, $date, (int) $me['id'], date('Y-m-d H:i:s'), (int) $id]);
+        flash('Визовое указание обновлено. Изменение и автор зафиксированы в журнале действий.');
+        $this->redirect('/visas/opis/' . (int) $id);
+    }
+
+    /** Убрать человека из уже «указанной» описи → доработка (как отказ; комментарий обязателен). */
+    public function refuseFromInstructed(string $id): void
+    {
+        $me = $this->guard();
+        Auth::verifyCsrf();
+        $opis = Database::one('SELECT * FROM visa_opis WHERE id=?', [(int) $id]);
+        if (!$opis) { flash('Опись не найдена.', 'error'); $this->redirect('/visas/opis/list'); }
+        if ($opis['status'] !== 'instructed') { flash('Это действие доступно только для описи с внесённым указанием. До указания — кнопка «убрать».', 'error'); $this->redirect('/visas/opis/' . (int) $id); }
+
+        $rowId = (int) $this->input('row_id');
+        $comment = trim((string) $this->input('comment'));
+        if ($comment === '') { flash('Укажите причину удаления из визового указания.', 'error'); $this->redirect('/visas/opis/' . (int) $id); }
+        $row = Database::one("SELECT * FROM visa_rows WHERE id=? AND opis_id=? AND status='instructed'", [$rowId, (int) $id]);
+        if (!$row) { flash('Строка не найдена в этой описи (возможно, уже удалена).', 'error'); $this->redirect('/visas/opis/' . (int) $id); }
+        $amount = ((string) $this->input('deduct') === '1') ? VisaReworkService::checkPrice() : 0.0;
+
+        VisaReworkService::removeFromInstruction($row, (int) $id, $amount, (int) $me['id'], $comment);
+        flash('Человек удалён из визового указания и направлен на доработку (повторно). Распределите его на доске «МИД: на доработке».');
+        $this->redirect('/visas/opis/' . (int) $id);
+    }
+
     /** Удалить строку из ещё не «указанной» описи (вернуть в кандидаты). */
     public function removeRow(string $id): void
     {
@@ -268,20 +319,29 @@ class VisaOpisController extends Controller
     public function reworkBoard(): void
     {
         $this->guard();
+        // Доступные страны среди строк на доработке (для фильтра «передать по одной стране»).
+        $countries = [];
+        foreach (Database::all("SELECT citizenship FROM visa_rows WHERE status='rework'") as $r) {
+            $c = self::norm((string) $r['citizenship']); if ($c === '') { $c = 'БЕЗ СТРАНЫ'; }
+            $countries[$c] = ($countries[$c] ?? 0) + 1;
+        }
+        ksort($countries, SORT_LOCALE_STRING);
         $this->view('visas/rework_board', [
             'title' => 'МИД: строки на доработке',
             'specialists' => self::specialists(),
+            'countries' => $countries,
             'csrf' => Auth::csrf(),
         ]);
     }
 
-    /** AJAX: строки «на доработке» (пул или у специалиста). */
+    /** AJAX: строки «на доработке» (пул или у специалиста), опц. фильтр по стране. */
     public function reworkItems(): void
     {
         $me = Auth::user();
         if (!$me || !$this->isVisaManager($me)) { $this->json(['items' => [], 'total' => 0]); }
         $owner = (string) $this->input('owner', 'pool');
         $q = mb_strtolower(trim((string) $this->input('q')), 'UTF-8');
+        $country = self::norm((string) $this->input('country'));
 
         $where = "status='rework'";
         $params = [];
@@ -289,9 +349,18 @@ class VisaOpisController extends Controller
         else { $where .= ' AND assigned_to = ?'; $params[] = (int) $owner; }
         if ($q !== '') { $where .= ' AND (LOWER(out_no) LIKE ? OR LOWER(surname_lat) LIKE ? OR LOWER(surname_ru) LIKE ?)'; array_push($params, "%$q%", "%$q%", "%$q%"); }
 
-        $total = (int) Database::scalar("SELECT COUNT(*) FROM visa_rows WHERE $where", $params);
-        $rows = Database::all("SELECT id, out_no, surname_lat, citizenship, excluded_user, mid_refuse_note FROM visa_rows WHERE $where ORDER BY id LIMIT 400", $params);
-        $this->json(['items' => $rows, 'total' => $total, 'shown' => count($rows)]);
+        // Гражданство — свободный текст; нормализуем и фильтруем по стране в PHP (как на доске описей),
+        // чтобы поведение совпадало в SQLite и PostgreSQL. Фильтр до отсечения LIMIT.
+        $rows = Database::all("SELECT id, out_no, surname_lat, citizenship, excluded_user, mid_refuse_note FROM visa_rows WHERE $where ORDER BY id", $params);
+        if ($country !== '') {
+            $rows = array_values(array_filter($rows, function ($r) use ($country) {
+                $c = self::norm((string) $r['citizenship']); if ($c === '') { $c = 'БЕЗ СТРАНЫ'; }
+                return $c === $country;
+            }));
+        }
+        $total = count($rows);
+        $shown = array_slice($rows, 0, 400);
+        $this->json(['items' => $shown, 'total' => $total, 'shown' => count($shown)]);
     }
 
     /** AJAX: назначить строки на доработке специалисту (нельзя первичному проверяющему). */

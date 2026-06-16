@@ -15,6 +15,24 @@
     </div>
     <div id="upResult" style="margin-top:8px"></div>
 
+    <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px">
+        <h3 style="margin:0 0 6px">Или ввести вручную</h3>
+        <form method="post" action="/manager/manual">
+            <?= csrf_field() ?>
+            <label style="max-width:320px">Название списка
+                <input type="text" name="name" placeholder="напр. Ручной ввод">
+            </label>
+            <label style="display:block;margin-top:8px">Рег. номера
+                <textarea name="regs" rows="3" style="font-family:monospace"
+                    placeholder="RUS-0001/26 - RUS-0009/26&#10;RUS-00001/26, RUS-00005/26, RUS-00007/26"></textarea>
+            </label>
+            <p class="muted" style="margin:4px 0 8px">Формат: <code>КОД-НОМЕР/ГОД</code>. Диапазон — через тире:
+                <code>RUS-0001/26 - RUS-0009/26</code> (9 анкет). Перечисление — через запятую или с новой строки.
+                Дубликаты пропускаются.</p>
+            <button class="btn btn-primary" type="submit">Добавить анкеты</button>
+        </form>
+    </div>
+
     <?php if ($lists): ?>
     <table class="table" style="margin-top:12px">
         <thead><tr><th>Список</th><th class="num">Всего</th><th class="num">Не распред.</th><th class="num">Проверено</th></tr></thead>

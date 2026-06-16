@@ -8,6 +8,7 @@ use App\Services\VisaParser;
 use App\Services\OpenRouter;
 use App\Services\NotificationService;
 use App\Services\Settings;
+use App\Services\Xlsx;
 
 /**
  * Контур виз: загрузка ходатайств из Word, ИИ-подстановка адресов (OpenRouter),
@@ -23,6 +24,16 @@ class VisaController extends Controller
         'birth_place' => 'Место рожд.', 'sex' => 'Пол', 'passport_no' => 'Паспорт №',
         'issue_date' => 'Выдан', 'expiry_date' => 'Действ. до', 'work_address' => 'Адрес работы',
         'visit_places' => 'Города в РФ', 'visa_place' => 'Место получения визы', 'ai_address' => 'Адрес (ИИ)',
+    ];
+
+    /** Человекочитаемые статусы визовой анкеты (конвейер visa_rows.status). */
+    public const STATUS_LABELS = [
+        'loaded'     => 'Загружена',
+        'assigned'   => 'Назначена (в работе)',
+        'checked'    => 'Проверена',
+        'in_opis'    => 'В описи',
+        'instructed' => 'Указание получено',
+        'rework'     => 'Доработка (отказ МИД)',
     ];
 
     /** Базовые настройки бланка (применяются к новым партиям; меняются виз-менеджером). */
@@ -756,5 +767,118 @@ class VisaController extends Controller
             'title' => 'Рейтинг по визам',
             'ranking' => $rows, 'period' => $period, 'meId' => Auth::id(),
         ]);
+    }
+
+    // ================= СВОДНЫЙ ОТЧЁТ ПО СТАТУСАМ =================
+
+    /** Нормализация страны (свободный текст citizenship): UPPER + trim. */
+    private static function normCountry(string $c): string
+    {
+        return mb_strtoupper(trim($c), 'UTF-8');
+    }
+
+    /** Собрать строки сводного отчёта по визовым анкетам с учётом фильтров (status/batch/country/q). */
+    private function statusRows(array $f, int $limit = 0): array
+    {
+        $where = '1=1'; $params = [];
+        if (!empty($f['status']) && isset(self::STATUS_LABELS[$f['status']])) { $where .= ' AND r.status = ?'; $params[] = $f['status']; }
+        if (!empty($f['batch_id'])) { $where .= ' AND r.batch_id = ?'; $params[] = (int) $f['batch_id']; }
+        if (!empty($f['q'])) {
+            $q = mb_strtolower(trim((string) $f['q']), 'UTF-8');
+            $where .= ' AND (LOWER(r.out_no) LIKE ? OR LOWER(r.surname_lat) LIKE ? OR LOWER(r.surname_ru) LIKE ?)';
+            array_push($params, "%$q%", "%$q%", "%$q%");
+        }
+        $rows = Database::all(
+            "SELECT r.id, r.out_no, r.citizenship, r.surname_lat, r.names_lat, r.surname_ru, r.status,
+                    r.recheck, r.rework_count, r.checked_at, r.created_at, r.mid_refused_at, r.mid_refuse_note,
+                    b.name AS batch_name, u_up.full_name AS uploader, u_as.full_name AS checker,
+                    o.id AS opis_id, o.instruction_no, o.instruction_date, o.status AS opis_status
+               FROM visa_rows r
+               LEFT JOIN visa_batches b ON b.id = r.batch_id
+               LEFT JOIN users u_up ON u_up.id = b.uploaded_by
+               LEFT JOIN users u_as ON u_as.id = r.assigned_to
+               LEFT JOIN visa_opis o ON o.id = r.opis_id
+              WHERE $where
+              ORDER BY r.id DESC", $params);
+        // Страна — свободный текст: нормализуем и фильтруем в PHP (единообразно с досками).
+        $country = self::normCountry((string) ($f['country'] ?? ''));
+        if ($country !== '') {
+            $rows = array_values(array_filter($rows, function ($r) use ($country) {
+                $c = self::normCountry((string) $r['citizenship']); if ($c === '') { $c = 'БЕЗ СТРАНЫ'; }
+                return $c === $country;
+            }));
+        }
+        if ($limit > 0 && count($rows) > $limit) { $rows = array_slice($rows, 0, $limit); }
+        return $rows;
+    }
+
+    /** Текущие фильтры отчёта из запроса. */
+    private function statusFilters(): array
+    {
+        return [
+            'status'   => (string) $this->input('status', ''),
+            'batch_id' => (string) $this->input('batch_id', ''),
+            'country'  => (string) $this->input('country', ''),
+            'q'        => (string) $this->input('q', ''),
+        ];
+    }
+
+    /** Сводная таблица всех визовых анкет со статусом (для отслеживания) + фильтры + выгрузка. */
+    public function statusReport(): void
+    {
+        Auth::requireLogin();
+        if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
+        $f = $this->statusFilters();
+        $maxRows = 1000;
+        $rows = $this->statusRows($f, $maxRows + 1);
+        $truncated = count($rows) > $maxRows;
+        if ($truncated) { $rows = array_slice($rows, 0, $maxRows); }
+
+        $batches = Database::all('SELECT id, name FROM visa_batches ORDER BY id DESC');
+        $countries = [];
+        foreach (Database::all('SELECT citizenship FROM visa_rows') as $r) {
+            $c = self::normCountry((string) $r['citizenship']); if ($c === '') { $c = 'БЕЗ СТРАНЫ'; }
+            $countries[$c] = ($countries[$c] ?? 0) + 1;
+        }
+        ksort($countries, SORT_LOCALE_STRING);
+
+        $this->view('visas/status_report', [
+            'title' => 'Сводный отчёт по визовым анкетам',
+            'rows' => $rows,
+            'statusLabels' => self::STATUS_LABELS,
+            'batches' => $batches,
+            'countries' => $countries,
+            'filters' => $f,
+            'truncated' => $truncated,
+            'maxRows' => $maxRows,
+        ]);
+    }
+
+    /** Выгрузка сводного отчёта по статусам в Excel (с учётом текущих фильтров). */
+    public function statusReportExport(): void
+    {
+        Auth::requireLogin();
+        if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
+        $rows = $this->statusRows($this->statusFilters(), 20000);
+        $headers = ['Исх. №', 'Страна', 'Фамилия (лат)', 'Имена (лат)', 'Фамилия (рус)', 'Статус', 'Повторная/доработка',
+                    'Партия (загрузка)', 'Кто загрузил', 'Кто проверяет', 'Опись', 'Указание №', 'Дата указания',
+                    'Проверено', 'Отказ МИД', 'Создано', 'Комментарий доработки'];
+        $data = [];
+        foreach ($rows as $r) {
+            $recheck = ((int) $r['recheck'] || (int) $r['rework_count'] > 0) ? 'да' : '';
+            $data[] = [
+                (string) $r['out_no'], (string) $r['citizenship'],
+                (string) $r['surname_lat'], (string) $r['names_lat'], (string) $r['surname_ru'],
+                self::STATUS_LABELS[$r['status']] ?? (string) $r['status'],
+                $recheck,
+                (string) ($r['batch_name'] ?? ''), (string) ($r['uploader'] ?? ''), (string) ($r['checker'] ?? ''),
+                $r['opis_id'] ? ('#' . (int) $r['opis_id']) : '',
+                (string) ($r['instruction_no'] ?? ''), (string) ($r['instruction_date'] ?? ''),
+                substr((string) $r['checked_at'], 0, 16), substr((string) $r['mid_refused_at'], 0, 16),
+                substr((string) $r['created_at'], 0, 16), (string) ($r['mid_refuse_note'] ?? ''),
+            ];
+        }
+        Xlsx::download('visa-anketas-status-' . date('Y-m-d') . '.xlsx',
+            [['name' => 'Статусы виз. анкет', 'headers' => $headers, 'rows' => $data]]);
     }
 }

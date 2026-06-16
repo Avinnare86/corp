@@ -5,6 +5,7 @@ use App\Core\Controller;
 use App\Core\Auth;
 use App\Core\Database;
 use App\Services\ListParser;
+use App\Services\RegRangeParser;
 use App\Services\Tariff;
 use App\Services\NotificationService;
 
@@ -188,6 +189,55 @@ class ManagerController extends Controller
             $this->json(['ok' => true, 'added' => $added, 'dup' => $dup, 'message' => $msg]);
         }
         flash($msg);
+        $this->redirect('/manager');
+    }
+
+    /** Ручной ввод анкет: одиночные номера, перечисление и диапазоны (КОД-НОМЕР/ГОД). */
+    public function manualAdd(): void
+    {
+        Auth::requireRole('anketa_manager', 'admin');
+        Auth::verifyCsrf();
+
+        $parsed = RegRangeParser::parse((string) $this->input('regs'));
+        if (!$parsed['regs']) {
+            $hint = $parsed['bad'] ? ' Нераспознано: ' . implode(', ', array_slice($parsed['bad'], 0, 10)) : '';
+            flash('Не распознано ни одного рег. номера. Формат: КОД-НОМЕР/ГОД; диапазон через тире.' . $hint, 'error');
+            $this->redirect('/manager');
+        }
+        $name = trim((string) $this->input('name')) ?: ('Ручной ввод ' . date('d.m.Y H:i'));
+
+        @set_time_limit(0);
+        $listId = Database::insert('INSERT INTO assignment_lists (name, uploaded_by) VALUES (?,?)', [$name, Auth::id()]);
+        $added = 0; $dup = 0;
+
+        $pdo = Database::pdo();
+        $pdo->beginTransaction();
+        try {
+            $check = $pdo->prepare('SELECT 1 FROM assignment_items WHERE reg_number = ?');
+            $ins = $pdo->prepare('INSERT INTO assignment_items (list_id, reg_number, country_code) VALUES (?,?,?)');
+            foreach ($parsed['regs'] as $reg) {
+                $check->execute([$reg]);
+                if ($check->fetchColumn()) { $dup++; continue; }
+                $ins->execute([$listId, $reg, RegRangeParser::countryCode($reg)]);
+                $added++;
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            flash('Ошибка при добавлении анкет.', 'error');
+            $this->redirect('/manager');
+        }
+        // Пустой список (всё дубликаты/нераспознано) не оставляем.
+        if (!$added) { Database::run('DELETE FROM assignment_lists WHERE id = ?', [$listId]); }
+
+        if (!$added) {
+            flash('Новых анкет не добавлено: ' . ($dup ? "все {$dup} уже есть в системе (дубликаты)." : 'номера не распознаны.'), 'error');
+        } else {
+            $msg = "Список «{$name}» создан вручную: добавлено {$added}"
+                . ($dup ? ", пропущено дубликатов {$dup}" : '')
+                . ($parsed['bad'] ? ', нераспознано ' . count($parsed['bad']) : '') . '.';
+            flash($msg);
+        }
         $this->redirect('/manager');
     }
 

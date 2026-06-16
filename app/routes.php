@@ -57,6 +57,7 @@ $router->get('/manager',                  [ManagerController::class, 'index']);
 $router->get('/manager/report',           [ManagerController::class, 'report']);
 $router->get('/manager/report/export',    [ManagerController::class, 'reportExport']);
 $router->post('/manager/upload',          [ManagerController::class, 'upload']);
+$router->post('/manager/manual',           [ManagerController::class, 'manualAdd']);
 $router->get('/manager/items',            [ManagerController::class, 'items']);
 $router->post('/manager/move',            [ManagerController::class, 'move']);
 $router->post('/manager/distribute',      [ManagerController::class, 'distribute']);
@@ -108,6 +109,8 @@ $router->get('/visas/batch/{id}/rows',  [\App\Controllers\VisaController::class,
 $router->post('/visas/defaults',        [\App\Controllers\VisaController::class, 'saveDefaults']);
 $router->post('/visas/batch/{id}/params', [\App\Controllers\VisaController::class, 'saveParams']);
 $router->get('/visas/report',           [\App\Controllers\VisaController::class, 'report']);
+$router->get('/visas/report/status',     [\App\Controllers\VisaController::class, 'statusReport']);
+$router->get('/visas/report/status/export', [\App\Controllers\VisaController::class, 'statusReportExport']);
 $router->get('/visas/rating',           [\App\Controllers\VisaController::class, 'rating']);
 $router->get('/visas/batch/{id}/zip',   [\App\Controllers\VisaController::class, 'exportZip']);
 $router->get('/visas/batch/{id}/pdf',   [\App\Controllers\VisaController::class, 'exportPdf']);
@@ -119,6 +122,8 @@ $router->get('/visas/opis/list',             [\App\Controllers\VisaOpisControlle
 $router->get('/visas/opis/{id}',             [\App\Controllers\VisaOpisController::class, 'show']);
 $router->get('/visas/opis/{id}/docs',        [\App\Controllers\VisaOpisController::class, 'docs']);
 $router->post('/visas/opis/{id}/instruction',[\App\Controllers\VisaOpisController::class, 'instruction']);
+$router->post('/visas/opis/{id}/instruction-edit',[\App\Controllers\VisaOpisController::class, 'editInstruction']);
+$router->post('/visas/opis/{id}/refuse-row', [\App\Controllers\VisaOpisController::class, 'refuseFromInstructed']);
 $router->post('/visas/opis/{id}/remove',     [\App\Controllers\VisaOpisController::class, 'removeRow']);
 $router->post('/visas/opis/{id}/delete',     [\App\Controllers\VisaOpisController::class, 'destroy']);
 // МИД: доработка после отказа
@@ -265,3 +270,7 @@ $router->get('/admin/timesheet',          [AdminController::class, 'timesheet'])
 $router->post('/admin/timesheet',         [AdminController::class, 'saveTimesheet']);
 $router->get('/admin/settings',           [AdminController::class, 'settings']);
 $router->post('/admin/settings',          [AdminController::class, 'saveSettings']);
+// Управление данными: удаление/откат любых строк (только админ)
+$router->get('/admin/data',                       [AdminController::class, 'dataManagement']);
+$router->post('/admin/data/{entity}/{id}/delete', [AdminController::class, 'superDelete']);
+$router->post('/admin/data/{entity}/{id}/revert', [AdminController::class, 'revertStatus']);

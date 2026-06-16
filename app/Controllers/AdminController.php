@@ -22,6 +22,41 @@ class AdminController extends Controller
         $this->view('admin/index', ['title' => 'Администрирование', 'stats' => $stats]);
     }
 
+    // ---------- Управление данными: удаление/откат любой записи ----------
+    public function dataManagement(): void
+    {
+        Auth::requireRole('admin');
+        $entity = (string) $this->input('entity', 'visa_row');
+        if (!isset(\App\Services\AdminDataService::entities()[$entity])) { $entity = 'visa_row'; }
+        $q = (string) $this->input('q', '');
+        $this->view('admin/data', [
+            'title' => 'Управление данными',
+            'entities' => \App\Services\AdminDataService::entities(),
+            'entity' => $entity,
+            'q' => $q,
+            'rows' => \App\Services\AdminDataService::listRows($entity, $q),
+            'csrf' => Auth::csrf(),
+        ]);
+    }
+
+    public function superDelete(string $entity, string $id): void
+    {
+        Auth::requireRole('admin');
+        Auth::verifyCsrf();
+        $res = \App\Services\AdminDataService::delete($entity, (int) $id, (int) Auth::id());
+        flash($res['message'], $res['ok'] ? 'success' : 'error');
+        $this->redirect('/admin/data?' . http_build_query(['entity' => $entity, 'q' => (string) $this->input('q', '')]));
+    }
+
+    public function revertStatus(string $entity, string $id): void
+    {
+        Auth::requireRole('admin');
+        Auth::verifyCsrf();
+        $res = \App\Services\AdminDataService::revert($entity, (int) $id);
+        flash($res['message'], $res['ok'] ? 'success' : 'error');
+        $this->redirect('/admin/data?' . http_build_query(['entity' => $entity, 'q' => (string) $this->input('q', '')]));
+    }
+
     // ---------- Справочник должностей ----------
     public function positions(): void
     {

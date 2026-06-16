@@ -63,9 +63,26 @@
 </section>
 <?php else: ?>
 <section class="panel">
-    <h2 style="margin-top:0">Состав описи (указание получено)</h2>
+    <h2 style="margin-top:0">Визовое указание получено</h2>
+    <p class="muted" style="margin-top:0">№ и дату можно отредактировать (например, при опечатке). Изменение фиксируется в журнале действий — кто и когда правил.</p>
+    <form method="post" action="/visas/opis/<?= (int)$opis['id'] ?>/instruction-edit" class="form-inline" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <?= csrf_field() ?>
+        <label>№ визового указания<input type="text" name="instruction_no" value="<?= e($opis['instruction_no']) ?>"></label>
+        <label>Дата указания<input type="text" name="instruction_date" value="<?= e($opis['instruction_date']) ?>" placeholder="дд.мм.гггг"></label>
+        <button class="btn btn-mini" onclick="return confirm('Сохранить изменение визового указания? Будет записано в журнал действий.')">Изменить указание</button>
+        <?php if (!empty($opis['instruction_edited_at'])): ?>
+            <span class="muted">последняя правка: <strong><?= e($editorName ?: '—') ?></strong>, <?= e(substr((string)$opis['instruction_edited_at'], 0, 16)) ?></span>
+        <?php endif; ?>
+    </form>
+</section>
+
+<section class="panel">
+    <h2 style="margin-top:0">Состав описи (<?= count($rows) ?> чел.)</h2>
+    <p class="muted" style="margin-top:0">Если из полученного указания нужно <strong>удалить человека</strong> (МИД отказал по уже внесённой строке и т.п.) — нажмите «в доработку».
+        Это равнозначно отказу: строка уйдёт на повторную проверку другому специалисту с пометкой <em>«повторно, удалён из визового указания»</em>.
+        <strong>Комментарий обязателен.</strong> По вычету с первичного проверяющего решаете вы: 0 (не его вина) или стоимость проверки.</p>
     <table class="table">
-        <thead><tr><th>Исх. №</th><th>Фамилия</th><th>Гражданство</th><th>Паспорт</th></tr></thead>
+        <thead><tr><th>Исх. №</th><th>Фамилия</th><th>Гражданство</th><th>Паспорт</th><th>Удаление из указания</th></tr></thead>
         <tbody>
         <?php foreach ($rows as $r): ?>
             <tr>
@@ -73,10 +90,24 @@
                 <td><?= e(trim($r['surname_lat'] . ' ' . $r['names_lat'])) ?></td>
                 <td class="muted"><?= e($r['citizenship']) ?></td>
                 <td><?= e($r['passport_no']) ?></td>
+                <td>
+                    <form method="post" action="/visas/opis/<?= (int)$opis['id'] ?>/refuse-row" class="form-inline" style="gap:6px;flex-wrap:wrap;align-items:center"
+                          onsubmit="return confirm('Убрать из визового указания и отправить на доработку (повторно)?')">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="row_id" value="<?= (int)$r['id'] ?>">
+                        <input type="text" name="comment" placeholder="причина (обязательно)" required style="max-width:220px">
+                        <select name="deduct">
+                            <option value="0">вычет 0</option>
+                            <option value="1">снять <?= number_format($price, 2, ',', ' ') ?> ₽</option>
+                        </select>
+                        <button class="btn btn-mini" style="color:#c0392b">в доработку</button>
+                    </form>
+                </td>
             </tr>
         <?php endforeach; ?>
+        <?php if (!$rows): ?><tr><td colspan="5" class="muted">В описи не осталось строк (все удалены / на доработке).</td></tr><?php endif; ?>
         </tbody>
     </table>
-    <p class="muted">Отказанные МИД строки выведены из этой описи и переведены на доработку — см. <a href="/visas/rework">МИД: на доработке</a>.</p>
+    <p class="muted">Отказанные/удалённые строки — на доработке: <a href="/visas/rework">МИД: на доработке</a>.</p>
 </section>
 <?php endif; ?>

@@ -727,6 +727,16 @@ foreach ([
         echo "OK  колонка visa_batches.$col добавлена\n";
     }
 }
+// Аудит правки визового указания (кто/когда менял № и дату уже внесённого указания).
+foreach ([
+    'instruction_edited_by' => 'INT NULL',
+    'instruction_edited_at' => 'DATETIME NULL',
+] as $col => $ddl) {
+    if (!columnExists('visa_opis', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE visa_opis ADD COLUMN $col $ddl"));
+        echo "OK  колонка visa_opis.$col добавлена\n";
+    }
+}
 if (!columnExists('dorabotka_comments', 'category')) {
     $pdo->exec("ALTER TABLE dorabotka_comments ADD COLUMN category VARCHAR(100) NOT NULL DEFAULT 'Прочее'");
     echo "OK  колонка dorabotka_comments.category добавлена\n";
