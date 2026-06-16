@@ -1,12 +1,21 @@
 <?php use App\Controllers\StimulusController; $st = StimulusController::STATUS;
 $isMgmt = ($kind ?? 'staff') === 'mgmt';
-$steps = $isMgmt
-    ? [['director', 'Директор (утверждает приказом)', $memo['director_signed_at'] ?? null, $memo['director_sign_type'] ?? null]]
-    : [
+$direct = $direct ?? ($memo['direct_tier'] ?? null);
+$dirStep = ['director', 'Директор', $memo['director_signed_at'] ?? null, $memo['director_sign_type'] ?? null];
+$depStep = ['deputy', 'Зам (прямое назначение)', $memo['deputy_signed_at'] ?? null, $memo['deputy_sign_type'] ?? null];
+if ($isMgmt) {
+    $steps = [['director', 'Директор (утверждает приказом)', $memo['director_signed_at'] ?? null, $memo['director_sign_type'] ?? null]];
+} elseif ($direct === 'director') {
+    $steps = [['director', 'Директор (прямое назначение)', $memo['director_signed_at'] ?? null, $memo['director_sign_type'] ?? null]];
+} elseif ($direct === 'deputy') {
+    $steps = [$depStep, $dirStep];
+} else {
+    $steps = [
         ['head', 'Начальник отдела', $memo['head_signed_at'] ?? null, $memo['head_sign_type'] ?? null],
         ['deputy', 'Курирующий зам', $memo['deputy_signed_at'] ?? null, $memo['deputy_sign_type'] ?? null],
-        ['director', 'Директор', $memo['director_signed_at'] ?? null, $memo['director_sign_type'] ?? null],
+        $dirStep,
     ];
+}
 ?>
 <div class="chat-head">
     <a class="btn btn-mini" href="/memos">← Служебки</a>
@@ -72,14 +81,17 @@ $steps = $isMgmt
             <?php endforeach; ?>
         </div>
 
-        <?php if ($canHeadSign || $canDeputySign || $canDirectorSign || !empty($canMgmtSign)): ?>
+        <?php if ($canHeadSign || $canDeputySign || $canDirectorSign || !empty($canMgmtSign) || !empty($canDirectSign)): ?>
         <h3 class="sub">Подписать (ЭП — подтверждение паролем)</h3>
         <form method="post" action="/memos/<?= (int)$memo['id'] ?>/sign">
             <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
             <label>Ваш пароль<input type="password" name="password" required></label>
             <div class="form-inline" style="margin-top:8px">
                 <button class="btn btn-primary">
-                    <?= !empty($canMgmtSign) ? '🖋 Утвердить приказом директора' : ($canHeadSign ? '🖋 Подписать и направить заму' : ($canDeputySign ? '🖋 Утвердить (заму)' : '🖋 Утвердить (директор)')) ?>
+                    <?= !empty($canDirectSign) ? e($directLabel)
+                        : (!empty($canMgmtSign) ? '🖋 Утвердить приказом директора'
+                        : ($canHeadSign ? '🖋 Подписать и направить заму'
+                        : ($canDeputySign ? '🖋 Утвердить (заму)' : '🖋 Утвердить (директор)'))) ?>
                 </button>
             </div>
         </form>

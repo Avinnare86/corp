@@ -45,6 +45,15 @@
     <?php endforeach; ?>
 </table>
 
+<?php $signed = array_filter($route, fn($r) => ($r['stage_type'] ?? '') === 'sign' && !empty($r['sign_hash'])); ?>
+<?php if ($signed): ?>
+<div style="margin-top:22px">
+    <?php foreach ($signed as $r): ?>
+        <?= ep_stamp('Подписант' . ($r['behalf_name'] ? ' (за ' . $r['full_name'] . ')' : ''), $r['behalf_name'] ?: $r['full_name'], $r['decided_at'], $r['sign_type'] ?? 'PEP', $r['sign_hash']) ?>
+    <?php endforeach; ?>
+</div>
+<?php endif; ?>
+
 <p style="margin-top:30px">Лист сформирован: <?= date('d.m.Y H:i') ?></p>
 </body>
 </html>

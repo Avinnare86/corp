@@ -38,6 +38,21 @@
         <input type="hidden" name="id" value="<?= (int)($memo['id'] ?? 0) ?>">
         <input type="hidden" name="kind" value="<?= e($kind ?? 'staff') ?>">
         <input type="hidden" name="department_id" value="<?= (int)($dept['id'] ?? 0) ?>">
+        <?php if (!empty($direct)): ?>
+        <input type="hidden" name="direct_tier" value="<?= e($direct) ?>">
+        <div class="flash" style="background:#eef;color:#223;margin-bottom:10px">Прямое назначение
+            (<?= $direct === 'director' ? 'директор — утверждается сразу' : 'зам — далее только подпись директора' ?>),
+            без участия начальника отдела.</div>
+        <?php if (!empty($deptOpts) && empty($memo['id'])): ?>
+        <label style="max-width:420px;margin-bottom:10px">Подразделение
+            <select onchange="location.href='/memos/direct/new?dept='+this.value">
+                <?php foreach ($deptOpts as $d): ?>
+                    <option value="<?= (int)$d['id'] ?>" <?= (int)($deptId ?? 0)===(int)$d['id']?'selected':'' ?>><?= e($d['name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <?php endif; ?>
+        <?php endif; ?>
         <div class="form-inline" style="align-items:flex-end">
             <label>Период<input type="month" name="period" value="<?= e($memo['period'] ?? date('Y-m')) ?>" required></label>
             <label>Вид выплаты по умолчанию

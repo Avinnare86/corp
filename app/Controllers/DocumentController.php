@@ -5,6 +5,7 @@ use App\Core\Controller;
 use App\Core\Auth;
 use App\Core\Database;
 use App\Services\NotificationService;
+use App\Services\Settings;
 
 /**
  * СЭД: документы с маршрутом из этапов (по образцу СЭД «Практика»).
@@ -481,10 +482,21 @@ class DocumentController extends Controller
             flash('Для «согласовано с замечаниями» укажите замечания в комментарии.', 'error');
             $this->redirect('/docs/' . $id);
         }
+        // Этап «Подписание» — подтверждение паролем (простая ЭП) + отпечаток для штампа.
+        $signType = null; $signHash = null;
+        if ($step['stage_type'] === 'sign') {
+            $pwd = (string) $this->input('password');
+            $pwHash = (string) Database::scalar('SELECT password_hash FROM users WHERE id=?', [$uid]);
+            if ($pwd === '' || !password_verify($pwd, $pwHash)) {
+                flash('Подпись не выполнена: неверный пароль.', 'error'); $this->redirect('/docs/' . $id);
+            }
+            $signType = 'PEP';
+            $signHash = substr(hash_hmac('sha256', $id . '|' . $uid . '|' . $now, (string) Settings::get('sign_secret', 'uchet')), 0, 24);
+        }
         $okStatus = $step['stage_type'] === 'ack' ? 'acked' : 'approved';
         if ($withRemarks) { $comment = '[С замечаниями] ' . $comment; }
-        Database::run('UPDATE doc_approvers SET status=?, comment=?, decided_at=?, on_behalf_of=?, file_version=? WHERE id=?',
-            [$okStatus, $comment ?: null, $now, $onBehalf ? $uid : null, self::currentVersion((int) $id) ?: null, $step['id']]);
+        Database::run('UPDATE doc_approvers SET status=?, comment=?, decided_at=?, on_behalf_of=?, file_version=?, sign_type=?, sign_hash=? WHERE id=?',
+            [$okStatus, $comment ?: null, $now, $onBehalf ? $uid : null, self::currentVersion((int) $id) ?: null, $signType, $signHash, $step['id']]);
         $verb = $withRemarks ? 'согласовано с замечаниями'
             : (['approve' => 'согласовано', 'sign' => 'подписано', 'ack' => 'ознакомлен'][$step['stage_type']] ?? 'выполнено');
         $this->history((int) $id, (self::STAGE_LABEL[$step['stage_type']] ?? '') . ': ' . $verb . ' — ' . $signerName, $comment ?: null);
@@ -901,7 +913,7 @@ class DocumentController extends Controller
         $doc = Database::one('SELECT * FROM documents WHERE id = ?', [$docId]);
         $first = Database::one('SELECT * FROM doc_approvers WHERE document_id = ? AND step_no = 1 ORDER BY id LIMIT 1', [$docId]);
         if (!$first) { flash('Добавьте хотя бы один этап с участником.', 'error'); return; }
-        Database::run("UPDATE doc_approvers SET status='pending', comment=NULL, decided_at=NULL, on_behalf_of=NULL WHERE document_id = ?", [$docId]);
+        Database::run("UPDATE doc_approvers SET status='pending', comment=NULL, decided_at=NULL, on_behalf_of=NULL, sign_type=NULL, sign_hash=NULL WHERE document_id = ?", [$docId]);
         Database::run("UPDATE documents SET status='on_approval', current_step=1, sent_at=? WHERE id=?", [date('Y-m-d H:i:s'), $docId]);
         $this->history($docId, 'Отправлен по маршруту');
         $targets = (int) $first['parallel']

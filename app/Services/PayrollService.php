@@ -158,14 +158,18 @@ class PayrollService
 
         // --- Стимул по утверждённым служебкам за период ---
         $memoLines = Database::all(
-            "SELECT l.amount, l.pay_kind, l.percent FROM stimulus_memo_lines l
+            "SELECT l.amount, l.pay_kind,
+                    (SELECT o.new_amount FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1) AS override_amount
+               FROM stimulus_memo_lines l
                JOIN stimulus_memos m ON m.id = l.memo_id
               WHERE l.user_id = ? AND m.period = ? AND m.status = 'approved'",
             [$employeeId, $period]);
         $stimMonthly = 0.0; $stimOnetime = 0.0;
         foreach ($memoLines as $ml) {
-            if ($ml['pay_kind'] === 'onetime') { $stimOnetime += (float) $ml['amount']; }
-            else { $stimMonthly += round((float) $ml['amount'] * $prorate, 2); } // ежемесячный — пропорц. отработке
+            // эффективная сумма = последняя корректировка вышестоящего (снижение/отмена), иначе назначенная
+            $amt = $ml['override_amount'] !== null ? (float) $ml['override_amount'] : (float) $ml['amount'];
+            if ($ml['pay_kind'] === 'onetime') { $stimOnetime += $amt; }
+            else { $stimMonthly += round($amt * $prorate, 2); } // ежемесячный — пропорц. отработке
         }
         $stimMonthly = round($stimMonthly, 2); $stimOnetime = round($stimOnetime, 2);
         $stimTotal = round($stimMonthly + $stimOnetime, 2);

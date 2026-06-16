@@ -6,6 +6,7 @@ use App\Core\Auth;
 use App\Core\Database;
 use App\Services\NotificationService;
 use App\Services\Settings;
+use App\Services\Org;
 
 /**
  * Служебная записка об установлении стимулирующих выплат.
@@ -114,6 +115,18 @@ class StimulusController extends Controller
         $this->memoForm(null, (int) Auth::id(), 'mgmt');
     }
 
+    /** Прямое назначение стимула вышестоящим (без участия начальников ниже): директор/зам. */
+    public function createDirect(): void
+    {
+        Auth::requireRole('director', 'deputy_director', 'admin');
+        $tier = Org::tier((int) Auth::id());
+        if (!in_array($tier, ['director', 'deputy'], true)) {
+            flash('Прямое назначение доступно директору или курирующему заместителю.', 'error');
+            $this->redirect('/memos');
+        }
+        $this->memoForm(null, (int) Auth::id(), 'staff', $tier);
+    }
+
     public function edit(string $id): void
     {
         Auth::requireRole('dept_head', 'director', 'admin');
@@ -123,11 +136,13 @@ class StimulusController extends Controller
         $this->memoForm($memo, (int)$memo['author_id'], $memo['kind'] ?? 'staff');
     }
 
-    private function memoForm(?array $memo, int $authorId, string $kind = 'staff'): void
+    private function memoForm(?array $memo, int $authorId, string $kind = 'staff', ?string $direct = null): void
     {
         $kind = ($memo['kind'] ?? $kind) === 'mgmt' ? 'mgmt' : $kind;
+        $direct = $memo['direct_tier'] ?? $direct;   // при редактировании берём из служебки
         $period = (string) ($memo['period'] ?? date('Y-m'));
         $isMgmt = $kind === 'mgmt';
+        $deptOpts = null;
 
         if ($isMgmt) {
             // Стимул замам и гл. бухгалтеру: пул — заместители директора и бухгалтерия.
@@ -139,6 +154,18 @@ class StimulusController extends Controller
             $deptId = 0;
             $cats = [self::CAT_MGMT];
             $forecast = null;
+        } elseif ($direct) {
+            // Прямое назначение вышестоящим: выбор подчинённого отдела (директору — все, заму — курируемые).
+            $deptOpts = $direct === 'director'
+                ? Database::all('SELECT id, name FROM departments ORDER BY name')
+                : self::deptsByIds(Org::curatedDeptIds($authorId));
+            $deptId = (int) ($memo['department_id'] ?? ($this->input('dept') ?: 0));
+            if (!$deptId && $deptOpts) { $deptId = (int) $deptOpts[0]['id']; }
+            $members = $deptId ? Database::all(
+                'SELECT id, full_name, position, oklad, rate_volume, position_id FROM users WHERE department_id = ? AND is_active = 1 ORDER BY full_name',
+                [$deptId]) : [];
+            $cats = self::CATS_STAFF;
+            $forecast = $deptId ? \App\Services\StimulusBudgetService::forecast((int) $deptId, $period) : null;
         } else {
             // отдел автора (начальник ведёт служебку по своему отделу)
             $deptId = $memo['department_id'] ?? (int) Database::scalar('SELECT department_id FROM users WHERE id = ?', [$authorId]);
@@ -172,6 +199,9 @@ class StimulusController extends Controller
                 : ($isMgmt ? 'Стимул заместителям / гл. бухгалтеру' : 'Новая служебка о стимуле'),
             'memo' => $memo,
             'kind' => $kind,
+            'direct' => $direct,
+            'deptOpts' => $deptOpts,
+            'deptId' => $isMgmt ? 0 : (int) $deptId,
             'showPiece' => !$isMgmt,
             'dept' => $isMgmt ? null : Database::one('SELECT * FROM departments WHERE id = ?', [$deptId]),
             'members' => $members,
@@ -186,7 +216,7 @@ class StimulusController extends Controller
 
     public function store(): void
     {
-        Auth::requireRole('dept_head', 'director', 'admin');
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'admin');
         Auth::verifyCsrf();
         $uid = (int) Auth::id();
         $id = (int) $this->input('id');
@@ -198,6 +228,18 @@ class StimulusController extends Controller
         $deptId   = $kind === 'mgmt' ? null : ((int) $this->input('department_id') ?: null);
         $sourceId = $this->input('source_id') ? (int) $this->input('source_id') : null;
         $groundIds = array_values(array_filter(array_map('intval', $_POST['grounds'] ?? [])));
+
+        // Прямое назначение вышестоящим (без участия начальников ниже): авто-маршрут по тиру.
+        $direct = in_array($this->input('direct_tier'), ['director', 'deputy'], true) && $kind === 'staff'
+            ? (string) $this->input('direct_tier') : null;
+        if ($direct) {
+            $tier = Org::tier($uid);
+            $isDir = $tier === 'director' || Auth::isAdmin();
+            if (!$isDir && $tier !== 'deputy') { flash('Прямое назначение доступно директору или курирующему заму.', 'error'); $this->redirect('/memos'); }
+            if (!$deptId) { flash('Выберите подразделение для прямого назначения.', 'error'); $this->redirect('/memos'); }
+            if (!$isDir && !Org::isSuperiorOfDept($uid, $deptId)) { flash('Назначать напрямую можно только в курируемые вами подразделения.', 'error'); $this->redirect('/memos'); }
+            $direct = $isDir ? 'director' : 'deputy';
+        }
 
         if (!$groundIds) { flash('Выберите хотя бы одно основание (раздел 4).', 'error'); $this->backToForm($id, $kind); }
         $groundTexts = [];
@@ -280,12 +322,12 @@ class StimulusController extends Controller
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         if ($id) {
-            Database::run('UPDATE stimulus_memos SET department_id=?, period=?, pay_kind=?, source_id=?, grounds=?, grounds_ids=?, kind=?, status=? WHERE id=?',
-                [$deptId, $period, $payKind, $sourceId, implode('; ', $groundTexts), implode(',', $groundIds), $kind, 'draft', $id]);
+            Database::run('UPDATE stimulus_memos SET department_id=?, period=?, pay_kind=?, source_id=?, grounds=?, grounds_ids=?, kind=?, direct_tier=?, status=? WHERE id=?',
+                [$deptId, $period, $payKind, $sourceId, implode('; ', $groundTexts), implode(',', $groundIds), $kind, $direct, 'draft', $id]);
             Database::run('DELETE FROM stimulus_memo_lines WHERE memo_id=?', [$id]);
         } else {
-            $id = Database::insert('INSERT INTO stimulus_memos (department_id, author_id, period, pay_kind, source_id, grounds, grounds_ids, kind, status) VALUES (?,?,?,?,?,?,?,?,?)',
-                [$deptId, $uid, $period, $payKind, $sourceId, implode('; ', $groundTexts), implode(',', $groundIds), $kind, 'draft']);
+            $id = Database::insert('INSERT INTO stimulus_memos (department_id, author_id, period, pay_kind, source_id, grounds, grounds_ids, kind, direct_tier, status) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [$deptId, $uid, $period, $payKind, $sourceId, implode('; ', $groundTexts), implode(',', $groundIds), $kind, $direct, 'draft']);
         }
         $pfrom = $period . '-01';
         $pto = date('Y-m-t', strtotime($pfrom));
@@ -306,6 +348,14 @@ class StimulusController extends Controller
         $this->redirect($kind === 'mgmt' ? '/memos/mgmt/new' : '/memos/new');
     }
 
+    /** Список отделов по id (для селектора прямого назначения). */
+    private static function deptsByIds(array $ids): array
+    {
+        if (!$ids) { return []; }
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        return Database::all("SELECT id, name FROM departments WHERE id IN ($ph) ORDER BY name", $ids);
+    }
+
     public function show(string $id): void
     {
         Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
@@ -321,7 +371,9 @@ class StimulusController extends Controller
         $isCurator = !empty($roles['deputy_director']) && ((int)$memo['curator_id'] === $uid || Auth::isAdmin());
         $isDirector = !empty($roles['director']) || Auth::isAdmin();
         $isAcc = (!empty($roles['accountant']) || Auth::isAdmin()) && in_array($memo['status'], ['deputy_signed','approved'], true);
-        if (!($isAuthor || $isCurator || $isDirector || $isAcc || Auth::isAdmin())) {
+        // вышестоящий по структуре видит служебки подчинённых подразделений
+        $isSuperior = Org::isSuperiorOfDept($uid, $memo['department_id'] ? (int)$memo['department_id'] : null);
+        if (!($isAuthor || $isCurator || $isDirector || $isAcc || $isSuperior || Auth::isAdmin())) {
             flash('Нет доступа к этой служебке.', 'error'); $this->redirect('/memos');
         }
         $lines = Database::all(
@@ -334,13 +386,24 @@ class StimulusController extends Controller
         // что может сделать текущий пользователь
         $isMgmt = ($memo['kind'] ?? 'staff') === 'mgmt';
         $canMgmtSign = $isMgmt && in_array($memo['status'], ['draft','revision'], true) && $isDirector;
-        $canHeadSign = !$isMgmt && $isAuthor && $memo['status'] === 'draft';
-        $canDeputySign = !$isMgmt && (($memo['status'] === 'head_signed' && (!empty($roles['deputy_director']) && ((int)$memo['curator_id']===$uid))) || ($memo['status']==='head_signed' && Auth::isAdmin()));
-        $canDirectorSign = !$isMgmt && $memo['status'] === 'deputy_signed' && ($isDirector);
+        $direct = $memo['direct_tier'] ?? null;
+        $canHeadSign = !$isMgmt && !$direct && $isAuthor && $memo['status'] === 'draft';
+        $canDeputySign = !$isMgmt && !$direct && (($memo['status'] === 'head_signed' && (!empty($roles['deputy_director']) && ((int)$memo['curator_id']===$uid))) || ($memo['status']==='head_signed' && Auth::isAdmin()));
+        $canDirectorSign = !$isMgmt && !$direct && $memo['status'] === 'deputy_signed' && ($isDirector);
+        // прямое назначение: своя короткая логика подписи
+        $canDirectSign = false; $directLabel = '';
+        if ($direct === 'director' && in_array($memo['status'], ['draft','revision'], true) && $isDirector) {
+            $canDirectSign = true; $directLabel = '🖋 Назначить и утвердить (директор)';
+        } elseif ($direct === 'deputy' && $memo['status'] === 'draft' && $isAuthor && (!empty($roles['deputy_director']) || Auth::isAdmin())) {
+            $canDirectSign = true; $directLabel = '🖋 Подписать и направить директору';
+        } elseif ($direct === 'deputy' && $memo['status'] === 'deputy_signed' && $isDirector) {
+            $canDirectSign = true; $directLabel = '🖋 Утвердить (директор)';
+        }
         $this->view('stimulus/show', [
             'title' => 'Служебка №' . ($memo['number'] ?: $memo['id']),
             'memo' => $memo, 'lines' => $lines, 'groundRows' => $groundRows,
             'kind' => $memo['kind'] ?? 'staff',
+            'direct' => $direct,
             'total' => array_sum(array_map(fn($l)=>(float)$l['amount'], $lines)),
             'source' => $memo['source_id'] ? Database::one('SELECT * FROM pay_sources WHERE id=?', [$memo['source_id']]) : null,
             'canEdit' => $isAuthor && in_array($memo['status'], ['draft','revision'], true),
@@ -348,7 +411,9 @@ class StimulusController extends Controller
             'canDeputySign' => $canDeputySign,
             'canDirectorSign' => $canDirectorSign,
             'canMgmtSign' => $canMgmtSign,
-            'canReject' => ($canDeputySign || $canDirectorSign),
+            'canDirectSign' => $canDirectSign,
+            'directLabel' => $directLabel,
+            'canReject' => ($canDeputySign || $canDirectorSign || ($direct === 'deputy' && $memo['status'] === 'deputy_signed' && $isDirector)),
             'csrf' => Auth::csrf(),
         ]);
     }
@@ -419,6 +484,38 @@ class StimulusController extends Controller
             $this->redirect('/memos/' . (int)$id);
         }
 
+        // Прямое назначение вышестоящим — сокращённый маршрут (без начальника отдела).
+        $direct = $memo['direct_tier'] ?? null;
+        if ($direct === 'director') {
+            if (in_array($memo['status'], ['draft', 'revision'], true) && (!empty($roles['director']) || Auth::isAdmin())) {
+                $num = $memo['number'] ?: self::nextNumber();
+                Database::run('UPDATE stimulus_memos SET status=?, number=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=? WHERE id=?',
+                    ['approved', $num, $uid, 'PEP', $now, $sig, $id]);
+                foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='accountant'") as $acc) {
+                    NotificationService::create((int) $acc['id'], 'Стимул назначен директором', "Директор назначил стимул напрямую (№{$num}).");
+                }
+                flash("Стимул назначен напрямую и утверждён приказом директора (№{$num}).");
+            } else { flash('Сейчас вы не можете подписать эту служебку.', 'error'); }
+            $this->redirect('/memos/' . (int)$id);
+        }
+        if ($direct === 'deputy') {
+            if ($memo['status'] === 'draft' && (int)$memo['author_id'] === $uid && (!empty($roles['deputy_director']) || Auth::isAdmin())) {
+                $num = $memo['number'] ?: self::nextNumber();
+                Database::run('UPDATE stimulus_memos SET status=?, number=?, deputy_id=?, deputy_sign_type=?, deputy_signed_at=?, deputy_sign_hash=? WHERE id=?',
+                    ['deputy_signed', $num, $uid, 'PEP', $now, $sig, $id]);
+                foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='director'") as $dir) {
+                    NotificationService::create((int) $dir['id'], 'Служебка на утверждение директором', "Зам назначил стимул напрямую (№{$num}), ожидает вашего утверждения.");
+                }
+                flash("Подписано заместителем напрямую (№{$num}). Ожидает утверждения директором.");
+            } elseif ($memo['status'] === 'deputy_signed' && (!empty($roles['director']) || Auth::isAdmin())) {
+                Database::run('UPDATE stimulus_memos SET status=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=? WHERE id=?',
+                    ['approved', $uid, 'PEP', $now, $sig, $id]);
+                NotificationService::create((int)$memo['author_id'], 'Служебка утверждена', "Ваша прямая служебка о стимуле №{$memo['number']} утверждена директором.");
+                flash('Стимул утверждён директором.');
+            } else { flash('Сейчас вы не можете подписать эту служебку.', 'error'); }
+            $this->redirect('/memos/' . (int)$id);
+        }
+
         if ($memo['status'] === 'draft' && (int)$memo['author_id'] === $uid) {
             // начальник подписал → присвоить номер, отправить заму
             $num = $memo['number'] ?: self::nextNumber();
@@ -473,6 +570,121 @@ class StimulusController extends Controller
             flash('Черновик служебки удалён.');
         }
         $this->redirect('/memos');
+    }
+
+    /** Видит ли пользователь весь стимул (директор/бухгалтер/админ). */
+    private function seesAllStimulus(): bool
+    {
+        return Auth::has('director', 'accountant') || Auth::isAdmin();
+    }
+
+    /** Корректировка (снижение/отмена) утверждённого стимула вышестоящим — с аудитом. */
+    public function override(string $lineId): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'admin');
+        Auth::verifyCsrf();
+        $uid = (int) Auth::id();
+        $line = Database::one(
+            'SELECT l.*, m.status AS memo_status, m.period AS memo_period
+               FROM stimulus_memo_lines l JOIN stimulus_memos m ON m.id=l.memo_id WHERE l.id=?', [$lineId]);
+        if (!$line) { flash('Строка стимула не найдена.', 'error'); $this->redirect('/memos/summary'); }
+        $canBase = Auth::has('director') || Auth::isAdmin();
+        if (!$canBase && !Org::canOverseeUser($uid, (int) $line['user_id'])) {
+            flash('Корректировать можно только стимул подчинённых.', 'error'); $this->redirect('/memos/summary');
+        }
+        if ($line['memo_status'] !== 'approved') {
+            flash('Снизить/отменить можно только утверждённый стимул.', 'error'); $this->redirect('/memos/summary');
+        }
+        $reason = trim((string) $this->input('reason'));
+        if ($reason === '') { flash('Укажите причину снижения/отмены.', 'error'); $this->redirect('/memos/summary'); }
+        $cancel = (string) $this->input('cancel') === '1';
+        $new = $cancel ? 0.0 : (float) str_replace([' ', ','], ['', '.'], (string) $this->input('new_amount'));
+        if ($new < 0) { $new = 0.0; }
+        if ($new > (float) $line['amount'] + 0.005) {
+            flash('Новая сумма не может превышать исходную (' . money($line['amount']) . '). Стимул можно только снизить или отменить.', 'error');
+            $this->redirect('/memos/summary?period=' . urlencode((string) $line['memo_period']));
+        }
+        Database::insert('INSERT INTO stimulus_overrides (memo_line_id, new_amount, by_user_id, reason) VALUES (?,?,?,?)',
+            [(int) $lineId, round($new, 2), $uid, $reason]);
+        // уведомим получателя и автора служебки
+        NotificationService::create((int) $line['user_id'], 'Стимул скорректирован',
+            ($cancel ? 'Ваш стимул отменён' : 'Ваш стимул снижен до ' . money($new)) . ' за ' . $line['memo_period'] . '. Причина: ' . $reason);
+        flash($cancel ? 'Стимул отменён (0). Корректировка зафиксирована.' : 'Стимул снижен до ' . money($new) . '. Корректировка зафиксирована.');
+        $this->redirect('/memos/summary?period=' . urlencode((string) $line['memo_period']));
+    }
+
+    /** Строки сводной (с учётом видимости и последней корректировки). */
+    private function summaryRows(int $uid, string $period): array
+    {
+        $where = '1=1'; $params = [];
+        if ($period !== '') { $where .= ' AND m.period = ?'; $params[] = $period; }
+        $rows = Database::all(
+            "SELECT m.period, m.number, m.status, m.department_id, m.author_id, m.direct_tier,
+                    d.name AS dept_name, l.id AS line_id, l.user_id, l.amount, l.pay_kind,
+                    ur.full_name AS recipient, ah.full_name AS author_name,
+                    (SELECT o.new_amount FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1) AS ov_amount,
+                    (SELECT ob.full_name FROM stimulus_overrides o JOIN users ob ON ob.id=o.by_user_id WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1) AS ov_by,
+                    (SELECT o.reason FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1) AS ov_reason
+               FROM stimulus_memo_lines l
+               JOIN stimulus_memos m ON m.id=l.memo_id
+               JOIN users ur ON ur.id=l.user_id
+               JOIN users ah ON ah.id=m.author_id
+               LEFT JOIN departments d ON d.id=m.department_id
+              WHERE $where
+              ORDER BY m.period DESC, d.name, ur.full_name", $params);
+        $seeAll = $this->seesAllStimulus();
+        $canBase = Auth::has('director') || Auth::isAdmin();
+        $out = [];
+        foreach ($rows as $r) {
+            $oversee = Org::canOverseeUser($uid, (int) $r['user_id']);
+            if (!$seeAll && !$oversee && (int) $r['author_id'] !== $uid && (int) $r['user_id'] !== $uid) { continue; }
+            $r['effective'] = $r['ov_amount'] !== null ? (float) $r['ov_amount'] : (float) $r['amount'];
+            $r['can_override'] = $r['status'] === 'approved' && ($canBase || $oversee);
+            $out[] = $r;
+        }
+        return $out;
+    }
+
+    /** Сводная таблица: кто кому какой стимул назначил по месяцам (+ корректировки). */
+    public function summary(): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        $period = (string) $this->input('period', date('Y-m'));
+        $rows = $this->summaryRows((int) Auth::id(), $period);
+        $periods = array_column(Database::all('SELECT DISTINCT period FROM stimulus_memos ORDER BY period DESC'), 'period');
+        $this->view('stimulus/summary', [
+            'title' => 'Сводная по стимулу',
+            'rows' => $rows,
+            'period' => $period,
+            'periods' => $periods,
+            'statusLabels' => self::STATUS,
+            'csrf' => Auth::csrf(),
+        ]);
+    }
+
+    /** Выгрузка сводной в Excel (с учётом видимости и фильтра периода). */
+    public function summaryExport(): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        $rows = $this->summaryRows((int) Auth::id(), (string) $this->input('period', date('Y-m')));
+        $headers = ['Месяц', 'Отдел', 'Получатель', 'Вид', 'Назначено', 'Корректировка', 'Кто снизил', 'Причина', 'Итог', 'Назначил', 'Прямое', 'Статус', '№ служебки'];
+        $data = [];
+        foreach ($rows as $r) {
+            $data[] = [
+                (string) $r['period'], (string) ($r['dept_name'] ?? '—'), (string) $r['recipient'],
+                $r['pay_kind'] === 'onetime' ? 'единоврем.' : 'ежемес.',
+                round((float) $r['amount'], 2),
+                $r['ov_amount'] !== null ? round((float) $r['ov_amount'], 2) : '',
+                (string) ($r['ov_by'] ?? ''), (string) ($r['ov_reason'] ?? ''),
+                round((float) $r['effective'], 2),
+                (string) $r['author_name'],
+                $r['direct_tier'] ? ($r['direct_tier'] === 'director' ? 'директор' : 'зам') : '',
+                self::STATUS[$r['status']] ?? (string) $r['status'],
+                (string) ($r['number'] ?: ('#' . $r['line_id'])),
+            ];
+        }
+        \App\Services\Xlsx::download('stimulus-summary-' . date('Y-m-d') . '.xlsx',
+            [['name' => 'Стимул по месяцам', 'headers' => $headers, 'rows' => $data]]);
     }
 
     private static function nextNumber(): string

@@ -82,7 +82,9 @@ if ($uid) {
     // Служебки о стимуле — начальники/замы/директор/бухгалтерия (вне привязки к проектам)
     if ($can('dept_head', 'deputy_director', 'director', 'accountant')) {
         $memoInbox = \App\Controllers\StimulusController::inboxCount((int) $uid);
-        $menu['Стимул'] = [['/memos', 'Служебки о стимуле', $memoInbox]];
+        $g = [['/memos', 'Служебки о стимуле', $memoInbox], ['/memos/summary', 'Сводная по стимулу', 0]];
+        if ($can('director', 'deputy_director')) { $g[] = ['/memos/direct/new', 'Назначить напрямую', 0]; }
+        $menu['Стимул'] = $g;
     }
     // Финансы — только менеджер проекта финансы
     if ($isFinMgr) {

@@ -327,14 +327,7 @@ class AdminController extends Controller
     /** Является ли $meId руководителем сотрудника по структуре (глава/куратор отдела или выше по цепочке). */
     private static function isStructuralSuperior(int $meId, ?int $deptId): bool
     {
-        $guard = 0;
-        while ($deptId && $guard++ < 20) {
-            $d = Database::one('SELECT head_id, curator_id, parent_id FROM departments WHERE id=?', [$deptId]);
-            if (!$d) { break; }
-            if ((int) $d['head_id'] === $meId || (int) $d['curator_id'] === $meId) { return true; }
-            $deptId = $d['parent_id'] ? (int) $d['parent_id'] : null;
-        }
-        return false;
+        return \App\Services\Org::isSuperiorOfDept($meId, $deptId);
     }
 
     /** Карточка одного сотрудника: подробности, перевод, удаление + роли/доступы + надбавка. */

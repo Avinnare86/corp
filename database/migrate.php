@@ -737,6 +737,21 @@ foreach ([
         echo "OK  колонка visa_opis.$col добавлена\n";
     }
 }
+// ЭП-штамп на подписях документов СЭД (по образцу служебок).
+foreach ([
+    'sign_type' => "VARCHAR(8) NULL",
+    'sign_hash' => "VARCHAR(80) NULL",
+] as $col => $ddl) {
+    if (!columnExists('doc_approvers', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE doc_approvers ADD COLUMN $col $ddl"));
+        echo "OK  колонка doc_approvers.$col добавлена\n";
+    }
+}
+// Прямое назначение стимула вышестоящим (сокращённый маршрут подписи).
+if (!columnExists('stimulus_memos', 'direct_tier')) {
+    $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN direct_tier VARCHAR(12) NULL"); // director|deputy
+    echo "OK  колонка stimulus_memos.direct_tier добавлена\n";
+}
 if (!columnExists('dorabotka_comments', 'category')) {
     $pdo->exec("ALTER TABLE dorabotka_comments ADD COLUMN category VARCHAR(100) NOT NULL DEFAULT 'Прочее'");
     echo "OK  колонка dorabotka_comments.category добавлена\n";
@@ -842,6 +857,17 @@ $extra['stimulus_memo_lines'] = "CREATE TABLE IF NOT EXISTS stimulus_memo_lines 
     period_to   DATE NULL,
     oklad_load  $MONEY NOT NULL DEFAULT 0,   -- оклад на нагрузку = номин.оклад × ставка (без отработки)
     percent     $MONEY NOT NULL DEFAULT 0    -- amount / oklad_load × 100
+) $ENGINE";
+
+// Корректировки стимула вышестоящим (снижение/отмена). Оригинальная строка остаётся;
+// в ЗП и сводной берётся последняя корректировка по строке (аудит «кто и на сколько снизил»).
+$extra['stimulus_overrides'] = "CREATE TABLE IF NOT EXISTS stimulus_overrides (
+    id $ID,
+    memo_line_id INT NOT NULL,           -- stimulus_memo_lines.id (корректируемое назначение)
+    new_amount   $MONEY NOT NULL DEFAULT 0, -- новая сумма (0 = отмена); только ≤ исходной
+    by_user_id   INT NOT NULL,           -- кто снизил/отменил (вышестоящий)
+    reason       TEXT NULL,
+    created_at   TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
 foreach ($extra as $name => $sql) {

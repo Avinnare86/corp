@@ -202,6 +202,9 @@ foreach ($route as $r) { $stages[(int)$r['step_no']][] = $r; }
                         <?php if ($r['behalf_name']): ?><span class="muted" style="font-size:.76rem">визировал заместитель: <?= e($r['behalf_name']) ?></span><?php endif; ?>
                         <?php if ($r['decided_at']): ?><span class="muted" style="font-size:.76rem"><?= e(substr((string)$r['decided_at'],0,16)) ?><?= $r['file_version'] ? ' · виза к версии v' . (int)$r['file_version'] : '' ?></span><?php endif; ?>
                         <?php if ($r['comment']): ?><div class="step-visa">«<?= e($r['comment']) ?>»</div><?php endif; ?>
+                        <?php if (($r['stage_type'] ?? '') === 'sign' && !empty($r['sign_hash'])): ?>
+                            <?= ep_stamp('Подписант' . ($r['behalf_name'] ? ' (за ' . $r['full_name'] . ')' : ''), $r['behalf_name'] ?: $r['full_name'], $r['decided_at'], $r['sign_type'] ?? 'PEP', $r['sign_hash']) ?>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endforeach; ?>
@@ -221,8 +224,14 @@ foreach ($route as $r) { $stages[(int)$r['step_no']][] = $r; }
                 <label>Комментарий (виза)
                     <textarea name="comment" rows="2" placeholder="обязателен при отклонении"></textarea>
                 </label>
+                <?php if ($myTurn['stage_type'] === 'sign'): ?>
+                <label style="max-width:320px">Пароль (подтверждение ЭП)
+                    <input type="password" name="password" autocomplete="off" placeholder="ваш пароль входа">
+                </label>
+                <?php endif; ?>
                 <div class="form-inline">
-                    <button class="btn btn-primary" name="verdict" value="approve"><?= $myTurn['stage_type']==='sign' ? '🖋 Подписать' : '✓ Согласовать' ?></button>
+                    <button class="btn btn-primary" name="verdict" value="approve"
+                        <?= $myTurn['stage_type']==='sign' ? 'onclick="return this.form.password.value!==\'\' || (alert(\'Введите пароль для подписи\'),false)"' : '' ?>><?= $myTurn['stage_type']==='sign' ? '🖋 Подписать' : '✓ Согласовать' ?></button>
                     <?php if ($myTurn['stage_type']==='approve'): ?>
                     <button class="btn" name="verdict" value="approve_rem"
                             onclick="return this.form.comment.value.trim()!=='' || (alert('Укажите замечания в комментарии'),false)">✓ С замечаниями</button>
