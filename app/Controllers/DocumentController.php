@@ -99,7 +99,7 @@ class DocumentController extends Controller
             case 'inbox':
                 $rows = Database::all("$base JOIN doc_approvers a ON a.document_id = doc.id AND a.step_no = doc.current_step
                     AND a.user_id IN ($ph) AND a.status='pending'
-                    WHERE doc.status = 'on_approval' GROUP BY doc.id ORDER BY doc.sent_at DESC", $actIds);
+                    WHERE doc.status = 'on_approval' GROUP BY doc.id, dt.id, u.id, dep.id ORDER BY doc.sent_at DESC", $actIds);
                 break;
             case 'drafts':
                 $rows = Database::all("$base WHERE doc.author_id = ? AND doc.status IN ('draft','revision') ORDER BY doc.id DESC", [$uid]);
