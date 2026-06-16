@@ -129,6 +129,51 @@ class OfficeConverter
         return null;
     }
 
+    /**
+     * Любой офисный файл (Word/Excel/RTF/ODT/…) → PDF силами LibreOffice (soffice).
+     * Кроссплатформенно; на Windows используется, если установлен LibreOffice (для MS Office
+     * есть отдельный COM-путь в PdfPreview). Возвращает PDF-байты или null.
+     */
+    public static function fileToPdf(string $srcPath, int $timeoutSec = 180): ?string
+    {
+        $soffice = self::sofficePath();
+        if ($soffice === null || !is_file($srcPath)) { return null; }
+        $work = self::makeWorkDir();
+        if ($work === null) { return null; }
+
+        $ext = strtolower(pathinfo($srcPath, PATHINFO_EXTENSION)) ?: 'bin';
+        $in  = $work . DIRECTORY_SEPARATOR . 'in.' . $ext;
+        if (!@copy($srcPath, $in)) { self::rrmdir($work); return null; }
+        $profile = $work . DIRECTORY_SEPARATOR . 'lo_profile';
+        @mkdir($profile, 0777, true);
+
+        if (self::isWindows()) {
+            $cmd = self::winArg($soffice)
+                 . ' --headless --norestore --convert-to pdf:writer_pdf_Export'
+                 . ' -env:UserInstallation=' . self::winArg('file:///' . str_replace('\\', '/', $profile))
+                 . ' --outdir ' . self::winArg($work) . ' ' . self::winArg($in);
+            $guard = 'powershell -NoProfile -ExecutionPolicy Bypass -Command '
+                   . self::winArg(
+                       '$p = Start-Process -FilePath cmd.exe -ArgumentList \'/c\',' . self::psSingle($cmd)
+                       . ' -WindowStyle Hidden -PassThru;'
+                       . ' if (-not $p.WaitForExit(' . ($timeoutSec * 1000) . ')) { try { $p.Kill() } catch {} ; exit 124 }'
+                     );
+            @exec($guard . ' 2>&1');
+        } else {
+            $cmd = 'cd ' . escapeshellarg($work) . ' && HOME=' . escapeshellarg($work)
+                 . ' timeout ' . (int) $timeoutSec . ' ' . escapeshellarg($soffice)
+                 . ' --headless --norestore --convert-to pdf:writer_pdf_Export'
+                 . ' -env:UserInstallation=file://' . escapeshellarg($profile)
+                 . ' --outdir ' . escapeshellarg($work) . ' ' . escapeshellarg($in);
+            @exec($cmd . ' 2>&1');
+        }
+
+        $outPdf = $work . DIRECTORY_SEPARATOR . 'in.pdf';
+        $bin = is_file($outPdf) ? @file_get_contents($outPdf) : false;
+        self::rrmdir($work);
+        return ($bin !== false && strlen($bin) > self::MIN_PDF) ? $bin : null;
+    }
+
     // ---------- Движок 1: Microsoft Word (Windows) ----------
 
     private static function viaWord(array $docxBinaries, int $timeoutSec): ?string

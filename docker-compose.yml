@@ -1,26 +1,39 @@
-# Корпоративный портал: приложение (PHP+Apache) + PostgreSQL.
-# Запуск:  docker compose up -d --build   →  http://СЕРВЕР:8080
-# Параметры берутся из .env (см. .env.example). СМЕНИТЕ пароль БД и пароль admin после старта.
+# Корпоративный портал: приложение (PHP-FPM + nginx в одном образе) + PostgreSQL, за обратным прокси Traefik.
+#
+# Образ берётся из GHCR (собирается GitHub Actions при пуше в main): ghcr.io/avinnare86/corp:latest
+#   Прод:           docker compose pull && docker compose up -d
+#   Локальная сборка: docker compose up -d --build   (соберёт из исходников вместо pull)
+#
+# Параметры — в .env (см. .env.example). Метки Traefik — ЗАГОТОВКА: поправьте домен (CORP_HOST),
+# имя внешней сети Traefik, entrypoint и certresolver под вашу инсталляцию.
 services:
   app:
-    build: .
-    image: corp-portal:latest
+    image: ghcr.io/avinnare86/corp:latest
+    build: .                       # для локальной сборки (docker compose up --build); в проде используется image из GHCR
     restart: unless-stopped
-    ports:
-      - "${APP_PORT:-8080}:80"
     environment:
       DB_DRIVER: pgsql
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-uchet}
       DB_USER: ${DB_USER:-uchet}
-      DB_PASS: ${DB_PASS:-change_me}
-      SEED_DEMO: ${SEED_DEMO:-1}      # 0 — не создавать демо-данные/пользователей
+      DB_PASS: ${DB_PASS:?задайте DB_PASS в .env}
+      SEED_DEMO: ${SEED_DEMO:-1}    # 0 — не создавать демо-данные/пользователей
+      TZ: ${TZ:-Europe/Moscow}
     volumes:
-      - app_storage:/var/www/html/storage   # хранит secret.key и загрузки — ОБЯЗАТЕЛЬНО бэкапить
+      - app_storage:/var/www/html/storage   # secret.key и загрузки — ОБЯЗАТЕЛЬНО бэкапить
     depends_on:
       db:
         condition: service_healthy
+    networks: [proxy, internal]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"     # ← имя вашей внешней сети Traefik
+      - "traefik.http.routers.corp.rule=Host(`${CORP_HOST:-corp.example.org}`)"
+      - "traefik.http.routers.corp.entrypoints=websecure"
+      - "traefik.http.routers.corp.tls=true"
+      - "traefik.http.routers.corp.tls.certresolver=letsencrypt"  # ← ваш resolver
+      - "traefik.http.services.corp.loadbalancer.server.port=80"
 
   db:
     image: postgres:16-alpine
@@ -28,14 +41,20 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-uchet}
       POSTGRES_USER: ${DB_USER:-uchet}
-      POSTGRES_PASSWORD: ${DB_PASS:-change_me}
+      POSTGRES_PASSWORD: ${DB_PASS:?задайте DB_PASS в .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks: [internal]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-uchet} -d ${DB_NAME:-uchet}"]
       interval: 5s
       timeout: 3s
       retries: 20
+
+networks:
+  proxy:
+    external: true        # сеть, в которой работает Traefik (создаётся отдельно)
+  internal: {}
 
 volumes:
   app_storage:

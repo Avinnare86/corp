@@ -32,14 +32,23 @@ class PdfPreview
 
         $dst = self::dir() . '/' . (int) $file['id'] . '.pdf';
         if (is_file($dst) && filesize($dst) > 0) { return $dst; }
-        if (!class_exists('\\COM')) { return null; }
-
-        $srcW = str_replace('/', '\\', (string) realpath($src));
-        $dstW = str_replace('/', '\\', $dst);
+        $isWord  = in_array($ext, self::WORD_EXT, true);
+        $isExcel = in_array($ext, self::EXCEL_EXT, true);
+        if (!$isWord && !$isExcel) { return null; }
         @set_time_limit(180);
 
-        if (in_array($ext, self::WORD_EXT, true))  { return self::viaWord($srcW, $dstW) ? $dst : null; }
-        if (in_array($ext, self::EXCEL_EXT, true)) { return self::viaExcel($srcW, $dstW) ? $dst : null; }
+        // Windows с MS Office — через COM (точное соответствие Word/Excel).
+        if (class_exists('\\COM')) {
+            $srcW = str_replace('/', '\\', (string) realpath($src));
+            $dstW = str_replace('/', '\\', $dst);
+            if ($isWord)  { return self::viaWord($srcW, $dstW) ? $dst : null; }
+            if ($isExcel) { return self::viaExcel($srcW, $dstW) ? $dst : null; }
+            return null;
+        }
+
+        // Linux/прочее — через LibreOffice (soffice), если установлен (в т.ч. в Docker-образе).
+        $pdf = OfficeConverter::fileToPdf($src);
+        if ($pdf !== null && @file_put_contents($dst, $pdf) > 0) { return $dst; }
         return null;
     }
 
