@@ -1,0 +1,26 @@
+# Портативный PHP — только для Windows, в Linux-образе не нужен (экономит ~87 МБ)
+tools/php
+
+# Git и локальное
+.git
+.claude
+.vscode
+.idea
+
+# Секреты и рабочие данные (создаются в контейнере/томе)
+storage/secret.key
+storage/database.sqlite
+storage/database.sqlite-shm
+storage/database.sqlite-wal
+storage/database.sqlite-journal
+storage/uploads/*
+storage/tmp/*
+
+# Крупные архивы и образцы документов (не нужны в образе)
+*.rar
+*.zip
+*.7z
+*.pdf
+/*.docx
+/*.xls
+/*.xlsx

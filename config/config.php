@@ -7,10 +7,10 @@
 return [
     'app_name' => 'Корпоративный портал',
 
-    // 'sqlite' (по умолчанию, для разработки/демо), 'pgsql' (рекомендуется для прод) или 'mysql'
-    // Сейчас зафиксировано на SQLite (старая рабочая БД storage/database.sqlite).
-    // Для PostgreSQL верните строку: 'driver' => getenv('DB_DRIVER') ?: 'sqlite',  и задайте DB_DRIVER=pgsql.
-    'driver' => 'sqlite',
+    // 'sqlite' (по умолчанию, для разработки/демо), 'pgsql' (рекомендуется для прод) или 'mysql'.
+    // Драйвер берётся из окружения DB_DRIVER (для Docker/прод задайте DB_DRIVER=pgsql);
+    // если переменная не задана — остаётся SQLite (локальная разработка, storage/database.sqlite).
+    'driver' => getenv('DB_DRIVER') ?: 'sqlite',
 
     'sqlite' => [
         'path' => __DIR__ . '/../storage/database.sqlite',

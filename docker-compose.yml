@@ -1,0 +1,42 @@
+# Корпоративный портал: приложение (PHP+Apache) + PostgreSQL.
+# Запуск:  docker compose up -d --build   →  http://СЕРВЕР:8080
+# Параметры берутся из .env (см. .env.example). СМЕНИТЕ пароль БД и пароль admin после старта.
+services:
+  app:
+    build: .
+    image: corp-portal:latest
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    environment:
+      DB_DRIVER: pgsql
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-uchet}
+      DB_USER: ${DB_USER:-uchet}
+      DB_PASS: ${DB_PASS:-change_me}
+      SEED_DEMO: ${SEED_DEMO:-1}      # 0 — не создавать демо-данные/пользователей
+    volumes:
+      - app_storage:/var/www/html/storage   # хранит secret.key и загрузки — ОБЯЗАТЕЛЬНО бэкапить
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-uchet}
+      POSTGRES_USER: ${DB_USER:-uchet}
+      POSTGRES_PASSWORD: ${DB_PASS:-change_me}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-uchet} -d ${DB_NAME:-uchet}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  app_storage:
+  pgdata:
