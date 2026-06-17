@@ -9,6 +9,7 @@ class Audit
     /** Карта маршрутов → понятное название действия. */
     private static array $labels = [
         '#^/logout$#'                       => 'Выход',
+        '#^/password/change$#'              => 'Смена пароля',
         '#^/manager/upload$#'               => 'Загрузка списка',
         '#^/manager/move$#'                 => 'Перераспределение досье',
         '#^/manager/distribute$#'           => 'Распределение досье',
@@ -136,7 +137,7 @@ class Audit
 
         // Параметры без чувствительных полей (пароли и API-ключи в журнал не пишутся).
         $params = $_POST;
-        unset($params['_csrf'], $params['password'], $params['openrouter_key'], $params['smtp_pass']);
+        unset($params['_csrf'], $params['password'], $params['password_confirm'], $params['openrouter_key'], $params['smtp_pass']);
         if (!empty($_FILES['file']['name'])) { $params['_file'] = $_FILES['file']['name']; }
         // обрезать длинные значения
         array_walk_recursive($params, function (&$v) {

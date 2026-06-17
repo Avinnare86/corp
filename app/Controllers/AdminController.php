@@ -397,8 +397,8 @@ class AdminController extends Controller
             }
         }
         Database::insert(
-            'INSERT INTO users (full_name, login, password_hash, role, position, position_id, oklad, rate_volume, schedule_type, allowance, does_anketas, does_operations, is_active)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)',
+            'INSERT INTO users (full_name, login, password_hash, role, position, position_id, oklad, rate_volume, schedule_type, allowance, does_anketas, does_operations, is_active, must_change_password)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,1)',
             [
                 $name, $login, password_hash($pass, PASSWORD_DEFAULT),
                 $this->input('role', 'employee'),
@@ -447,7 +447,8 @@ class AdminController extends Controller
 
         $newPass = $this->input('password');
         if ($newPass) {
-            Database::run('UPDATE users SET password_hash=? WHERE id=?',
+            // Сброшенный админом пароль — временный: потребовать смену при следующем входе.
+            Database::run('UPDATE users SET password_hash=?, must_change_password=1 WHERE id=?',
                 [password_hash($newPass, PASSWORD_DEFAULT), $id]);
         }
         flash('Данные сотрудника обновлены.');

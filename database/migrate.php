@@ -644,6 +644,12 @@ if (!columnExists('users', 'department_id')) {
     $pdo->exec('ALTER TABLE users ADD COLUMN department_id INT NULL');
     echo "OK  колонка users.department_id добавлена\n";
 }
+// Принудительная смена пароля при первом входе (пароль задан админом). Существующие
+// пользователи получают 1 — их текущий пароль задан админом, нужно сменить при следующем входе.
+if (!columnExists('users', 'must_change_password')) {
+    $pdo->exec('ALTER TABLE users ADD COLUMN must_change_password INT NOT NULL DEFAULT 1');
+    echo "OK  колонка users.must_change_password добавлена\n";
+}
 foreach ([
     'is_timekeeper_org'  => 'INT NOT NULL DEFAULT 0',  // табельщик по организации
     'timekeeper_dept_id' => 'INT NULL',                // табельщик конкретного отдела

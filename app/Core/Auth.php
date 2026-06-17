@@ -22,6 +22,8 @@ class Auth
             $_SESSION['user_id'] = (int) $user['id'];
             $_SESSION['role']    = $user['role'];
             $_SESSION['name']    = $user['full_name'];
+            // Требование сменить пароль при первом входе (пароль задан админом).
+            $_SESSION['must_pw_change'] = (int) ($user['must_change_password'] ?? 0);
             return true;
         }
         return false;

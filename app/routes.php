@@ -27,6 +27,8 @@ use App\Controllers\TabelController;
 $router->get('/login',  [AuthController::class, 'showLogin']);
 $router->post('/login', [AuthController::class, 'login']);
 $router->get('/logout', [AuthController::class, 'logout']);
+$router->get('/password/change',  [\App\Controllers\PasswordController::class, 'form']);
+$router->post('/password/change', [\App\Controllers\PasswordController::class, 'change']);
 $router->get('/',       [DashboardController::class, 'index']);
 
 // --- Личный кабинет специалиста ---

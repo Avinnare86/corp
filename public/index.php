@@ -20,6 +20,16 @@ require __DIR__ . '/../app/routes.php';
 // Автолог всех POST-действий (мутаций) залогиненных пользователей. /login логируется отдельно.
 $reqPath = rtrim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/', '/');
 if ($reqPath === '') { $reqPath = '/'; }
+
+// Принудительная смена пароля при первом входе (пароль задан админом):
+// пока пароль не сменён — доступна только страница смены, выход и статика.
+if (\App\Core\Auth::check() && !empty($_SESSION['must_pw_change'])
+    && strpos($reqPath, '/assets/') !== 0
+    && !in_array($reqPath, ['/password/change', '/logout'], true)) {
+    header('Location: /password/change');
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $reqPath !== '/login' && \App\Core\Auth::check()) {
     \App\Services\Audit::logRequest($reqPath);
 }

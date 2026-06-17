@@ -184,6 +184,7 @@ if ($uid) {
     </script>
     <div class="user">
         <span><?= e($authUser['full_name'] ?? '') ?></span>
+        <a href="/password/change" title="Сменить пароль">Пароль</a>
         <a class="btn-logout" href="/logout">Выход</a>
     </div>
     <?php endif; ?>
