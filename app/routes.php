@@ -196,6 +196,10 @@ $router->get('/memos/mgmt/new',     [\App\Controllers\StimulusController::class,
 $router->get('/memos/direct/new',   [\App\Controllers\StimulusController::class, 'createDirect']);
 $router->get('/memos/summary',      [\App\Controllers\StimulusController::class, 'summary']);
 $router->get('/memos/summary/export',[\App\Controllers\StimulusController::class, 'summaryExport']);
+$router->get('/memos/coverage',     [\App\Controllers\StimulusController::class, 'coverage']);
+$router->get('/memos/coverage/export',[\App\Controllers\StimulusController::class, 'coverageExport']);
+$router->get('/memos/print-report', [\App\Controllers\StimulusController::class, 'printReport']);
+$router->get('/memos/print-batch',  [\App\Controllers\StimulusController::class, 'printBatch']);
 $router->post('/memos/line/{id}/override', [\App\Controllers\StimulusController::class, 'override']);
 $router->post('/memos',             [\App\Controllers\StimulusController::class, 'store']);
 $router->get('/memos/{id}',         [\App\Controllers\StimulusController::class, 'show']);
@@ -257,6 +261,8 @@ $router->post('/admin/employees',         [AdminController::class, 'storeEmploye
 $router->post('/admin/employees/{id}/update', [AdminController::class, 'updateEmployee']);
 $router->post('/admin/employees/{id}/delete', [AdminController::class, 'deleteEmployee']);
 $router->post('/admin/employees/{id}/allowance', [AdminController::class, 'setAllowance']);
+$router->post('/admin/employees/{id}/allowance-grant', [AdminController::class, 'allowanceGrant']);
+$router->post('/admin/allowance-grants/{id}/cancel', [AdminController::class, 'cancelAllowanceGrant']);
 $router->get('/admin/comments',           [AdminController::class, 'comments']);
 $router->post('/admin/comments',          [AdminController::class, 'storeComment']);
 $router->post('/admin/comments/{id}/delete', [AdminController::class, 'deleteComment']);

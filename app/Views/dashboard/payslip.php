@@ -107,19 +107,18 @@ $doesOps = (int) ($user['does_operations'] ?? 0) === 1;
             <td class="num"><?= money($payroll['earned']) ?></td>
         </tr>
         <tr>
-            <td>Гарантированный минимум: оклад <?= money($payroll['oklad']) ?><?php if ($payroll['allowance']>0): ?> + надбавка <?= money($payroll['allowance']) ?><?php endif; ?>
+            <td>Гарантированный минимум: оклад <?= money($payroll['oklad']) ?>
                 <br><span class="muted">за отработанное время <?= (int)$payroll['worked_days'] ?>/<?= (int)$payroll['norm_days'] ?> <?= $unit ?><?php if ($payroll['rate_volume']!=1): ?>, ставка <?= e($payroll['rate_volume']) ?><?php endif; ?></span></td>
             <td class="num"><?= money($payroll['floor']) ?></td>
         </tr>
         <tr class="payslip-verdict">
             <td>
                 <?php if (!empty($payroll['norm_model'])): ?>
-                    ✅ Оклад+надбавка (гарантия) + доплата по тарифу за <?= (int)$payroll['anketa_above_count'] ?> анкет сверх норматива
+                    ✅ Оклад (гарантия) + доплата по тарифу за <?= (int)$payroll['anketa_above_count'] ?> анкет сверх норматива
                 <?php elseif ($payroll['reached_level']): ?>
                     ✅ Начислено по заработку — он выше гарантии
                 <?php else: ?>
                     ⓘ Заработок ниже гарантии — начислен гарантированный минимум
-                    <?php if ($payroll['allowance']>0): ?><br><span class="muted">надбавка выплачивается, но сделкой пока не отработана</span><?php endif; ?>
                 <?php endif; ?>
             </td>
             <td class="num"><strong><?= money($payroll['gross']) ?></strong></td>

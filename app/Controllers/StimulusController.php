@@ -418,15 +418,14 @@ class StimulusController extends Controller
         ]);
     }
 
-    /** Сформированный документ служебки (А4) со штампами ЭП — печать → PDF. */
-    public function printDoc(string $id): void
+    /** Данные одной служебки для печатной формы (А4). */
+    private function printData(int $id): ?array
     {
-        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
         $memo = Database::one(
             'SELECT m.*, d.name AS dept_name, d.curator_id, a.full_name AS author_name, a.position AS author_position
                FROM stimulus_memos m LEFT JOIN departments d ON d.id=m.department_id
                JOIN users a ON a.id=m.author_id WHERE m.id=?', [$id]);
-        if (!$memo) { http_response_code(404); exit('Служебка не найдена'); }
+        if (!$memo) { return null; }
         $lines = Database::all(
             'SELECT l.*, u.full_name, u.position FROM stimulus_memo_lines l JOIN users u ON u.id=l.user_id WHERE l.memo_id=? ORDER BY u.full_name', [$id]);
         $signers = [
@@ -435,20 +434,127 @@ class StimulusController extends Controller
             'director' => $memo['director_id'] ? Database::one('SELECT full_name, position FROM users WHERE id=?', [$memo['director_id']]) : null,
         ];
         $dirName = (string) Database::scalar("SELECT full_name FROM users WHERE id IN (SELECT user_id FROM user_roles WHERE role_slug='director') ORDER BY id LIMIT 1");
-        // Полный перечень выбранных оснований с нормативными процентами (раздел 4).
         $gids = array_values(array_filter(array_map('intval', explode(',', (string) $memo['grounds_ids']))));
         $groundRows = $gids
             ? Database::all('SELECT text, category, percent FROM stimulus_grounds WHERE id IN (' . implode(',', array_fill(0, count($gids), '?')) . ') ORDER BY percent DESC, category', $gids)
             : array_map(fn($t) => ['text' => $t, 'category' => '', 'percent' => 0], array_values(array_filter(array_map('trim', explode(';', (string) $memo['grounds'])))));
-        $this->view('stimulus/print', [
-            'title' => 'Служебка №' . ($memo['number'] ?: $memo['id']),
+        return [
             'memo' => $memo, 'lines' => $lines, 'signers' => $signers,
             'kind' => $memo['kind'] ?? 'staff',
             'source' => $memo['source_id'] ? Database::one('SELECT * FROM pay_sources WHERE id=?', [$memo['source_id']]) : null,
             'directorName' => $dirName ?: 'Д.Н. Семёнов',
             'grounds' => array_map(fn($g) => $g['text'], $groundRows),
             'groundRows' => $groundRows,
-        ], false);
+        ];
+    }
+
+    /** Сформированный документ служебки (А4) со штампами ЭП — печать → PDF. */
+    public function printDoc(string $id): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        $d = $this->printData((int) $id);
+        if (!$d) { http_response_code(404); exit('Служебка не найдена'); }
+        $this->view('stimulus/print', array_merge(['title' => 'Служебка №' . ($d['memo']['number'] ?: $d['memo']['id'])], $d), false);
+    }
+
+    /** Отчёт «служебки на печать»: по отделам, в разрезе ежемес./единовр., со ссылками на PDF. */
+    public function printReport(): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        $period = (string) $this->input('period', date('Y-m'));
+        $memos = $this->reportMemos($period);
+        $this->view('stimulus/print_report', [
+            'title' => 'Служебки на печать',
+            'memos' => $memos,
+            'period' => $period,
+            'periods' => array_column(Database::all('SELECT DISTINCT period FROM stimulus_memos ORDER BY period DESC'), 'period'),
+            'statusLabels' => self::STATUS,
+        ]);
+    }
+
+    /** Печать ВСЕХ подходящих служебок одной страницей (A4-страницы) → один PDF из браузера. */
+    public function printBatch(): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        $period = (string) $this->input('period', date('Y-m'));
+        $batch = [];
+        foreach ($this->reportMemos($period) as $m) {
+            $d = $this->printData((int) $m['id']);
+            if ($d) { $batch[] = $d; }
+        }
+        $this->view('stimulus/print_batch', ['title' => 'Служебки — печать пакетом', 'batch' => $batch, 'period' => $period], false);
+    }
+
+    /** Служебки за период (approved + проекты, не отклонённые) с учётом видимости — для отчётов печати. */
+    private function reportMemos(string $period): array
+    {
+        $where = "m.status <> 'rejected'"; $params = [];
+        if ($period !== '') { $where .= ' AND m.period=?'; $params[] = $period; }
+        $rows = Database::all(
+            "SELECT m.id, m.number, m.period, m.status, m.pay_kind, m.department_id, m.author_id,
+                    d.name AS dept_name, a.full_name AS author_name,
+                    (SELECT COUNT(*) FROM stimulus_memo_lines l WHERE l.memo_id=m.id) AS people
+               FROM stimulus_memos m LEFT JOIN departments d ON d.id=m.department_id JOIN users a ON a.id=m.author_id
+              WHERE $where ORDER BY d.name, m.pay_kind DESC, m.id", $params);
+        if ($this->seesAllStimulus()) { return $rows; }
+        $uid = (int) Auth::id();
+        return array_values(array_filter($rows, fn($m) =>
+            Org::isSuperiorOfDept($uid, $m['department_id'] ? (int) $m['department_id'] : null) || (int) $m['author_id'] === $uid));
+    }
+
+    /** Отчёт для бухгалтерии: помесячное покрытие сотрудников стимулом (ежемес./единовр.). */
+    public function coverage(): void
+    {
+        Auth::requireRole('accountant', 'director', 'admin');
+        $period = (string) $this->input('period', date('Y-m'));
+        $this->view('stimulus/coverage', [
+            'title' => 'Покрытие стимулом (бухгалтерия)',
+            'rows' => $this->coverageRows($period),
+            'period' => $period,
+            'periods' => array_column(Database::all('SELECT DISTINCT period FROM stimulus_memos ORDER BY period DESC'), 'period'),
+        ]);
+    }
+
+    /** Агрегаты покрытия: по месяцу+сотруднику, утв./проект × ежемес./единовр. (эффективная сумма с override). */
+    private function coverageRows(string $period): array
+    {
+        $where = "m.status <> 'rejected'"; $params = [];
+        if ($period !== '') { $where .= ' AND m.period=?'; $params[] = $period; }
+        $raw = Database::all(
+            "SELECT m.period, m.status, m.department_id, d.name AS dept_name, l.user_id, l.pay_kind, l.amount, l.id AS line_id,
+                    ur.full_name AS recipient,
+                    (SELECT o.new_amount FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1) AS ov_amount
+               FROM stimulus_memo_lines l JOIN stimulus_memos m ON m.id=l.memo_id JOIN users ur ON ur.id=l.user_id
+               LEFT JOIN departments d ON d.id=m.department_id
+              WHERE $where ORDER BY m.period DESC, d.name, ur.full_name", $params);
+        $agg = [];
+        foreach ($raw as $r) {
+            $key = $r['period'] . '|' . (int) $r['user_id'];
+            if (!isset($agg[$key])) {
+                $agg[$key] = ['period' => $r['period'], 'dept_name' => $r['dept_name'] ?: '—', 'recipient' => $r['recipient'],
+                    'm_appr' => 0.0, 'o_appr' => 0.0, 'm_proj' => 0.0, 'o_proj' => 0.0];
+            }
+            $eff = $r['ov_amount'] !== null ? (float) $r['ov_amount'] : (float) $r['amount'];
+            $appr = $r['status'] === 'approved';
+            if ($r['pay_kind'] === 'onetime') { $agg[$key][$appr ? 'o_appr' : 'o_proj'] += $eff; }
+            else { $agg[$key][$appr ? 'm_appr' : 'm_proj'] += $eff; }
+        }
+        foreach ($agg as &$a) { $a['total'] = round($a['m_appr'] + $a['o_appr'] + $a['m_proj'] + $a['o_proj'], 2); }
+        return array_values($agg);
+    }
+
+    /** Выгрузка отчёта покрытия в Excel. */
+    public function coverageExport(): void
+    {
+        Auth::requireRole('accountant', 'director', 'admin');
+        $rows = $this->coverageRows((string) $this->input('period', date('Y-m')));
+        $headers = ['Месяц', 'Отдел', 'Сотрудник', 'Ежемес. (утв.)', 'Единовр. (утв.)', 'Ежемес. (проект)', 'Единовр. (проект)', 'Итого'];
+        $data = array_map(fn($a) => [
+            $a['period'], $a['dept_name'], $a['recipient'],
+            round($a['m_appr'], 2), round($a['o_appr'], 2), round($a['m_proj'], 2), round($a['o_proj'], 2), $a['total'],
+        ], $rows);
+        \App\Services\Xlsx::download('stimulus-coverage-' . date('Y-m-d') . '.xlsx',
+            [['name' => 'Покрытие стимулом', 'headers' => $headers, 'rows' => $data]]);
     }
 
     /** Подпись очередного этапа (ПЭП — подтверждение паролем). */

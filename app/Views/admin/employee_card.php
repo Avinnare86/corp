@@ -110,17 +110,49 @@ $rate = rtrim(rtrim(number_format((float)$u['rate_volume'], 2, '.', ''), '0'), '
 <div>
     <?php if ($canSeeAllowance): ?>
     <section class="panel" style="border-left:4px solid #26368B">
-        <h2 style="margin-top:0">Надбавка к окладу</h2>
+        <h2 style="margin-top:0">Надбавка (через стимул)</h2>
+        <p class="muted" style="margin-top:0;font-size:.82rem">Надбавка назначается на период и формирует ежемесячные служебки-проекты о стимуле (основания — из списка). Оплата идёт по утверждённым служебкам; ранее заданная плоская надбавка (<?= money($u['allowance'] ?? 0) ?>) в ЗП больше не учитывается.</p>
+        <?php if (!empty($allowanceGrants)): ?>
+        <table class="table" style="margin-bottom:10px">
+            <thead><tr><th>Период</th><th class="num">₽/мес</th><th class="num">Проектов</th><th class="num">Утв.</th><th>Статус</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($allowanceGrants as $g): ?>
+                <tr>
+                    <td class="muted"><?= e(substr((string)$g['period_from'],0,7)) ?> — <?= e(substr((string)$g['period_to'],0,7)) ?></td>
+                    <td class="num"><?= money($g['amount']) ?></td>
+                    <td class="num"><?= (int)$g['memos'] ?></td>
+                    <td class="num"><?= (int)$g['approved'] ?></td>
+                    <td><span class="tag <?= $g['status']==='active'?'':'off' ?>"><?= $g['status']==='active'?'действует':'отменён' ?></span></td>
+                    <td><?php if ($canEditAllowance && $g['status']==='active'): ?>
+                        <form method="post" action="/admin/allowance-grants/<?= (int)$g['id'] ?>/cancel" class="inline" onsubmit="return confirm('Отменить назначение? Неутверждённые служебки-проекты будут удалены.')"><?= csrf_field() ?><button class="btn btn-mini btn-danger">Отменить</button></form>
+                    <?php endif; ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php endif; ?>
         <?php if ($canEditAllowance): ?>
-            <form method="post" action="/admin/employees/<?= (int)$u['id'] ?>/allowance" class="form-inline" style="align-items:flex-end">
+            <form method="post" action="/admin/employees/<?= (int)$u['id'] ?>/allowance-grant" class="grid-form">
                 <?= csrf_field() ?>
-                <label>Надбавка, ₽/мес<input type="number" step="0.01" name="allowance" value="<?= e($u['allowance'] ?? 0) ?>" style="width:150px"></label>
-                <button class="btn btn-primary">Сохранить надбавку</button>
+                <label>Надбавка, ₽/мес<input type="number" step="0.01" name="amount" required></label>
+                <label>Источник
+                    <select name="source_id"><option value="">—</option>
+                        <?php foreach (($paySources ?? []) as $s): ?><option value="<?= (int)$s['id'] ?>"><?= e($s['name']) ?></option><?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Период с<input type="month" name="period_from" value="<?= e(date('Y-m')) ?>" required></label>
+                <label>по<input type="month" name="period_to" value="<?= e(date('Y-m')) ?>" required></label>
+                <fieldset style="grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:8px">
+                    <legend class="muted" style="font-size:.8rem">Основания (из списка стимула) — их суммарный % должен покрывать % надбавки</legend>
+                    <?php foreach (($stimGrounds ?? []) as $gr): $p = rtrim(rtrim(number_format((float)$gr['percent'],1,'.',''),'0'),'.'); ?>
+                        <label class="chk" style="display:block"><input type="checkbox" name="grounds[]" value="<?= (int)$gr['id'] ?>">
+                            <?= e($gr['text']) ?> <span class="muted">(<?= e($gr['category']) ?><?= (float)$gr['percent']>0 ? ', до '.e($p).'%' : '' ?>)</span></label>
+                    <?php endforeach; ?>
+                </fieldset>
+                <div style="grid-column:1/-1"><button class="btn btn-primary">Назначить надбавку (создать служебки)</button></div>
             </form>
-            <p class="muted" style="margin:6px 0 0;font-size:.78rem">Надбавку устанавливает бухгалтерия. Она входит в гарантированную часть ЗП.</p>
         <?php else: ?>
-            <p style="margin:0">Текущая надбавка: <strong><?= money($u['allowance'] ?? 0) ?></strong>/мес</p>
-            <p class="muted" style="margin:6px 0 0;font-size:.78rem">Установлена бухгалтерией. Просмотр — для руководителей и директора.</p>
+            <p class="muted" style="margin:6px 0 0;font-size:.78rem">Назначает бухгалтерия. Просмотр — для руководителей и директора.</p>
         <?php endif; ?>
     </section>
     <?php endif; ?>

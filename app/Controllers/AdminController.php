@@ -355,6 +355,12 @@ class AdminController extends Controller
             'canManage' => $canManage,
             'canSeeAllowance' => $canSeeAllowance,
             'canEditAllowance' => $canEditAllowance,
+            'stimGrounds' => Database::all('SELECT * FROM stimulus_grounds WHERE is_active=1 AND category IN (?,?) ORDER BY category, percent DESC, text', \App\Controllers\StimulusController::CATS_STAFF),
+            'paySources' => Database::all('SELECT * FROM pay_sources ORDER BY id'),
+            'allowanceGrants' => Database::all(
+                "SELECT g.*, (SELECT COUNT(*) FROM stimulus_memos m WHERE m.grant_id=g.id) AS memos,
+                        (SELECT COUNT(*) FROM stimulus_memos m WHERE m.grant_id=g.id AND m.status='approved') AS approved
+                   FROM allowance_grants g WHERE g.user_id=? ORDER BY g.id DESC", [$u['id']]),
             'allPositions' => Database::all('SELECT * FROM positions WHERE is_active = 1 ORDER BY title'),
             'departments' => Database::all('SELECT id, name FROM departments ORDER BY name'),
             'rolesCatalog' => Database::all('SELECT * FROM roles ORDER BY sort'),
@@ -479,6 +485,35 @@ class AdminController extends Controller
         Database::run('UPDATE users SET allowance = ? WHERE id = ?', [$allow, $id]);
         flash('Надбавка обновлена.');
         $this->redirect('/admin/employees/' . (int) $id);
+    }
+
+    /** Назначить надбавку (стимул) на период → ежемесячные служебки-проекты. */
+    public function allowanceGrant(string $id): void
+    {
+        Auth::requireRole('admin', 'accountant');
+        Auth::verifyCsrf();
+        $res = \App\Services\AllowanceService::grant([
+            'user_id' => (int) $id,
+            'amount' => $this->input('amount', 0),
+            'period_from' => (string) $this->input('period_from'),
+            'period_to' => (string) $this->input('period_to'),
+            'grounds_ids' => $_POST['grounds'] ?? [],
+            'source_id' => $this->input('source_id'),
+            'assigned_by' => (int) Auth::id(),
+        ]);
+        flash($res['message'], $res['ok'] ? 'success' : 'error');
+        $this->redirect('/admin/employees/' . (int) $id);
+    }
+
+    /** Отменить назначение надбавки (удалить неутверждённые проекты). */
+    public function cancelAllowanceGrant(string $id): void
+    {
+        Auth::requireRole('admin', 'accountant');
+        Auth::verifyCsrf();
+        $g = Database::one('SELECT user_id FROM allowance_grants WHERE id=?', [(int) $id]);
+        $res = \App\Services\AllowanceService::cancel((int) $id);
+        flash($res['message'], $res['ok'] ? 'success' : 'error');
+        $this->redirect('/admin/employees/' . (int) ($g['user_id'] ?? 0));
     }
 
     // ---------- Справочник стран ----------

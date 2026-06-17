@@ -47,10 +47,11 @@ class PayrollService
         $workedDays = $autoWorked > 0 ? $autoWorked : ($ts ? (int) $ts['worked_days'] : 0);
         $prorate = $normDays > 0 ? min(1.0, $workedDays / $normDays) : 0.0;
 
-        // Гарантированная база (пропорц. времени).
+        // Гарантированная база (пропорц. времени). Надбавка переведена на стимул (ежемесячные
+        // служебки-стимул) и в гарантию (floor) больше НЕ входит — оплачивается через stim_monthly.
         $okladGuaranteed = round($oklad * $rate * $prorate, 2);
-        $allowGuaranteed = round($allowance * $prorate, 2);
-        $floor = round($okladGuaranteed + $allowGuaranteed, 2);
+        $allowGuaranteed = 0.0; // legacy: users.allowance больше не оплачивается напрямую
+        $floor = round($okladGuaranteed, 2);
 
         // --- Сделка: анкеты (назначенные менеджером и отмеченные проверенными) ---
         $norm = null;

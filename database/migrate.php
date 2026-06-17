@@ -840,6 +840,11 @@ if (!columnExists('stimulus_memos', 'direct_tier')) {
     $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN direct_tier VARCHAR(12) NULL"); // director|deputy
     echo "OK  колонка stimulus_memos.direct_tier добавлена\n";
 }
+// Связь сгенерированной служебки-проекта с назначением надбавки.
+if (!columnExists('stimulus_memos', 'grant_id')) {
+    $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN grant_id INT NULL");
+    echo "OK  колонка stimulus_memos.grant_id добавлена\n";
+}
 if (!columnExists('dorabotka_comments', 'category')) {
     $pdo->exec("ALTER TABLE dorabotka_comments ADD COLUMN category VARCHAR(100) NOT NULL DEFAULT 'Прочее'");
     echo "OK  колонка dorabotka_comments.category добавлена\n";
@@ -956,6 +961,21 @@ $extra['stimulus_overrides'] = "CREATE TABLE IF NOT EXISTS stimulus_overrides (
     by_user_id   INT NOT NULL,           -- кто снизил/отменил (вышестоящий)
     reason       TEXT NULL,
     created_at   TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
+// Назначение надбавки на период (через стимул): порождает ежемесячные служебки-проекты.
+$extra['allowance_grants'] = "CREATE TABLE IF NOT EXISTS allowance_grants (
+    id $ID,
+    user_id     INT NOT NULL,
+    amount      $MONEY NOT NULL DEFAULT 0,    -- надбавка в месяц, ₽
+    period_from DATE NOT NULL,
+    period_to   DATE NOT NULL,
+    grounds_ids VARCHAR(255) DEFAULT '',      -- id оснований из stimulus_grounds через запятую
+    grounds     TEXT NULL,                    -- склейка текстов оснований
+    source_id   INT NULL,                     -- источник выплат (pay_sources)
+    assigned_by INT NULL,
+    status      VARCHAR(12) NOT NULL DEFAULT 'active', -- active | canceled
+    created_at  TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
 foreach ($extra as $name => $sql) {

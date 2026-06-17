@@ -84,6 +84,8 @@ if ($uid) {
         $memoInbox = \App\Controllers\StimulusController::inboxCount((int) $uid);
         $g = [['/memos', 'Служебки о стимуле', $memoInbox], ['/memos/summary', 'Сводная по стимулу', 0]];
         if ($can('director', 'deputy_director')) { $g[] = ['/memos/direct/new', 'Назначить напрямую', 0]; }
+        $g[] = ['/memos/print-report', 'Служебки на печать', 0];
+        if ($can('accountant', 'director')) { $g[] = ['/memos/coverage', 'Покрытие (бухгалтерия)', 0]; }
         $menu['Стимул'] = $g;
     }
     // Финансы — только менеджер проекта финансы

@@ -13,13 +13,14 @@ $stamp = function($who, $s, $at, $type, $hash) {
 };
 ?>
 <!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8"><title>Служебка №<?= e($memo['number'] ?: $memo['id']) ?></title>
+<html lang="ru"><head><meta charset="utf-8"><title>Служебки — печать пакетом</title>
 <style>
   body{font-family:'Times New Roman',serif;font-size:13pt;color:#000;background:#888;margin:0;padding:24px}
   .toolbar{font-family:Arial;font-size:11pt;background:#f0f2f8;border-radius:8px;padding:10px 14px;margin:0 auto 16px;max-width:820px;display:flex;gap:10px;align-items:center}
   .toolbar a,.toolbar button{font-family:Arial;padding:8px 14px;border-radius:6px;border:1px solid #99a;background:#fff;cursor:pointer;text-decoration:none;color:#223}
   .toolbar .primary{background:#26368B;color:#fff;border-color:#26368B}
-  .sheet{background:#fff;max-width:820px;margin:0 auto;padding:28mm 20mm;box-shadow:0 4px 24px rgba(0,0,0,.4);box-sizing:border-box}
+  .sheet{background:#fff;max-width:820px;margin:0 auto 24px;padding:28mm 20mm;box-shadow:0 4px 24px rgba(0,0,0,.4);box-sizing:border-box;page-break-after:always}
+  .sheet:last-of-type{page-break-after:auto}
   .addr{margin-left:55%;text-align:left;margin-bottom:24px;line-height:1.4}
   h1{text-align:center;font-size:14pt;margin:8px 0 2px;text-transform:uppercase;letter-spacing:.02em}
   .sub{text-align:center;font-style:italic;margin:0 0 4px}
@@ -29,18 +30,23 @@ $stamp = function($who, $s, $at, $type, $hash) {
   table.t th,table.t td{border:1px solid #000;padding:5px 8px;vertical-align:top}
   table.t th{background:#f3f3f3;text-align:center;font-weight:bold}
   table.t td.r{text-align:right;white-space:nowrap}
-  .sign-row{margin-top:28px;display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
   .stamp{border:2px solid #1a56b8;border-radius:10px;padding:10px 14px;color:#1a56b8;font-family:Arial;font-size:9pt;line-height:1.5;margin:14px 0;max-width:430px}
   .stamp b{font-size:10pt;letter-spacing:.03em}
   .status{font-family:Arial;font-size:10pt;color:#666;text-align:center;margin-top:10px}
-  @media print{ body{background:#fff;padding:0} .toolbar{display:none} .sheet{box-shadow:none;max-width:none;padding:18mm} }
+  @media print{ body{background:#fff;padding:0} .toolbar{display:none} .sheet{box-shadow:none;max-width:none;padding:18mm;margin:0} }
 </style></head>
 <body>
 <div class="toolbar">
-    <a href="/memos/<?= (int)$memo['id'] ?>">← К служебке</a>
-    <button class="primary" onclick="window.print()">⬇ Скачать PDF / Печать</button>
-    <span>Сформированный документ. ЭП проставляется по мере подписания.</span>
+    <a href="/memos/print-report?period=<?= e($period) ?>">← К отчёту</a>
+    <button class="primary" onclick="window.print()">⬇ Скачать все PDF / Печать</button>
+    <span>Служебок: <?= count($batch) ?> · период <?= e($period ?: 'все') ?></span>
 </div>
-
-<?php include __DIR__ . '/_memo_sheet.php'; ?>
+<?php if (!$batch): ?>
+    <div class="sheet">Служебок за период не найдено.</div>
+<?php endif; ?>
+<?php foreach ($batch as $b):
+    $memo = $b['memo']; $lines = $b['lines']; $kind = $b['kind']; $source = $b['source'];
+    $directorName = $b['directorName']; $grounds = $b['grounds']; $groundRows = $b['groundRows']; $signers = $b['signers'];
+    include __DIR__ . '/_memo_sheet.php';
+endforeach; ?>
 </body></html>
