@@ -94,6 +94,7 @@ class InspectionController extends Controller
 
         $verdict = $this->input('verdict'); // 'correct' | 'error'
         $errorTypeId = $this->input('error_type_id');
+        $comment = trim((string) $this->input('comment', ''));
         $isCorrect = $verdict === 'correct';
         $errorTypeId = ($isCorrect || !$errorTypeId) ? null : (int) $errorTypeId;
 
@@ -102,7 +103,20 @@ class InspectionController extends Controller
             $this->redirect('/inspect/queue?date=' . urlencode($this->workDateOf($inspection)));
         }
 
-        PenaltyService::applyReview($inspection, $isCorrect, $errorTypeId, (int) Auth::id());
+        // Что было до сохранения — чтобы не слать повторное уведомление при идентичной правке.
+        $wasError    = $inspection['is_correct'] !== null && (int) $inspection['is_correct'] === 0;
+        $oldType     = $inspection['error_type_id'] !== null ? (int) $inspection['error_type_id'] : null;
+        $oldComment  = (string) ($inspection['controller_comment'] ?? '');
+
+        PenaltyService::applyReview($inspection, $isCorrect, $errorTypeId, (int) Auth::id(), $comment);
+
+        // Уведомить проверявшего сразу при фиксации ошибки (новой или уточнённой).
+        if (!$isCorrect) {
+            $changed = !$wasError || $oldType !== $errorTypeId || $oldComment !== $comment;
+            if ($changed) {
+                NotificationService::notifyInspectionError((int) $inspection['id'], $this->workDateOf($inspection));
+            }
+        }
 
         $this->redirect('/inspect/queue?date=' . urlencode($this->workDateOf($inspection)));
     }

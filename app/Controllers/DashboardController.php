@@ -41,6 +41,7 @@ class DashboardController extends Controller
             'title'    => 'Расчётный листок',
             'user'     => $user,
             'payroll'  => $payroll,
+            'penaltyRows' => !empty($payroll['penalty_details_flag']) ? PayrollService::penaltyDetails((int) $user['id'], $period) : [],
             'myRank'   => $myRank,
             'totalEmployees' => count($ranking),
             'unread'   => NotificationService::unreadCount((int) $user['id']),

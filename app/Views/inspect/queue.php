@@ -38,11 +38,17 @@
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <input type="text" name="comment" class="comment-input"
+                               placeholder="Комментарий к ошибке (необязательно) — придёт сотруднику"
+                               value="<?= e($it['controller_comment'] ?? '') ?>">
                         <button class="btn btn-mini btn-primary">Сохранить</button>
                         <?php if ($reviewed): ?>
                             <span class="verdict <?= $isError ? 'bad' : 'good' ?>">
                                 <?= $isError ? 'Ошибка: ' . e($it['error_name']) . ' · −' . money($it['penalty_amount']) . ($it['occurrence'] > 1 ? ' (повтор №' . (int) $it['occurrence'] . ')' : '') : 'Корректно' ?>
                             </span>
+                            <?php if ($isError && !empty($it['controller_comment'])): ?>
+                                <span class="muted comment-saved">💬 <?= e($it['controller_comment']) ?></span>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </form>
                 </td>

@@ -39,16 +39,22 @@ class PayrollService
 
         // Табель: норма (админ). Отработано — из учёта явки (открытых дней), иначе из табеля.
         $ts = Database::one('SELECT * FROM timesheets WHERE employee_id = ? AND period = ?', [$employeeId, $period]);
-        $normDays   = $ts ? (int) $ts['norm_days'] : 0;
+        // «Количество рабочих дней»: норма из табеля, иначе календарные рабочие дни месяца (никогда 0).
+        $normDays = ($ts && (int) $ts['norm_days'] > 0) ? (int) $ts['norm_days'] : self::calendarWorkingDays($period);
+        // «Дней отработано»: фактическая явка (открытые дни), иначе из табеля.
         $autoWorked = (int) Database::scalar(
             "SELECT COUNT(*) FROM work_days WHERE employee_id = ? AND substr(work_date,1,7) = ? AND opened_at IS NOT NULL",
             [$employeeId, $period]
         );
         $workedDays = $autoWorked > 0 ? $autoWorked : ($ts ? (int) $ts['worked_days'] : 0);
-        $prorate = $normDays > 0 ? min(1.0, $workedDays / $normDays) : 0.0;
+        // Гарантия исходит из ПОЛНОГО месяца (prorate=1), пока табель ЯВНО не зафиксирует неполный
+        // месяц (worked_days < norm_days, напр. приём/увольнение/отпуск). Это устраняет «40 ₽» при
+        // отсутствии явки/табеля: ЗП не опускается ниже минимума за полный месяц.
+        $tsNorm   = $ts ? (int) $ts['norm_days'] : 0;
+        $tsWorked = $ts ? (int) $ts['worked_days'] : 0;
+        $prorate  = ($ts && $tsNorm > 0 && $tsWorked < $tsNorm) ? max(0.0, min(1.0, $tsWorked / $tsNorm)) : 1.0;
 
-        // Гарантированная база (пропорц. времени). Надбавка переведена на стимул (ежемесячные
-        // служебки-стимул) и в гарантию (floor) больше НЕ входит — оплачивается через stim_monthly.
+        // Гарантированная база по окладу (пропорц. фактору). Надбавка переведена на стимул.
         $okladGuaranteed = round($oklad * $rate * $prorate, 2);
         $allowGuaranteed = 0.0; // legacy: users.allowance больше не оплачивается напрямую
         $floor = round($okladGuaranteed, 2);
@@ -157,29 +163,76 @@ class PayrollService
                      + self::visaDeductionSum($employeeId, $period, 26, 31);            // уйдёт в следующий месяц
         $penalties = round($penThis + $penCarryIn, 2);
 
-        // --- Стимул по утверждённым служебкам за период ---
+        // --- Стимул по утверждённым служебкам за период (по цели: за анкеты / за визы / за другое) ---
         $memoLines = Database::all(
-            "SELECT l.amount, l.pay_kind,
+            "SELECT l.amount, l.pay_kind, l.purpose,
                     (SELECT o.new_amount FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1) AS override_amount
                FROM stimulus_memo_lines l
                JOIN stimulus_memos m ON m.id = l.memo_id
               WHERE l.user_id = ? AND m.period = ? AND m.status = 'approved'",
             [$employeeId, $period]);
-        $stimMonthly = 0.0; $stimOnetime = 0.0;
+        $gAnk = 0.0; $gViz = 0.0; $gOth = 0.0; $stimOnetime = 0.0;
         foreach ($memoLines as $ml) {
             // эффективная сумма = последняя корректировка вышестоящего (снижение/отмена), иначе назначенная
             $amt = $ml['override_amount'] !== null ? (float) $ml['override_amount'] : (float) $ml['amount'];
-            if ($ml['pay_kind'] === 'onetime') { $stimOnetime += $amt; }
-            else { $stimMonthly += round($amt * $prorate, 2); } // ежемесячный — пропорц. отработке
+            if ($ml['pay_kind'] === 'onetime') { $stimOnetime += $amt; continue; } // разовый — полной суммой
+            $amt = $amt * $prorate;                                                 // ежемесячный — тем же фактором, что оклад
+            $purpose = $ml['purpose'] ?? 'other';
+            if ($purpose === 'anketas')   { $gAnk += $amt; }
+            elseif ($purpose === 'visas') { $gViz += $amt; }
+            else                          { $gOth += $amt; }
         }
-        $stimMonthly = round($stimMonthly, 2); $stimOnetime = round($stimOnetime, 2);
-        $stimTotal = round($stimMonthly + $stimOnetime, 2);
+        $gAnk = round($gAnk, 2); $gViz = round($gViz, 2); $gOth = round($gOth, 2);
+        $stimGuaranteed = round($gAnk + $gViz + $gOth, 2);       // гарантированные ежемесячные
+        $stimOnetime    = round($stimOnetime, 2);
+        $stimMonthly    = $stimGuaranteed;                       // legacy-ключ
+        $stimTotal      = round($stimMonthly + $stimOnetime, 2); // legacy-ключ
 
-        // Штрафы не могут опустить итог ниже гарантированного минимума (floor); стимул добавляется сверху.
-        $afterPenalty = round(max($floor, $gross - $penalties), 2);
-        $penaltyEffective = round($gross - $afterPenalty, 2);
-        $penaltyCapped = $penaltyEffective + 0.005 < $penalties;
-        $total = round($afterPenalty + $stimTotal, 2);
+        // ===== Модель «минимум + сверх минимума» (3 вида начислений) =====
+        $sAnk   = round($anketaSum, 2);  // сделка-анкеты (классика: все проверенные; norm: сверхнорматив)
+        $sViz   = round($opsSum, 2);     // сделка-операции (визы)
+        $sTotal = round($sAnk + $sViz, 2);
+        $okladCap = $okladGuaranteed;    // блок 1 = оклад × ставка × prorate
+
+        // Блок 1 — Начислено оклад. Классика: сделка заполняет оклад. Norm: оклад за выполнение норматива,
+        // вся сверхнормативная сделка + операции — это overflow «сверх минимума».
+        if ($normModel) {
+            $b1Sdelka = 0.0;
+            $b1Dopl   = $okladCap;
+            $overflowTotal = $sTotal;
+        } else {
+            $b1Sdelka = round(min($sTotal, $okladCap), 2);
+            $b1Dopl   = round($okladCap - $b1Sdelka, 2);
+            $overflowTotal = round(max(0.0, $sTotal - $okladCap), 2);
+        }
+        // Распределение overflow по источникам (для сопоставления с целью стимула); сосед — вычитанием.
+        $ovfAnk = ($sTotal > 0) ? round($sAnk * $overflowTotal / $sTotal, 2) : 0.0;
+        $ovfViz = round($overflowTotal - $ovfAnk, 2);
+
+        // Блок 2 — Ежемесячные стимулирующие (гарантированы): сделка-overflow закрывает цель,
+        // нехватка = доплата до минимума; «за другое» — всегда доплата (сделкой не зарабатывается).
+        $b2AnkSdelka = round(min($ovfAnk, $gAnk), 2);
+        $b2AnkDopl   = round($gAnk - $b2AnkSdelka, 2);
+        $b2VizSdelka = round(min($ovfViz, $gViz), 2);
+        $b2VizDopl   = round($gViz - $b2VizSdelka, 2);
+        $b2OthDopl   = $gOth;
+        $absorbed    = round($b2AnkSdelka + $b2VizSdelka, 2);
+        $leftover    = round($overflowTotal - $absorbed, 2); // неабсорбированная сделка сверх оклада и целей
+
+        // Блок 3 — Единовременные (аддитивно): разовый стимул + неабсорбированная сделка + фикс-подработки.
+        $b3Onetime  = $stimOnetime;
+        $b3Leftover = $leftover;
+        $b3Fix      = $fixSum;
+        $b3Total    = round($b3Onetime + $b3Leftover + $b3Fix, 2);
+
+        // Минимум (гарантия) и сверх минимума.
+        $minTotal  = round($okladCap + $stimGuaranteed, 2);
+        $overTotal = $b3Total;
+
+        // Снижение за ошибки (как раньше), но защищаем минимум целиком: штраф ест только «сверх».
+        $penaltyEffective = round(min($penalties, $overTotal), 2);
+        $penaltyCapped    = $penaltyEffective + 0.005 < $penalties;
+        $total = round($minTotal + ($overTotal - $penaltyEffective), 2);
 
         return [
             'period'           => $period,
@@ -226,10 +279,96 @@ class PayrollService
             'stim_monthly'     => $stimMonthly,
             'stim_onetime'     => $stimOnetime,
             'stim_total'       => $stimTotal,
+            // ===== новая модель: минимум + сверх минимума, по 3 видам начислений =====
+            'min_total'        => $minTotal,
+            'over_total'       => $overTotal,
+            'oklad_cap'        => $okladCap,
+            's_ank'            => $sAnk,
+            's_viz'            => $sViz,
+            's_total'          => $sTotal,
+            'b1_sdelka'        => $b1Sdelka,
+            'b1_dopl'          => $b1Dopl,
+            'g_ank'            => $gAnk,
+            'g_viz'            => $gViz,
+            'g_oth'            => $gOth,
+            'stim_guaranteed'  => $stimGuaranteed,
+            'ovf_total'        => $overflowTotal,
+            'ovf_ank'          => $ovfAnk,
+            'ovf_viz'          => $ovfViz,
+            'absorbed'         => $absorbed,
+            'leftover_overflow'=> $leftover,
+            'b2_ank_sdelka'    => $b2AnkSdelka,
+            'b2_ank_dopl'      => $b2AnkDopl,
+            'b2_viz_sdelka'    => $b2VizSdelka,
+            'b2_viz_dopl'      => $b2VizDopl,
+            'b2_oth_dopl'      => $b2OthDopl,
+            'b3_onetime'       => $b3Onetime,
+            'b3_leftover'      => $b3Leftover,
+            'b3_fix'           => $b3Fix,
+            'b3_total'         => $b3Total,
+            'penalty_details_flag' => $penalties > 0.0049,
             'total'            => $total,
             // совместимость со старыми вызовами
             'dossier_count'    => $anketaCount,
         ];
+    }
+
+    /** Календарные рабочие дни месяца (Пн–Пт) — норма по умолчанию, если нет табеля. Никогда 0. */
+    private static function calendarWorkingDays(string $period): int
+    {
+        $parts = explode('-', $period);
+        $y = (int) ($parts[0] ?? 0); $m = (int) ($parts[1] ?? 0);
+        if ($y < 1 || $m < 1 || $m > 12) { return 21; }
+        $days = (int) date('t', mktime(0, 0, 0, $m, 1, $y));
+        $cnt = 0;
+        for ($d = 1; $d <= $days; $d++) {
+            if ((int) date('N', mktime(0, 0, 0, $m, $d, $y)) <= 5) { $cnt++; } // 1=Пн..5=Пт
+        }
+        return $cnt > 0 ? $cnt : 21;
+    }
+
+    /**
+     * Детализация снижений за ошибки за период (для раскрытия в расчётном листке):
+     * штрафы контролёра по анкетам (inspections) + визовые вычеты (visa_deductions).
+     */
+    public static function penaltyDetails(int $employeeId, string $period): array
+    {
+        $rows = [];
+        $ins = Database::all(
+            "SELECT ai.reg_number, ai.country_code, " . Database::txt('ai.checked_at') . " AS checked_at,
+                    i.penalty_amount, i.occurrence, et.name AS error_name
+               FROM inspections i
+               JOIN assignment_items ai ON ai.id = i.dossier_id
+               LEFT JOIN error_types et ON et.id = i.error_type_id
+              WHERE i.employee_id = ? AND i.is_correct = 0 AND substr(ai.checked_at,1,7) = ?
+              ORDER BY ai.checked_at",
+            [$employeeId, $period]
+        );
+        foreach ($ins as $r) {
+            $rows[] = [
+                'date'   => substr((string) $r['checked_at'], 0, 10),
+                'kind'   => 'anketa',
+                'title'  => trim((string) ($r['reg_number'] ?? '') . ' ' . (string) ($r['country_code'] ?? '')),
+                'reason' => ($r['error_name'] ?? 'ошибка') . ((int) $r['occurrence'] > 1 ? " (повтор №{$r['occurrence']})" : ''),
+                'amount' => (float) $r['penalty_amount'],
+            ];
+        }
+        $vis = Database::all(
+            "SELECT amount, reason, " . Database::txt('created_at') . " AS created_at
+               FROM visa_deductions WHERE employee_id = ? AND period = ? ORDER BY created_at",
+            [$employeeId, $period]
+        );
+        foreach ($vis as $r) {
+            if ((float) $r['amount'] <= 0) { continue; } // 0 = не его вина, в снижение не идёт
+            $rows[] = [
+                'date'   => substr((string) $r['created_at'], 0, 10),
+                'kind'   => 'visa',
+                'title'  => 'Виза — возврат на доработку (отказ МИД)',
+                'reason' => (string) ($r['reason'] ?? ''),
+                'amount' => (float) $r['amount'],
+            ];
+        }
+        return $rows;
     }
 
     /** Сумма сделки (анкеты по тарифам + операции) за период с фильтром дня DD от..до. */

@@ -15,7 +15,7 @@ class PenaltyService
      * Зафиксировать результат проверки анкеты.
      * При ошибке считает снижение с эскалацией за повторы того же типа у сотрудника в периоде.
      */
-    public static function applyReview(array $inspection, bool $isCorrect, ?int $errorTypeId, int $controllerId): void
+    public static function applyReview(array $inspection, bool $isCorrect, ?int $errorTypeId, int $controllerId, ?string $comment = null): void
     {
         $penalty = 0.0;
         $occurrence = 0;
@@ -47,12 +47,15 @@ class PenaltyService
             $penalty = round($base * $mult, 2);
         }
 
+        // Комментарий хранится только у ошибки; для корректной анкеты сбрасывается.
+        $commentToStore = (!$isCorrect && $comment !== null && $comment !== '') ? $comment : null;
+
         Database::run(
             'UPDATE inspections
                 SET is_correct = ?, error_type_id = ?, penalty_amount = ?, occurrence = ?,
-                    controller_id = ?, reviewed_at = ?
+                    controller_id = ?, reviewed_at = ?, controller_comment = ?
               WHERE id = ?',
-            [$isCorrect ? 1 : 0, $isCorrect ? null : $errorTypeId, $penalty, $occurrence, $controllerId, date('Y-m-d H:i:s'), $inspection['id']]
+            [$isCorrect ? 1 : 0, $isCorrect ? null : $errorTypeId, $penalty, $occurrence, $controllerId, date('Y-m-d H:i:s'), $commentToStore, $inspection['id']]
         );
 
         // Брак: анкета встаёт в очередь на повторную проверку ДРУГИМ специалистом —

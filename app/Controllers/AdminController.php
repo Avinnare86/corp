@@ -499,6 +499,7 @@ class AdminController extends Controller
             'period_to' => (string) $this->input('period_to'),
             'grounds_ids' => $_POST['grounds'] ?? [],
             'source_id' => $this->input('source_id'),
+            'purpose' => (string) $this->input('purpose', 'other'),
             'assigned_by' => (int) Auth::id(),
         ]);
         flash($res['message'], $res['ok'] ? 'success' : 'error');

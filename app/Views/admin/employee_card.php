@@ -142,6 +142,13 @@ $rate = rtrim(rtrim(number_format((float)$u['rate_volume'], 2, '.', ''), '0'), '
                 </label>
                 <label>Период с<input type="month" name="period_from" value="<?= e(date('Y-m')) ?>" required></label>
                 <label>по<input type="month" name="period_to" value="<?= e(date('Y-m')) ?>" required></label>
+                <label>Цель (для расчёта ЗП)
+                    <select name="purpose">
+                        <option value="other">за другое (гарантированная доплата)</option>
+                        <option value="anketas">за анкеты (зарабатывается сделкой)</option>
+                        <option value="visas">за визы (зарабатывается сделкой)</option>
+                    </select>
+                </label>
                 <fieldset style="grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:8px">
                     <legend class="muted" style="font-size:.8rem">Основания (из списка стимула) — их суммарный % должен покрывать % надбавки</legend>
                     <?php foreach (($stimGrounds ?? []) as $gr): $p = rtrim(rtrim(number_format((float)$gr['percent'],1,'.',''),'0'),'.'); ?>

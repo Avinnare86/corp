@@ -96,7 +96,7 @@
         </div>
         <?php endif; ?>
         <table class="table" id="memoLines">
-            <thead><tr><th>Работник</th><?php if ($showPiece): ?><th class="num">Квота</th><th class="num">Визы</th><?php endif; ?><th>Оклад×ставка</th><th class="num">Сумма стимула, ₽</th><th class="num">%</th><th>Вид</th><th></th></tr></thead>
+            <thead><tr><th>Работник</th><?php if ($showPiece): ?><th class="num">Квота</th><th class="num">Визы</th><?php endif; ?><th>Оклад×ставка</th><th class="num">Сумма стимула, ₽</th><th class="num">%</th><th>Вид</th><th>Цель</th><th>Основание</th><th></th></tr></thead>
             <tbody></tbody>
         </table>
         <button type="button" class="btn btn-mini" onclick="addLine()">+ Добавить <?= $isMgmt ? 'руководителя' : 'работника' ?></button>
@@ -111,8 +111,13 @@
 <script>
 var SHOW_PIECE = <?= $showPiece ? 'true' : 'false' ?>;
 var MEMBERS = <?= json_encode(array_map(fn($m)=>['id'=>(int)$m['id'],'name'=>$m['full_name'].' — '.$m['position'],'load'=>(float)$m['oklad_load'],'kvota'=>(float)$m['kvota'],'visy'=>(float)$m['visy'],'total'=>(float)$m['piece']], $members), JSON_UNESCAPED_UNICODE) ?>;
-var EXIST = <?= json_encode(array_map(fn($l)=>['user_id'=>(int)$l['user_id'],'amount'=>(float)$l['amount'],'kind'=>$l['pay_kind']], $lines), JSON_UNESCAPED_UNICODE) ?>;
-function opt(sel){ return MEMBERS.map(function(m){ return '<option value="'+m.id+'"'+(m.id==sel?' selected':'')+'>'+m.name+'</option>'; }).join(''); }
+var EXIST = <?= json_encode(array_map(fn($l)=>['user_id'=>(int)$l['user_id'],'amount'=>(float)$l['amount'],'kind'=>$l['pay_kind'],'purpose'=>$l['purpose']??'other','reason_id'=>$l['reason_id']!==null?(int)$l['reason_id']:null], $lines), JSON_UNESCAPED_UNICODE) ?>;
+var REASONS = <?= json_encode(array_map(fn($r)=>['id'=>(int)$r['id'],'text'=>$r['text']], $reasons ?? []), JSON_UNESCAPED_UNICODE) ?>;
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function opt(sel){ return MEMBERS.map(function(m){ return '<option value="'+m.id+'"'+(m.id==sel?' selected':'')+'>'+esc(m.name)+'</option>'; }).join(''); }
+function reasonOpts(sel){ return '<option value="">—</option>'+REASONS.map(function(r){ return '<option value="'+r.id+'"'+(r.id==sel?' selected':'')+'>'+esc(r.text)+'</option>'; }).join(''); }
+function purposeOpts(sel){ sel=sel||'other'; var o=[['other','за другое'],['anketas','за анкеты'],['visas','за визы']];
+  return o.map(function(p){ return '<option value="'+p[0]+'"'+(p[0]===sel?' selected':'')+'>'+p[1]+'</option>'; }).join(''); }
 function memOf(id){ return MEMBERS.find(function(x){return x.id==id;}); }
 function fmt(n){ return (Math.round(n*100)/100).toLocaleString('ru-RU'); }
 function recalc(tr){
@@ -127,7 +132,7 @@ function updTotal(){
   var s=0; document.querySelectorAll('#memoLines .m-amount').forEach(function(i){ s+=parseFloat((i.value||'0').replace(',','.'))||0; });
   var el=document.getElementById('memoTotal'); if(el) el.textContent=fmt(s)+' ₽';
 }
-function addLine(uid, amount, kind){
+function addLine(uid, amount, kind, purpose, reasonId){
   var tb=document.querySelector('#memoLines tbody');
   var i=tb.children.length;
   var def=document.getElementById('defKind').value;
@@ -139,6 +144,8 @@ function addLine(uid, amount, kind){
     +'<td><input class="m-amount" type="text" name="row['+i+'][amount]" value="'+(amount||'')+'" style="width:120px;text-align:right"></td>'
     +'<td class="m-pct num">—</td>'
     +'<td><select name="row['+i+'][pay_kind]"><option value="monthly"'+((kind||def)==='monthly'?' selected':'')+'>ежемес.</option><option value="onetime"'+((kind||def)==='onetime'?' selected':'')+'>единоврем.</option></select></td>'
+    +'<td><select name="row['+i+'][purpose]" title="За анкеты/визы — сделка сверх оклада закрывает стимул; за другое — гарантированная доплата">'+purposeOpts(purpose)+'</select></td>'
+    +'<td><select name="row['+i+'][reason_id]">'+reasonOpts(reasonId)+'</select></td>'
     +'<td><button type="button" class="btn btn-mini btn-danger" onclick="this.closest(\'tr\').remove();updTotal()">×</button></td>';
   tb.appendChild(tr);
   tr.querySelector('.m-user').addEventListener('change',function(){recalc(tr);});
@@ -161,6 +168,6 @@ function pullPiece(kind){
   });
   if(!added){ alert('За выбранный период (до 25 числа) нет начисленной сделки по '+(kind==='kvota'?'квоте':kind==='visy'?'визам':'квоте и визам')+'.'); }
 }
-if (EXIST.length) { EXIST.forEach(function(l){ addLine(l.user_id, l.amount, l.kind); }); } else { addLine(); }
+if (EXIST.length) { EXIST.forEach(function(l){ addLine(l.user_id, l.amount, l.kind, l.purpose, l.reason_id); }); } else { addLine(); }
 updTotal();
 </script>

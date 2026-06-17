@@ -200,6 +200,9 @@ $router->get('/memos/coverage',     [\App\Controllers\StimulusController::class,
 $router->get('/memos/coverage/export',[\App\Controllers\StimulusController::class, 'coverageExport']);
 $router->get('/memos/print-report', [\App\Controllers\StimulusController::class, 'printReport']);
 $router->get('/memos/print-batch',  [\App\Controllers\StimulusController::class, 'printBatch']);
+$router->get('/memos/reasons',      [\App\Controllers\ReasonController::class, 'index']);
+$router->post('/memos/reasons',     [\App\Controllers\ReasonController::class, 'store']);
+$router->post('/memos/reasons/{id}/delete', [\App\Controllers\ReasonController::class, 'delete']);
 $router->post('/memos/line/{id}/override', [\App\Controllers\StimulusController::class, 'override']);
 $router->post('/memos',             [\App\Controllers\StimulusController::class, 'store']);
 $router->get('/memos/{id}',         [\App\Controllers\StimulusController::class, 'show']);

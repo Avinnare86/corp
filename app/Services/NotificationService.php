@@ -16,6 +16,41 @@ class NotificationService
     }
 
     /**
+     * Уведомить проверявшего сразу при фиксации ошибки контролёром (по одной анкете),
+     * со стандартизованным типом и свободным комментарием контролёра.
+     */
+    public static function notifyInspectionError(int $inspectionId, string $workDate): void
+    {
+        $it = Database::one(
+            "SELECT i.*, d.reg_number, d.country_code, et.name AS error_name
+               FROM inspections i
+               JOIN assignment_items d ON d.id = i.dossier_id
+               LEFT JOIN error_types et ON et.id = i.error_type_id
+              WHERE i.id = ?",
+            [$inspectionId]
+        );
+        if (!$it || (int) $it['is_correct'] !== 0) {
+            return; // уведомляем только по зафиксированной ошибке
+        }
+
+        $rep = (int) $it['occurrence'] > 1 ? " — ПОВТОР №{$it['occurrence']} (дороже)" : '';
+        $title = sprintf('Контроль за %s: ошибка по анкете %s', $workDate, $it['reg_number']);
+        $body = sprintf(
+            "Анкета %s (%s)\nТип ошибки: %s%s\nСнижение: −%s ₽",
+            $it['reg_number'],
+            $it['country_code'],
+            $it['error_name'] ?? 'ошибка',
+            $rep,
+            number_format((float) $it['penalty_amount'], 2, ',', ' ')
+        );
+        if (!empty($it['controller_comment'])) {
+            $body .= "\n\nКомментарий контролёра:\n" . $it['controller_comment'];
+        }
+
+        self::create((int) $it['employee_id'], $title, $body);
+    }
+
+    /**
      * После завершения проверки разослать уведомления всем проверенным сотрудникам
      * со списком косяков (повторы помечаются и стоят дороже).
      */
@@ -57,13 +92,17 @@ class NotificationService
                     $rep = (int) $it['occurrence'] > 1
                         ? " — ПОВТОР №{$it['occurrence']} (дороже)"
                         : '';
-                    $lines[] = sprintf(
+                    $line = sprintf(
                         '• %s — %s: −%s ₽%s',
                         $it['reg_number'],
                         $it['error_name'] ?? 'ошибка',
                         number_format((float) $it['penalty_amount'], 2, ',', ' '),
                         $rep
                     );
+                    if (!empty($it['controller_comment'])) {
+                        $line .= "\n    💬 {$it['controller_comment']}";
+                    }
+                    $lines[] = $line;
                 }
                 $title = sprintf('Проверка за %s: найдено ошибок — %d', $workDate, count($errorItems));
                 $body = "Проверено анкет: {$checkedCnt}.\n"

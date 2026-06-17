@@ -86,6 +86,7 @@ if ($uid) {
         if ($can('director', 'deputy_director')) { $g[] = ['/memos/direct/new', 'Назначить напрямую', 0]; }
         $g[] = ['/memos/print-report', 'Служебки на печать', 0];
         if ($can('accountant', 'director')) { $g[] = ['/memos/coverage', 'Покрытие (бухгалтерия)', 0]; }
+        if ($can('dept_head', 'deputy_director', 'director')) { $g[] = ['/memos/reasons', 'Основания (справочник)', 0]; }
         $menu['Стимул'] = $g;
     }
     // Финансы — только менеджер проекта финансы

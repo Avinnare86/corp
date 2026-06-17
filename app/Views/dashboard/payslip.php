@@ -2,6 +2,10 @@
 $unit = ($payroll['schedule_type'] ?? '5_2') === '2_2' ? 'смен' : 'дн.';
 $doesAnketas = (int) ($user['does_anketas'] ?? 1) === 1;
 $doesOps = (int) ($user['does_operations'] ?? 0) === 1;
+$p = $payroll;
+$normModel = !empty($p['norm_model']);
+$over = round((float) $p['total'] - (float) $p['min_total'], 2); // сверх минимума (после снижения за ошибки)
+$penaltyRows = $penaltyRows ?? [];
 ?>
 <div class="chat-head">
     <a class="btn btn-mini" href="/">← Главная</a>
@@ -15,8 +19,9 @@ $doesOps = (int) ($user['does_operations'] ?? 0) === 1;
         <div class="muted"><?= e($user['position']) ?></div>
     </div>
     <div class="card">
-        <div class="card-label">Ожидаемая ЗП за <?= e($payroll['period']) ?></div>
-        <div class="card-value big"><?= money($payroll['total']) ?></div>
+        <div class="card-label">Ожидаемая ЗП за <?= e($p['period']) ?></div>
+        <div class="card-value big"><?= money($p['total']) ?></div>
+        <div class="muted">не ниже минимума <?= money($p['min_total']) ?></div>
     </div>
     <div class="card">
         <div class="card-label">Место в рейтинге</div>
@@ -51,107 +56,141 @@ $doesOps = (int) ($user['does_operations'] ?? 0) === 1;
 </section>
 
 <section class="panel">
-    <h2>Расчётный лист за <?= e($payroll['period']) ?></h2>
+    <h2>Расчётный лист за <?= e($p['period']) ?></h2>
 
+    <table class="table payslip" style="max-width:520px">
+        <tr><td>Количество рабочих дней</td><td class="num"><?= (int) $p['norm_days'] ?> <?= $unit ?></td></tr>
+        <tr><td>Количество дней отработано</td><td class="num"><?= (int) $p['worked_days'] ?> <?= $unit ?></td></tr>
+    </table>
+
+    <?php // ----- Детализация сделки (как есть): анкеты/операции + подработки ----- ?>
     <?php if ($doesAnketas || $doesOps): ?>
-    <h3 class="sub">Сделка</h3>
-    <?php if (!empty($payroll['norm_model'])): ?>
+    <h3 class="sub">Сделка — детализация</h3>
+    <?php if ($normModel): ?>
         <p class="muted" style="margin:.2rem 0 .4rem">Анкеты — только <strong>сверх норматива</strong>: проверено
-            <?= (int)$payroll['anketa_checked'] ?>, покрыто окладом+надбавкой <?= (int)$payroll['anketa_covered'] ?>,
-            к доплате <?= (int)$payroll['anketa_above_count'] ?> (недельный норматив <?= (int)$payroll['anketa_norm_weekly'] ?>).</p>
+            <?= (int)$p['anketa_checked'] ?>, покрыто окладом <?= (int)$p['anketa_covered'] ?>,
+            к доплате <?= (int)$p['anketa_above_count'] ?> (недельный норматив <?= (int)$p['anketa_norm_weekly'] ?>).</p>
     <?php endif; ?>
     <table class="table">
         <thead><tr><th>Работа</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th></tr></thead>
         <tbody>
-        <?php if ($doesAnketas): foreach ($payroll['anketa_breakdown'] as $b): ?>
-            <tr>
-                <td>Анкеты · <?= e($b['title']) ?></td>
-                <td class="num"><?= (int) $b['count'] ?></td>
-                <td class="num"><?= money($b['price']) ?></td>
-                <td class="num"><?= money($b['subtotal']) ?></td>
-            </tr>
+        <?php if ($doesAnketas): foreach ($p['anketa_breakdown'] as $b): ?>
+            <tr><td>Анкеты · <?= e($b['title']) ?></td><td class="num"><?= (int) $b['count'] ?></td><td class="num"><?= money($b['price']) ?></td><td class="num"><?= money($b['subtotal']) ?></td></tr>
         <?php endforeach; endif; ?>
-        <?php if ($doesOps): foreach ($payroll['ops_breakdown'] as $b): ?>
-            <tr>
-                <td><?= e($b['name']) ?></td>
-                <td class="num"><?= (int) $b['count'] ?></td>
-                <td class="num"><?= money($b['price']) ?></td>
-                <td class="num"><?= money($b['subtotal']) ?></td>
-            </tr>
+        <?php if ($doesOps): foreach ($p['ops_breakdown'] as $b): ?>
+            <tr><td><?= e($b['name']) ?></td><td class="num"><?= (int) $b['count'] ?></td><td class="num"><?= money($b['price']) ?></td><td class="num"><?= money($b['subtotal']) ?></td></tr>
         <?php endforeach; endif; ?>
-        <?php if (!$payroll['anketa_breakdown'] && !$payroll['ops_breakdown']): ?>
+        <?php if (!$p['anketa_breakdown'] && !$p['ops_breakdown']): ?>
             <tr><td colspan="4" class="muted">За период сделка не введена.</td></tr>
         <?php endif; ?>
-        <tr class="total"><td>Итого сделка</td><td></td><td></td><td class="num"><?= money($payroll['piecework']) ?></td></tr>
+        <tr class="total"><td>Итого сделка</td><td></td><td></td><td class="num"><?= money($p['piecework']) ?></td></tr>
         </tbody>
     </table>
     <?php endif; ?>
 
-    <?php if ($payroll['fix_breakdown']): ?>
+    <?php if ($p['fix_breakdown']): ?>
     <h3 class="sub">Подработки (фикс, пропорц. времени)</h3>
     <table class="table">
         <thead><tr><th>Работа</th><th class="num">За месяц</th><th class="num">Начислено</th></tr></thead>
         <tbody>
-        <?php foreach ($payroll['fix_breakdown'] as $f): ?>
+        <?php foreach ($p['fix_breakdown'] as $f): ?>
             <tr><td><?= e($f['name']) ?></td><td class="num"><?= money($f['monthly']) ?></td><td class="num"><?= money($f['amount']) ?></td></tr>
         <?php endforeach; ?>
-        <tr class="total"><td>Итого подработки</td><td></td><td class="num"><?= money($payroll['fix_sum']) ?></td></tr>
+        <tr class="total"><td>Итого подработки</td><td></td><td class="num"><?= money($p['fix_sum']) ?></td></tr>
         </tbody>
     </table>
     <?php endif; ?>
 
-    <h3 class="sub">Сколько начислено</h3>
+    <?php // ===================== Начисления по видам ===================== ?>
+    <h3 class="sub">Начислено</h3>
     <table class="table payslip">
+        <!-- Блок 1: оклад -->
+        <tr class="pay-head"><td><strong>Начислено оклад</strong></td><td class="num"><strong><?= money($p['oklad_cap']) ?></strong></td></tr>
+        <?php if ($normModel): ?>
+            <tr><td class="sub-row">в т.ч. оклад за выполнение норматива</td><td class="num"><?= money($p['b1_dopl']) ?></td></tr>
+        <?php else: ?>
+            <tr><td class="sub-row">в т.ч. сделка</td><td class="num"><?= money($p['b1_sdelka']) ?></td></tr>
+            <tr><td class="sub-row">в т.ч. доплата до минимума</td><td class="num"><?= money($p['b1_dopl']) ?></td></tr>
+        <?php endif; ?>
+
+        <!-- Блок 2: ежемесячные стимулирующие -->
+        <?php if (($p['stim_guaranteed'] ?? 0) > 0): ?>
+        <tr class="pay-head"><td><strong>Ежемесячные стимулирующие выплаты</strong></td><td class="num"><strong><?= money($p['stim_guaranteed']) ?></strong></td></tr>
+            <?php if (($p['g_ank'] ?? 0) > 0): ?>
+            <tr><td class="sub-row">за анкеты — в т.ч. сделка</td><td class="num"><?= money($p['b2_ank_sdelka']) ?></td></tr>
+            <tr><td class="sub-row">за анкеты — доплата до минимума</td><td class="num"><?= money($p['b2_ank_dopl']) ?></td></tr>
+            <?php endif; ?>
+            <?php if (($p['g_viz'] ?? 0) > 0): ?>
+            <tr><td class="sub-row">за визы — в т.ч. сделка</td><td class="num"><?= money($p['b2_viz_sdelka']) ?></td></tr>
+            <tr><td class="sub-row">за визы — доплата до минимума</td><td class="num"><?= money($p['b2_viz_dopl']) ?></td></tr>
+            <?php endif; ?>
+            <?php if (($p['g_oth'] ?? 0) > 0): ?>
+            <tr><td class="sub-row">за другое — доплата (гарантировано)</td><td class="num"><?= money($p['b2_oth_dopl']) ?></td></tr>
+            <?php endif; ?>
+        <?php endif; ?>
+
+        <!-- Блок 3: единовременные -->
+        <?php if (($p['b3_total'] ?? 0) > 0): ?>
+        <tr class="pay-head"><td><strong>Единовременные выплаты</strong></td><td class="num"><strong><?= money($p['b3_total']) ?></strong></td></tr>
+            <?php if (($p['b3_leftover'] ?? 0) > 0): ?>
+            <tr><td class="sub-row">в т.ч. сделка (сверх оклада и ежемес. целей)</td><td class="num"><?= money($p['b3_leftover']) ?></td></tr>
+            <?php endif; ?>
+            <?php if (($p['b3_onetime'] ?? 0) > 0): ?>
+            <tr><td class="sub-row">в т.ч. разовый стимул</td><td class="num"><?= money($p['b3_onetime']) ?></td></tr>
+            <?php endif; ?>
+            <?php if (($p['b3_fix'] ?? 0) > 0): ?>
+            <tr><td class="sub-row">в т.ч. подработки</td><td class="num"><?= money($p['b3_fix']) ?></td></tr>
+            <?php endif; ?>
+        <?php endif; ?>
+
+        <!-- Снижение за ошибки -->
         <tr>
-            <td><?php if (!empty($payroll['norm_model'])): ?>Доплата сверх норматива (по тарифу<?= $doesOps ? ' + операции' : '' ?><?= $payroll['fix_sum']>0 ? ' + подработки' : '' ?>)<?php else: ?>Заработано за месяц (сделка<?= $payroll['fix_sum']>0 ? ' + подработки' : '' ?>)<?php endif; ?></td>
-            <td class="num"><?= money($payroll['earned']) ?></td>
-        </tr>
-        <tr>
-            <td>Гарантированный минимум: оклад <?= money($payroll['oklad']) ?>
-                <br><span class="muted">за отработанное время <?= (int)$payroll['worked_days'] ?>/<?= (int)$payroll['norm_days'] ?> <?= $unit ?><?php if ($payroll['rate_volume']!=1): ?>, ставка <?= e($payroll['rate_volume']) ?><?php endif; ?></span></td>
-            <td class="num"><?= money($payroll['floor']) ?></td>
-        </tr>
-        <tr class="payslip-verdict">
-            <td>
-                <?php if (!empty($payroll['norm_model'])): ?>
-                    ✅ Оклад (гарантия) + доплата по тарифу за <?= (int)$payroll['anketa_above_count'] ?> анкет сверх норматива
-                <?php elseif ($payroll['reached_level']): ?>
-                    ✅ Начислено по заработку — он выше гарантии
-                <?php else: ?>
-                    ⓘ Заработок ниже гарантии — начислен гарантированный минимум
+            <td>Снижение за ошибки
+                <?php if (!empty($p['penalty_capped'])): ?>
+                    <br><span class="muted">начислено −<?= money($p['penalties']) ?>, удержано −<?= money($p['penalty_effective']) ?>: итог не ниже минимума</span>
+                <?php endif; ?>
+                <?php if ($penaltyRows): ?>
+                    <details style="margin-top:4px">
+                        <summary class="muted" style="cursor:pointer">какие ошибки вошли в расчёт (<?= count($penaltyRows) ?>)</summary>
+                        <table class="table" style="margin-top:6px">
+                            <thead><tr><th>Дата</th><th>Объект</th><th>Причина</th><th class="num">−₽</th></tr></thead>
+                            <tbody>
+                            <?php foreach ($penaltyRows as $pr): ?>
+                                <tr>
+                                    <td class="muted"><?= e($pr['date']) ?></td>
+                                    <td><?= e($pr['title']) ?></td>
+                                    <td class="muted"><?= e($pr['reason']) ?></td>
+                                    <td class="num minus">−<?= money($pr['amount']) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </details>
                 <?php endif; ?>
             </td>
-            <td class="num"><strong><?= money($payroll['gross']) ?></strong></td>
+            <td class="num minus">−<?= money($p['penalty_effective']) ?></td>
         </tr>
-        <tr>
-            <td>− Снижения за ошибки (повторы дороже)
-                <?php if (!empty($payroll['penalty_capped'])): ?>
-                    <br><span class="muted">начислено −<?= money($payroll['penalties']) ?>, но удержано только −<?= money($payroll['penalty_effective']) ?>: итог не опускается ниже гарантии</span>
-                <?php endif; ?>
-            </td>
-            <td class="num minus">−<?= money($payroll['penalty_effective']) ?></td>
-        </tr>
-        <?php if (!empty($payroll['penalty_carry_in']) && $payroll['penalty_carry_in']>0): ?>
-        <tr><td class="muted">включая перенос штрафа из прошлого месяца (зафиксирован после 25-го)</td><td class="num muted">−<?= money($payroll['penalty_carry_in']) ?></td></tr>
+        <?php if (!empty($p['penalty_carry_in']) && $p['penalty_carry_in'] > 0): ?>
+        <tr><td class="muted">включая перенос штрафа из прошлого месяца (после 25-го)</td><td class="num muted">−<?= money($p['penalty_carry_in']) ?></td></tr>
         <?php endif; ?>
-        <?php if (($payroll['stim_total'] ?? 0) > 0): ?>
-        <tr>
-            <td>+ Стимул по утверждённым служебкам
-                <?php if (($payroll['stim_monthly']??0)>0): ?><br><span class="muted">ежемесячный (пропорц. отработке): <?= money($payroll['stim_monthly']) ?></span><?php endif; ?>
-                <?php if (($payroll['stim_onetime']??0)>0): ?><br><span class="muted">единовременный (полной суммой): <?= money($payroll['stim_onetime']) ?></span><?php endif; ?>
-            </td>
-            <td class="num plus">+<?= money($payroll['stim_total']) ?></td>
+
+        <!-- ИТОГО -->
+        <tr class="total">
+            <td>ИТОГО к выплате <span class="muted" style="font-weight:400">(минимум <?= money($p['min_total']) ?> + сверх минимума <?= money($over) ?>)</span></td>
+            <td class="num"><strong><?= money($p['total']) ?></strong></td>
         </tr>
-        <?php endif; ?>
-        <tr class="total"><td>ИТОГО к выплате (прогноз, не ниже гарантии <?= money($payroll['floor']) ?>)</td><td class="num"><?= money($payroll['total']) ?></td></tr>
     </table>
-    <?php if (($payroll['piece_carry'] ?? 0) > 0 || ($payroll['piece_settled'] ?? 0) > 0): ?>
+
+    <?php if (($p['piece_carry'] ?? 0) > 0 || ($p['piece_settled'] ?? 0) > 0): ?>
     <p class="muted" style="margin-top:8px">📅 <strong>Сделка по отсечке 25-го числа:</strong>
-        к выплате в служебку этого месяца (до 25-го) — <strong><?= money($payroll['piece_settled']) ?></strong>;
-        <?php if (($payroll['piece_carry']??0)>0): ?>проверено после 25-го (перейдёт в служебку следующего месяца) — <strong><?= money($payroll['piece_carry']) ?></strong>.<?php else: ?>после 25-го пока ничего.<?php endif; ?>
-        <?php if (($payroll['penalty_deferred']??0)>0): ?><br>⚠ Штраф −<?= money($payroll['penalty_deferred']) ?> зафиксирован после 25-го — учтётся в следующем месяце.<?php endif; ?>
+        к выплате в служебку этого месяца (до 25-го) — <strong><?= money($p['piece_settled']) ?></strong>;
+        <?php if (($p['piece_carry']??0)>0): ?>проверено после 25-го (перейдёт в служебку следующего месяца) — <strong><?= money($p['piece_carry']) ?></strong>.<?php else: ?>после 25-го пока ничего.<?php endif; ?>
+        <?php if (($p['penalty_deferred']??0)>0): ?><br>⚠ Штраф −<?= money($p['penalty_deferred']) ?> зафиксирован после 25-го — учтётся в следующем месяце.<?php endif; ?>
     </p>
     <?php endif; ?>
+
+    <p class="flash flash-info" style="margin-top:14px">⚠ Этот листок — <strong>предварительный прогноз</strong> и <strong>не является официальным документом</strong>.
+        Официальный расчётный листок направляет бухгалтерия.</p>
 </section>
 
 <?php if ($unread): ?>

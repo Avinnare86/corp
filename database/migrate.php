@@ -845,6 +845,16 @@ if (!columnExists('stimulus_memos', 'grant_id')) {
     $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN grant_id INT NULL");
     echo "OK  колонка stimulus_memos.grant_id добавлена\n";
 }
+// Цель строки стимула (за анкеты/визы/другое) — сделка сверх оклада «зарабатывает» стимул.
+if (!columnExists('stimulus_memo_lines', 'purpose')) {
+    $pdo->exec("ALTER TABLE stimulus_memo_lines ADD COLUMN purpose VARCHAR(10) NOT NULL DEFAULT 'other'"); // anketas|visas|other
+    echo "OK  колонка stimulus_memo_lines.purpose добавлена\n";
+}
+// Основание из справочника по отделам (для памяти «за что доплата»).
+if (!columnExists('stimulus_memo_lines', 'reason_id')) {
+    $pdo->exec("ALTER TABLE stimulus_memo_lines ADD COLUMN reason_id INT NULL");
+    echo "OK  колонка stimulus_memo_lines.reason_id добавлена\n";
+}
 if (!columnExists('dorabotka_comments', 'category')) {
     $pdo->exec("ALTER TABLE dorabotka_comments ADD COLUMN category VARCHAR(100) NOT NULL DEFAULT 'Прочее'");
     echo "OK  колонка dorabotka_comments.category добавлена\n";
@@ -978,6 +988,16 @@ $extra['allowance_grants'] = "CREATE TABLE IF NOT EXISTS allowance_grants (
     created_at  TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
+// Справочник оснований стимула по отделам (свободный, вне формальных stimulus_grounds):
+// начальник вспоминает, за что назначена каждая доплата. department_id NULL = общие.
+$extra['stimulus_reasons'] = "CREATE TABLE IF NOT EXISTS stimulus_reasons (
+    id $ID,
+    department_id INT NULL,
+    text          VARCHAR(500) NOT NULL,
+    is_active     INT NOT NULL DEFAULT 1,
+    created_at    TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
 foreach ($extra as $name => $sql) {
     $pdo->exec($ddlFix($sql));
     echo "OK  таблица {$name}\n";
@@ -1019,6 +1039,11 @@ foreach ([
 if (!columnExists('inspections', 'defer_to_period')) {
     $pdo->exec("ALTER TABLE inspections ADD COLUMN defer_to_period VARCHAR(7) NULL");
     echo "OK  колонка inspections.defer_to_period добавлена\n";
+}
+// Свободный комментарий контролёра к ошибке (помимо стандартизованного типа).
+if (!columnExists('inspections', 'controller_comment')) {
+    $pdo->exec("ALTER TABLE inspections ADD COLUMN controller_comment TEXT NULL");
+    echo "OK  колонка inspections.controller_comment добавлена\n";
 }
 
 // Каталог ролей (идемпотентно).

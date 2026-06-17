@@ -207,6 +207,7 @@ class StimulusController extends Controller
             'members' => $members,
             'lines' => $lines,
             'grounds' => Database::all("SELECT * FROM stimulus_grounds WHERE is_active = 1 AND category IN ($ph) ORDER BY category, percent DESC, text", $cats),
+            'reasons' => Database::all('SELECT id, text FROM stimulus_reasons WHERE is_active = 1 AND (department_id = ? OR department_id IS NULL) ORDER BY (department_id IS NULL), text', [(int) $deptId]),
             'sources' => Database::all('SELECT * FROM pay_sources ORDER BY id'),
             'selGrounds' => $memo ? array_filter(array_map('intval', explode(',', (string)$memo['grounds_ids']))) : [],
             'forecast' => $forecast,
@@ -261,7 +262,9 @@ class StimulusController extends Controller
             $load = round($okl * (float)($u['rate_volume'] ?? 1), 2);
             $pct = $load > 0 ? round($amount / $load * 100, 1) : 0;
             $lkind = ($r['pay_kind'] ?? $payKind) === 'onetime' ? 'onetime' : 'monthly';
-            $lines[] = ['user_id' => $eid, 'amount' => round($amount, 2), 'pay_kind' => $lkind, 'oklad_load' => $load, 'percent' => $pct];
+            $purpose = in_array($r['purpose'] ?? '', ['anketas', 'visas', 'other'], true) ? $r['purpose'] : 'other';
+            $reasonId = !empty($r['reason_id']) ? (int) $r['reason_id'] : null;
+            $lines[] = ['user_id' => $eid, 'amount' => round($amount, 2), 'pay_kind' => $lkind, 'oklad_load' => $load, 'percent' => $pct, 'purpose' => $purpose, 'reason_id' => $reasonId];
         }
         if (!$lines) { flash('Добавьте хотя бы одного работника с суммой.', 'error'); $this->backToForm($id, $kind); }
 
@@ -332,8 +335,8 @@ class StimulusController extends Controller
         $pfrom = $period . '-01';
         $pto = date('Y-m-t', strtotime($pfrom));
         foreach ($lines as $ln) {
-            Database::insert('INSERT INTO stimulus_memo_lines (memo_id, user_id, amount, pay_kind, period_from, period_to, oklad_load, percent) VALUES (?,?,?,?,?,?,?,?)',
-                [$id, $ln['user_id'], $ln['amount'], $ln['pay_kind'], $pfrom, $pto, $ln['oklad_load'], $ln['percent']]);
+            Database::insert('INSERT INTO stimulus_memo_lines (memo_id, user_id, amount, pay_kind, period_from, period_to, oklad_load, percent, purpose, reason_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [$id, $ln['user_id'], $ln['amount'], $ln['pay_kind'], $pfrom, $pto, $ln['oklad_load'], $ln['percent'], $ln['purpose'], $ln['reason_id']]);
         }
         $pdo->commit();
         flash($kind === 'mgmt'

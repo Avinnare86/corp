@@ -52,6 +52,8 @@ class AllowanceService
         $groundIds = array_values(array_filter(array_map('intval', (array) ($opts['grounds_ids'] ?? []))));
         $sourceId = (int) ($opts['source_id'] ?? 0) ?: null;
         $by = (int) ($opts['assigned_by'] ?? 0) ?: null;
+        // Цель строки (за анкеты/визы/другое): по умолчанию «за другое» — гарантированная доплата.
+        $purpose = in_array($opts['purpose'] ?? '', ['anketas', 'visas', 'other'], true) ? $opts['purpose'] : 'other';
 
         if (!$uid || $amount <= 0) { return ['ok' => false, 'message' => 'Укажите сотрудника и сумму надбавки.']; }
         $months = self::monthsRange($from, $to);
@@ -88,8 +90,8 @@ class AllowanceService
                 [$deptId, $author, $m, 'monthly', $sourceId, implode('; ', $groundTexts), implode(',', $groundIds), 'staff', 'draft', $grantId]);
             $pfrom = $m . '-01'; $pto = date('Y-m-t', strtotime($pfrom));
             Database::insert(
-                'INSERT INTO stimulus_memo_lines (memo_id, user_id, amount, pay_kind, period_from, period_to, oklad_load, percent) VALUES (?,?,?,?,?,?,?,?)',
-                [$memoId, $uid, $amount, 'monthly', $pfrom, $pto, $load, $pct]);
+                'INSERT INTO stimulus_memo_lines (memo_id, user_id, amount, pay_kind, period_from, period_to, oklad_load, percent, purpose) VALUES (?,?,?,?,?,?,?,?,?)',
+                [$memoId, $uid, $amount, 'monthly', $pfrom, $pto, $load, $pct, $purpose]);
             $created++;
         }
         $pdo->commit();
