@@ -27,9 +27,16 @@ class AdminDataService
             'visa_opis'       => 'Описи / визовые указания',
             'tabel'           => 'Табеля (эл. табель)',
             'memo'            => 'Служебки о стимуле',
+            'document'        => 'Документы СЭД',
             'user'            => 'Сотрудники',
         ];
     }
+
+    /** Человекочитаемые статусы документа СЭД (для списка). */
+    private const DOC_STATUS = [
+        'draft' => 'Черновик', 'on_approval' => 'На маршруте', 'revision' => 'На доработке',
+        'approved' => 'Согласован', 'registered' => 'Зарегистрирован',
+    ];
 
     public static function label(string $entity): string
     {
@@ -167,6 +174,25 @@ class AdminDataService
                     ];
                 }, $rows);
 
+            case 'document':
+                $w = $q !== '' ? 'WHERE LOWER(d.title) LIKE ? OR LOWER(d.reg_number) LIKE ?' : '';
+                $p = $q !== '' ? [$like, $like] : [];
+                $rows = Database::all(
+                    "SELECT d.id, d.title, d.reg_number, d.status, t.name AS type_name
+                       FROM documents d LEFT JOIN doc_types t ON t.id=d.type_id $w ORDER BY d.id DESC LIMIT 200", $p);
+                return array_map(function ($r) {
+                    $st = (string) $r['status'];
+                    return [
+                        'id' => (int) $r['id'],
+                        'title' => ($r['reg_number'] ?: '#' . $r['id']) . ' · ' . $r['title'],
+                        'sub' => (string) ($r['type_name'] ?? ''),
+                        'status' => self::DOC_STATUS[$st] ?? $st,
+                        'can_delete' => true,
+                        'can_revert' => in_array($st, ['approved', 'registered', 'on_approval', 'revision'], true),
+                        'revert_hint' => 'откат статуса на шаг назад (снять регистрацию/последнюю визу)',
+                    ];
+                }, $rows);
+
             case 'user':
                 $w = $q !== '' ? 'WHERE LOWER(full_name) LIKE ? OR LOWER(login) LIKE ?' : '';
                 $p = $q !== '' ? [$like, $like] : [];
@@ -272,6 +298,19 @@ class AdminDataService
                 Database::run('DELETE FROM stimulus_memos WHERE id=?', [$id]);
                 $pdo->commit();
                 return self::ok('Служебка о стимуле удалена (строки выплат сняты — ЗП пересчитается).');
+
+            case 'document':
+                if (!Database::scalar('SELECT 1 FROM documents WHERE id=?', [$id])) { return self::err('Документ не найден.'); }
+                $pdo->beginTransaction();
+                Database::run('DELETE FROM orders WHERE doc_id=?', [$id]);            // каскад поручений/резолюций (по решению)
+                self::runSafe('DELETE FROM doc_readers WHERE document_id=?', [$id]);
+                self::runSafe('DELETE FROM doc_approvers WHERE document_id=?', [$id]);
+                self::runSafe('DELETE FROM doc_files WHERE document_id=?', [$id]);
+                self::runSafe('DELETE FROM doc_history WHERE document_id=?', [$id]);
+                self::runSafe('DELETE FROM doc_number_reservations WHERE doc_id=?', [$id]); // освободить бронь
+                Database::run('DELETE FROM documents WHERE id=?', [$id]);
+                $pdo->commit();
+                return self::ok('Документ СЭД удалён (маршрут, файлы-метаданные, история и поручения по нему сняты; файлы на диске не удаляются).');
 
             case 'user':
                 return self::deleteUser($id, $adminId);
@@ -387,6 +426,9 @@ class AdminDataService
             case 'memo':
                 return self::revertMemo($id);
 
+            case 'document':
+                return self::revertDocument($id);
+
             case 'user':
                 $u = Database::one('SELECT id, is_active FROM users WHERE id=?', [$id]);
                 if (!$u) { return self::err('Сотрудник не найден.'); }
@@ -459,6 +501,43 @@ class AdminDataService
                 return self::ok('Служебка возвращена в черновик.');
         }
         return self::err('Служебка уже в статусе «черновик».');
+    }
+
+    /** Откат документа СЭД на шаг назад: registered/approved → on_approval → revision → draft. */
+    private static function revertDocument(int $id): array
+    {
+        $d = Database::one('SELECT * FROM documents WHERE id=?', [$id]);
+        if (!$d) { return self::err('Документ не найден.'); }
+        $st = (string) $d['status'];
+        $pdo = Database::pdo();
+        if ($st === 'approved' || $st === 'registered') {
+            $pdo->beginTransaction();
+            // снять регистрацию + освободить бронь
+            Database::run('UPDATE documents SET reg_number=NULL, reg_seq=NULL, reg_year=NULL, registered_at=NULL, registered_by=NULL, finished_at=NULL WHERE id=?', [$id]);
+            Database::run('UPDATE doc_number_reservations SET doc_id=NULL WHERE doc_id=?', [$id]);
+            // отменить последнюю визу/подпись и вернуть на её этап
+            $last = Database::one("SELECT * FROM doc_approvers WHERE document_id=? AND status IN ('approved','acked','rejected','skipped') AND decided_at IS NOT NULL ORDER BY decided_at DESC, id DESC LIMIT 1", [$id]);
+            if ($last) {
+                Database::run("UPDATE doc_approvers SET status='pending', comment=NULL, decided_at=NULL, on_behalf_of=NULL, sign_type=NULL, sign_hash=NULL WHERE id=?", [(int) $last['id']]);
+                Database::run("UPDATE documents SET status='on_approval', current_step=? WHERE id=?", [(int) $last['step_no'], $id]);
+            } else {
+                Database::run("UPDATE documents SET status='on_approval' WHERE id=?", [$id]);
+            }
+            $pdo->commit();
+            return self::ok('Документ возвращён на маршрут: снята регистрация и последняя виза.');
+        }
+        if ($st === 'on_approval') {
+            Database::run("UPDATE documents SET status='revision' WHERE id=?", [$id]);
+            return self::ok('Документ возвращён автору на доработку.');
+        }
+        if ($st === 'revision') {
+            $pdo->beginTransaction();
+            Database::run("UPDATE documents SET status='draft', sent_at=NULL, current_step=0 WHERE id=?", [$id]);
+            Database::run("UPDATE doc_approvers SET status='pending', comment=NULL, decided_at=NULL, on_behalf_of=NULL, sign_type=NULL, sign_hash=NULL WHERE document_id=?", [$id]);
+            $pdo->commit();
+            return self::ok('Документ возвращён в черновик (маршрут сброшен).');
+        }
+        return self::err('Документ уже в черновике — откатывать нечего.');
     }
 
     // ============ helpers ============

@@ -166,6 +166,30 @@ $tables['doc_readers'] = "CREATE TABLE IF NOT EXISTS doc_readers (
     UNIQUE (document_id, user_id)
 ) $ENGINE";
 
+// Журналы регистрации (МосЭДО): собственная нумерация по году.
+$tables['doc_journals'] = "CREATE TABLE IF NOT EXISTS doc_journals (
+    id $ID,
+    name       VARCHAR(150) NOT NULL,
+    direction  VARCHAR(10) NOT NULL DEFAULT '',   -- ''|incoming|outgoing|internal
+    prefix     VARCHAR(16) NOT NULL DEFAULT '',   -- префикс рег.№ (Вх/Исх/…)
+    index_code VARCHAR(20) NOT NULL DEFAULT '',   -- индекс дела для формата 'index/seq-year'
+    is_active  INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
+// Бронь (резерв) регистрационных номеров.
+$tables['doc_number_reservations'] = "CREATE TABLE IF NOT EXISTS doc_number_reservations (
+    id $ID,
+    journal_id  INT NOT NULL,
+    reg_year    INT NOT NULL,
+    reg_seq     INT NOT NULL,
+    reg_number  VARCHAR(60) NOT NULL,
+    reserved_by INT NULL,
+    reserved_at TIMESTAMP DEFAULT $NOW,
+    doc_id      INT NULL,                          -- занят документом (NULL = свободная бронь)
+    note        VARCHAR(200) DEFAULT ''
+) $ENGINE";
+
 // Обращения граждан (59-ФЗ): срок 30 дней, продление, ответ.
 $tables['appeals'] = "CREATE TABLE IF NOT EXISTS appeals (
     id $ID,
@@ -648,6 +672,34 @@ foreach ([
         echo "OK  колонка documents.$col добавлена\n";
     }
 }
+// МосЭДО: регистрация документов (журналы, собственный счётчик, дата регистрации, регистратор).
+foreach ([
+    'journal_id'    => 'INT NULL',         // журнал регистрации
+    'reg_seq'       => 'INT NULL',         // порядковый номер в журнале за год (для счётчика)
+    'reg_year'      => 'INT NULL',
+    'registered_at' => 'DATETIME NULL',    // дата регистрации (отдельно от created/finished)
+    'registered_by' => 'INT NULL',
+] as $col => $ddl) {
+    if (!columnExists('documents', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE documents ADD COLUMN $col $ddl"));
+        echo "OK  колонка documents.$col добавлена\n";
+    }
+}
+if (!columnExists('doc_types', 'journal_id')) {
+    $pdo->exec('ALTER TABLE doc_types ADD COLUMN journal_id INT NULL');  // журнал по умолчанию для типа
+    echo "OK  колонка doc_types.journal_id добавлена\n";
+}
+// Сид базовых журналов регистрации (один раз).
+if ((int) \App\Core\Database::scalar('SELECT COUNT(*) FROM doc_journals') === 0) {
+    foreach ([
+        ['Входящие',   'incoming', 'Вх'],
+        ['Исходящие',  'outgoing', 'Исх'],
+        ['Внутренние', 'internal', ''],
+    ] as [$jn, $jd, $jp]) {
+        $pdo->prepare('INSERT INTO doc_journals (name, direction, prefix) VALUES (?,?,?)')->execute([$jn, $jd, $jp]);
+    }
+    echo "OK  журналы регистрации (базовые)\n";
+}
 if (!columnExists('orders', 'doc_id')) {
     $pdo->exec('ALTER TABLE orders ADD COLUMN doc_id INT NULL');  // поручение/резолюция по документу
     echo "OK  колонка orders.doc_id добавлена\n";
@@ -962,6 +1014,8 @@ $rolesCatalog = [
     ['visa_manager',     'Менеджер проекта: визы',         'Загрузка и распределение визовых ходатайств', 80],
     ['finance_manager',  'Менеджер проекта: финансы',      'Бюджет ФОТ, тарифы, доплаты, основания стимула', 85],
     ['docs_manager',     'Менеджер проекта: документы',    'Типы документов, обращения, номенклатура дел', 86],
+    ['clerk',            'Делопроизводитель (регистратор)','Регистрация документов: присвоение/правка рег.№, журналы, бронь номера', 87],
+    ['doc_controller',   'Контролёр документов',           'Постановка документов на контроль и мониторинг исполнения', 88],
     ['controller',       'Контролёр',                      'Выборочная проверка (8%)', 90],
     ['anketa_worker',    'Специалист: проверка анкет',     'Проверка назначенных анкет (квота)', 100],
     ['visa_worker',      'Специалист: проверка виз',       'Проверка назначенных визовых строк', 110],

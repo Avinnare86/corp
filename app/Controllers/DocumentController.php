@@ -6,6 +6,7 @@ use App\Core\Auth;
 use App\Core\Database;
 use App\Services\NotificationService;
 use App\Services\Settings;
+use App\Services\RegistrationService;
 
 /**
  * СЭД: документы с маршрутом из этапов (по образцу СЭД «Практика»).
@@ -25,8 +26,21 @@ class DocumentController extends Controller
         'on_approval' => 'На маршруте',
         'revision'    => 'На доработке',
         'approved'    => 'Согласован',
+        'registered'  => 'Зарегистрирован',
     ];
     public const STAGE_LABEL = ['approve' => 'Согласование', 'sign' => 'Подписание', 'ack' => 'Ознакомление'];
+
+    /** Право регистрации документов (делопроизводитель/регистратор). */
+    private function canRegister(array $me): bool
+    {
+        return Auth::has('clerk', 'docs_manager') || Auth::isAdmin() || in_array($me['role'], ['admin', 'manager'], true);
+    }
+
+    /** Право ставить документы на контроль и вести мониторинг (контролёр документов). */
+    private function canControlDocs(array $me): bool
+    {
+        return Auth::has('doc_controller', 'docs_manager') || Auth::isAdmin() || in_array($me['role'], ['admin', 'manager'], true);
+    }
 
     // ---------- замещение ----------
     /** id пользователей, которых $uid замещает сегодня. */
@@ -416,6 +430,9 @@ class DocumentController extends Controller
             'allUsers'=> Database::all('SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name'),
             'files'   => Database::all('SELECT * FROM doc_files WHERE document_id = ? ORDER BY version DESC', [$id]),
             'readers' => Database::all('SELECT r.*, u.full_name FROM doc_readers r JOIN users u ON u.id = r.user_id WHERE r.document_id = ?', [$id]),
+            'canRegister' => $this->canRegister($me),
+            'isAdminUser' => Auth::isAdmin(),
+            'journals' => Database::all('SELECT id, name FROM doc_journals WHERE is_active=1 ORDER BY name'),
             'canManageReaders' => (int) $doc['author_id'] === $uid || in_array($me['role'], ['admin', 'manager'], true),
             'canFile' => in_array($me['role'], ['admin', 'manager'], true) || \App\Core\Auth::has('hr') || (int) $doc['author_id'] === $uid,
             'cases' => Database::all("SELECT id, index_code, title FROM nomenclature_cases WHERE status='open' ORDER BY index_code"),
@@ -526,8 +543,8 @@ class DocumentController extends Controller
             "SELECT COUNT(*) FROM doc_approvers WHERE document_id=? AND step_no > ? AND stage_type <> 'ack'", [$id, $stepNo]);
         $fresh = Database::one('SELECT * FROM documents WHERE id = ?', [$id]);
         if (!$fresh['reg_number'] && $remainNonAck === 0) {
-            $reg = $this->assignRegNumber($fresh);
-            Database::run('UPDATE documents SET reg_number=? WHERE id=?', [$reg, $id]);
+            $res = RegistrationService::register((int) $id, ['by' => null]);
+            $reg = $res['reg_number'] ?? '';
             $this->history($id, "Зарегистрирован, № {$reg}");
             NotificationService::create((int) $doc['author_id'], 'Документ зарегистрирован', "«{$doc['title']}» — рег. № {$reg}.");
         }
@@ -692,7 +709,7 @@ class DocumentController extends Controller
         $me = Auth::user();
         $doc = Database::one('SELECT * FROM documents WHERE id = ?', [$id]);
         if (!$doc) { $this->redirect('/docs'); }
-        $can = in_array($me['role'], ['admin', 'manager'], true)
+        $can = $this->canControlDocs($me)
             || (int) $doc['author_id'] === (int) $me['id']
             || ($me['department_id'] && (int) $doc['department_id'] === (int) $me['department_id']
                 && Database::scalar('SELECT 1 FROM departments WHERE id=? AND head_id=?', [$doc['department_id'], $me['id']]));
@@ -733,7 +750,7 @@ class DocumentController extends Controller
     {
         Auth::requireLogin();
         $me = Auth::user();
-        if (!in_array($me['role'], ['admin', 'manager'], true) && !\App\Core\Auth::has('hr')) {
+        if (!$this->canRegister($me) && !Auth::has('hr')) {
             flash('Реестр доступен делопроизводству.', 'error'); $this->redirect('/docs');
         }
         $dir = in_array($this->input('direction'), ['incoming', 'outgoing', 'internal'], true) ? $this->input('direction') : 'outgoing';
@@ -749,6 +766,153 @@ class DocumentController extends Controller
             'rows' => $rows, 'direction' => $dir, 'from' => $from, 'to' => $to,
             'dirLabel' => ['incoming' => 'входящих', 'outgoing' => 'исходящих', 'internal' => 'внутренних'][$dir],
         ], false);
+    }
+
+    // ---------- Регистрация (МосЭДО): ручная регистрация, журналы, бронь ----------
+
+    /** Форма ручной регистрации входящего/исходящего/внутреннего (делопроизводитель). */
+    public function registerForm(): void
+    {
+        Auth::requireLogin();
+        $me = Auth::user();
+        if (!$this->canRegister($me)) { flash('Регистрация документов — для делопроизводителя.', 'error'); $this->redirect('/docs'); }
+        $this->view('docs/register_form', [
+            'title' => 'Регистрация документа',
+            'types' => Database::all('SELECT * FROM doc_types ORDER BY name'),
+            'journals' => Database::all('SELECT * FROM doc_journals WHERE is_active=1 ORDER BY name'),
+            'correspondents' => Database::all('SELECT id, name, kind FROM correspondents WHERE is_active=1 ORDER BY name'),
+            'reservations' => Database::all('SELECT r.*, j.name AS jname FROM doc_number_reservations r JOIN doc_journals j ON j.id=r.journal_id WHERE r.doc_id IS NULL ORDER BY r.id DESC'),
+            'csrf' => Auth::csrf(),
+        ]);
+    }
+
+    /** Создать и сразу зарегистрировать документ без маршрута. */
+    public function registerStore(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        if (!$this->canRegister($me)) { $this->redirect('/docs'); }
+        $title = trim((string) $this->input('title'));
+        $typeId = (int) $this->input('type_id');
+        if ($title === '' || !$typeId) { flash('Укажите тип и заголовок.', 'error'); $this->redirect('/docs/register/new'); }
+        $c = $this->resolveCorrespondent();
+        $jid = (int) $this->input('journal_id') ?: null;
+        $docId = Database::insert(
+            'INSERT INTO documents (type_id, title, body, author_id, department_id, status, direction, correspondent_id, correspondent_name, incoming_number, incoming_date, delivery, journal_id)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            [$typeId, $title, (string) $this->input('body'), $me['id'], $me['department_id'] ?: null, 'registered',
+             $c['direction'], $c['id'], $c['name'], $c['inc_no'], $c['inc_date'], $c['delivery'], $jid]);
+        $this->saveFile($docId);
+        $res = RegistrationService::register($docId, [
+            'by' => (int) $me['id'], 'journal_id' => $jid,
+            'manual_no' => trim((string) $this->input('manual_no')),
+            'reg_date' => $this->input('reg_date') ?: null,
+            'reservation_id' => (int) $this->input('reservation_id') ?: null,
+        ]);
+        $this->history($docId, 'Зарегистрирован вручную, № ' . ($res['reg_number'] ?? ''));
+        flash($res['message'] ?? 'Зарегистрировано.');
+        $this->redirect('/docs/' . $docId);
+    }
+
+    /** Зарегистрировать существующий документ / правка рег.№ и даты (делопроизводитель). */
+    public function assignReg(string $id): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        if (!$this->canRegister($me)) { $this->redirect('/docs/' . (int) $id); }
+        if (!Database::scalar('SELECT 1 FROM documents WHERE id=?', [(int) $id])) { $this->redirect('/docs'); }
+        $res = RegistrationService::register((int) $id, [
+            'by' => (int) $me['id'],
+            'journal_id' => (int) $this->input('journal_id') ?: null,
+            'manual_no' => trim((string) $this->input('manual_no')),
+            'reg_date' => $this->input('reg_date') ?: null,
+        ]);
+        $this->history((int) $id, 'Регистрация (правка): № ' . ($res['reg_number'] ?? ''));
+        flash($res['message'] ?? 'Готово.');
+        $this->redirect('/docs/' . (int) $id);
+    }
+
+    /** Журналы регистрации (ведение + брони). */
+    public function journals(): void
+    {
+        Auth::requireLogin();
+        $me = Auth::user();
+        if (!$this->canRegister($me)) { flash('Журналы регистрации — для делопроизводителя.', 'error'); $this->redirect('/docs'); }
+        $this->view('docs/journals', [
+            'title' => 'Журналы регистрации',
+            'journals' => Database::all('SELECT j.*, (SELECT COUNT(*) FROM documents d WHERE d.journal_id=j.id) AS docs FROM doc_journals j ORDER BY j.id'),
+            'reservations' => Database::all('SELECT r.*, j.name AS jname, u.full_name AS by_name FROM doc_number_reservations r JOIN doc_journals j ON j.id=r.journal_id LEFT JOIN users u ON u.id=r.reserved_by WHERE r.doc_id IS NULL ORDER BY r.id DESC'),
+            'csrf' => Auth::csrf(),
+        ]);
+    }
+
+    public function storeJournal(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        if (!$this->canRegister($me)) { $this->redirect('/docs'); }
+        $id = (int) $this->input('id');
+        $name = trim((string) $this->input('name'));
+        if ($name === '') { flash('Укажите название журнала.', 'error'); $this->redirect('/docs/journals'); }
+        $dir = in_array($this->input('direction'), ['incoming', 'outgoing', 'internal'], true) ? $this->input('direction') : '';
+        $prefix = trim((string) $this->input('prefix'));
+        $idx = trim((string) $this->input('index_code'));
+        if ($id) {
+            Database::run('UPDATE doc_journals SET name=?, direction=?, prefix=?, index_code=?, is_active=? WHERE id=?',
+                [$name, $dir, $prefix, $idx, $this->input('is_active') ? 1 : 0, $id]);
+        } else {
+            Database::insert('INSERT INTO doc_journals (name, direction, prefix, index_code, is_active) VALUES (?,?,?,?,1)', [$name, $dir, $prefix, $idx]);
+        }
+        flash('Журнал сохранён.');
+        $this->redirect('/docs/journals');
+    }
+
+    /** Бронь следующего номера журнала. */
+    public function reserve(string $id): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        if (!$this->canRegister($me)) { $this->redirect('/docs/journals'); }
+        $res = RegistrationService::reserve((int) $id, (int) $me['id'], trim((string) $this->input('note')));
+        flash($res['message'] ?? 'Готово.');
+        $this->redirect('/docs/journals');
+    }
+
+    // ---------- Админ: откат действий в ЭДО ----------
+
+    /** Снять регистрационный номер (админ). */
+    public function unregister(string $id): void
+    {
+        Auth::requireRole('admin');
+        Auth::verifyCsrf();
+        Database::run('UPDATE documents SET reg_number=NULL, reg_seq=NULL, reg_year=NULL, registered_at=NULL, registered_by=NULL WHERE id=?', [(int) $id]);
+        Database::run('UPDATE doc_number_reservations SET doc_id=NULL WHERE doc_id=?', [(int) $id]);
+        $this->history((int) $id, 'Админ: снят регистрационный номер');
+        flash('Регистрационный номер снят.');
+        $this->redirect('/docs/' . (int) $id);
+    }
+
+    /** Отменить последнюю визу/подпись и вернуть документ на маршрут (админ). */
+    public function unvisa(string $id): void
+    {
+        Auth::requireRole('admin');
+        Auth::verifyCsrf();
+        if (!Database::scalar('SELECT 1 FROM documents WHERE id=?', [(int) $id])) { $this->redirect('/docs'); }
+        $last = Database::one(
+            "SELECT * FROM doc_approvers WHERE document_id=? AND status IN ('approved','acked','rejected','skipped') AND decided_at IS NOT NULL ORDER BY decided_at DESC, id DESC LIMIT 1",
+            [(int) $id]);
+        if (!$last) { flash('Нет виз для отмены.', 'error'); $this->redirect('/docs/' . (int) $id); }
+        Database::run("UPDATE doc_approvers SET status='pending', comment=NULL, decided_at=NULL, on_behalf_of=NULL, sign_type=NULL, sign_hash=NULL WHERE id=?", [(int) $last['id']]);
+        Database::run("UPDATE documents SET status='on_approval', current_step=?, reg_number=NULL, reg_seq=NULL, reg_year=NULL, registered_at=NULL, registered_by=NULL, finished_at=NULL WHERE id=?",
+            [(int) $last['step_no'], (int) $id]);
+        Database::run('UPDATE doc_number_reservations SET doc_id=NULL WHERE doc_id=?', [(int) $id]);
+        $this->history((int) $id, 'Админ: отменена последняя виза (' . (self::STAGE_LABEL[$last['stage_type']] ?? $last['stage_type']) . '), документ возвращён на маршрут');
+        flash('Последняя виза отменена, документ возвращён на маршрут.');
+        $this->redirect('/docs/' . (int) $id);
     }
 
     /** Списать документ в дело номенклатуры (или снять списание). */

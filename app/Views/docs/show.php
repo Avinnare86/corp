@@ -173,6 +173,41 @@ foreach ($route as $r) { $stages[(int)$r['step_no']][] = $r; }
     </section>
     <?php endif; ?>
 
+    <?php if (!empty($canRegister)): ?>
+    <section class="panel">
+        <h2>Регистрация</h2>
+        <p class="muted" style="margin-top:0">
+            <?= $doc['reg_number'] ? 'Зарегистрирован: <strong>' . e($doc['reg_number']) . '</strong>' . (!empty($doc['registered_at']) ? ' от ' . e(substr((string)$doc['registered_at'],0,10)) : '') : 'Не зарегистрирован' ?>
+        </p>
+        <form method="post" action="/docs/<?= (int)$doc['id'] ?>/assign-reg" class="form-inline" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <?= csrf_field() ?>
+            <label>Журнал
+                <select name="journal_id"><option value="">— по типу —</option>
+                    <?php foreach ($journals as $j): ?><option value="<?= (int)$j['id'] ?>" <?= (int)($doc['journal_id'] ?? 0)===(int)$j['id']?'selected':'' ?>><?= e($j['name']) ?></option><?php endforeach; ?>
+                </select>
+            </label>
+            <label>Дата регистрации<input type="date" name="reg_date" value="<?= e($doc['registered_at'] ? substr((string)$doc['registered_at'],0,10) : date('Y-m-d')) ?>"></label>
+            <label>Ручной рег.№<input type="text" name="manual_no" placeholder="пусто = авто" value="<?= e($doc['reg_number']) ?>"></label>
+            <button class="btn btn-primary"><?= $doc['reg_number'] ? 'Изменить регистрацию' : 'Зарегистрировать' ?></button>
+        </form>
+    </section>
+    <?php endif; ?>
+
+    <?php if (!empty($isAdminUser)): ?>
+    <section class="panel" style="border-left:4px solid #c0392b">
+        <h2 style="margin-top:0">Администрирование (откат действий)</h2>
+        <div class="form-inline" style="gap:8px;flex-wrap:wrap">
+            <?php if ($doc['reg_number']): ?>
+            <form method="post" action="/docs/<?= (int)$doc['id'] ?>/unregister" class="inline" onsubmit="return confirm('Снять регистрационный номер?')"><?= csrf_field() ?><button class="btn btn-mini">Снять рег.№</button></form>
+            <?php endif; ?>
+            <form method="post" action="/docs/<?= (int)$doc['id'] ?>/unvisa" class="inline" onsubmit="return confirm('Отменить последнюю визу и вернуть документ на маршрут?')"><?= csrf_field() ?><button class="btn btn-mini">Отменить последнюю визу</button></form>
+            <form method="post" action="/admin/data/document/<?= (int)$doc['id'] ?>/revert" class="inline" onsubmit="return confirm('Откатить статус документа на шаг назад?')"><?= csrf_field() ?><button class="btn btn-mini">↩ Откатить статус</button></form>
+            <form method="post" action="/admin/data/document/<?= (int)$doc['id'] ?>/delete" class="inline" onsubmit="return confirm('УДАЛИТЬ документ со всеми связями (маршрут, файлы-метаданные, история, поручения)?')"><?= csrf_field() ?><button class="btn btn-mini btn-danger">✕ Удалить документ</button></form>
+        </div>
+        <p class="muted" style="margin:6px 0 0">Действия фиксируются в журнале. «Откатить статус»/«Удалить» используют раздел «Управление данными».</p>
+    </section>
+    <?php endif; ?>
+
     <?php if ($history): ?>
     <section class="panel">
         <h2>История</h2>

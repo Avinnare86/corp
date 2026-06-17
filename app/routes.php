@@ -91,6 +91,15 @@ $router->post('/docs/{id}/recall',  [DocumentController::class, 'recall']);
 $router->post('/docs/{id}/order',   [DocumentController::class, 'order']);
 $router->post('/docs/{id}/redirect',[DocumentController::class, 'redirectTask']);
 $router->post('/docs/{id}/readers', [DocumentController::class, 'readers']);
+// Регистрация (МосЭДО): ручная регистрация, журналы, бронь; админ-откат действий
+$router->get('/docs/register/new',  [DocumentController::class, 'registerForm']);
+$router->post('/docs/register',     [DocumentController::class, 'registerStore']);
+$router->get('/docs/journals',      [DocumentController::class, 'journals']);
+$router->post('/docs/journals',     [DocumentController::class, 'storeJournal']);
+$router->post('/docs/journals/{id}/reserve', [DocumentController::class, 'reserve']);
+$router->post('/docs/{id}/assign-reg', [DocumentController::class, 'assignReg']);
+$router->post('/docs/{id}/unregister', [DocumentController::class, 'unregister']);
+$router->post('/docs/{id}/unvisa',  [DocumentController::class, 'unvisa']);
 
 // --- Визы: ходатайства ---
 $router->get('/visas',                  [\App\Controllers\VisaController::class, 'grid']);

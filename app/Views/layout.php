@@ -102,6 +102,13 @@ if ($uid) {
     ];
     $appealsInbox = \App\Controllers\AppealController::inboxCount((int) $uid);
     if ($isDocsMgr || $appealsInbox) { $gd[] = ['/appeals', 'Обращения граждан', $appealsInbox]; }
+    if ($can('clerk') || $isDocsMgr) {   // делопроизводитель / регистратор
+        $gd[] = ['/docs/register/new', 'Регистрация', 0];
+        $gd[] = ['/docs/journals', 'Журналы регистрации', 0];
+    }
+    if ($can('doc_controller')) {        // контролёр документов
+        $gd[] = ['/docs?folder=control', 'Контроль документов', 0];
+    }
     if ($isDocsMgr) { // менеджер проекта документы
         $gd[] = ['/docs/deputies', 'Замещение (СЭД)', 0];
         $gd[] = ['/nomenclature', 'Номенклатура дел', 0];
