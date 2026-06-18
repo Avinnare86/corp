@@ -250,6 +250,11 @@ $router->post('/timesheet2/{id}/sign',   [TabelController::class, 'sign']);
 $router->get('/timesheet2/{id}/view',    [TabelController::class, 'viewSigned']);
 $router->get('/timesheet2/{id}/export',  [TabelController::class, 'export']);
 $router->post('/timesheet2/{id}/delete', [TabelController::class, 'destroy']);
+// Сменный график колл-центра (2/2): план/факт часов
+$router->get('/shifts',         [\App\Controllers\ShiftController::class, 'index']);
+$router->get('/shifts/edit',    [\App\Controllers\ShiftController::class, 'edit']);
+$router->post('/shifts/save',   [\App\Controllers\ShiftController::class, 'save']);
+$router->get('/shifts/export',  [\App\Controllers\ShiftController::class, 'export']);
 
 // --- Меню контролёра ---
 $router->get('/inspect',                  [InspectionController::class, 'index']);

@@ -32,6 +32,12 @@ class PayrollService
         $rate      = (float) ($user['rate_volume'] ?? 1);
         $allowance = (float) ($user['allowance'] ?? 0);
         $schedule  = $user['schedule_type'] ?? '5_2';
+
+        // Колл-центр (график 2/2): «оклад» = ставка за час — отдельная почасовая модель.
+        // 5/2-логика ниже не затрагивается (ранний возврат).
+        if ($schedule === '2_2') {
+            return self::calculateHourly($employeeId, $period, $user, $oklad);
+        }
         // Норматив проверки анкет: NULL = классическая модель max(оклад, сделка);
         // задан (>=0) = аддитивная (оклад покрывает норматив, доплата по тарифу только сверх).
         $anketaNorm = $user['anketa_norm'] ?? null;
@@ -311,6 +317,136 @@ class PayrollService
             // совместимость со старыми вызовами
             'dossier_count'    => $anketaCount,
         ];
+    }
+
+    /**
+     * Почасовой расчёт (колл-центр, график 2/2): «оклад» = ставка за час.
+     * Базис: прошлый месяц — по факту (если введён), текущий/будущий — по плану (прогноз).
+     * Доплаты (ночные/праздничные/сверхурочные) — независимые надбавки поверх базы; персональная надбавка по ТК.
+     */
+    private static function calculateHourly(int $employeeId, string $period, array $user, float $rate): array
+    {
+        $nightPct = Settings::nightPct();
+        $holidayMult = Settings::holidayMult();
+        $overtimeMult = Settings::overtimeMult();
+
+        $planHours = self::shiftHours($employeeId, $period, 'plan_hours');
+        $factHours = self::shiftHours($employeeId, $period, 'fact_hours');
+        $useFact = ($period < self::currentPeriod()) && $factHours > 0;
+
+        if ($useFact) {
+            $basis = 'fact';
+            $H  = $factHours;
+            $Hn = self::shiftHours($employeeId, $period, 'fact_night');
+            $Hh = self::shiftHours($employeeId, $period, 'holiday_hours');
+            $Ho = self::shiftHours($employeeId, $period, 'overtime_hours');
+        } else {
+            $H  = $planHours;
+            $Hn = self::shiftHours($employeeId, $period, 'plan_night');
+            $Hh = 0.0; $Ho = 0.0;   // праздничные/сверхурочные — только в факт-табеле
+            $basis = $planHours > 0 ? 'plan' : 'none';
+        }
+
+        $base        = round($H * $rate, 2);
+        $nightPay    = round($Hn * $rate * $nightPct / 100, 2);
+        $holidayPay  = round($Hh * $rate * max(0.0, $holidayMult - 1), 2);
+        $overtimePay = round($Ho * $rate * max(0.0, $overtimeMult - 1), 2);
+        $accrued     = round($base + $nightPay + $holidayPay + $overtimePay, 2);
+
+        $bpct = (float) ($user['hourly_bonus_pct'] ?? 0);
+        $brub = (float) ($user['hourly_bonus_rub'] ?? 0);
+        $personalBonus = $bpct > 0 ? round($accrued * $bpct / 100, 2) : round($brub, 2);
+
+        $gross = round($accrued + $personalBonus, 2);
+
+        // Штрафы (для колл-центра обычно 0): та же логика, но итог не ниже 0.
+        $cutoff = 25;
+        $penThis = self::penaltySum($employeeId, $period, 1, $cutoff) + self::visaDeductionSum($employeeId, $period, 1, $cutoff);
+        $prev = date('Y-m', strtotime($period . '-01 -1 month'));
+        $penCarryIn = self::penaltySum($employeeId, $prev, 26, 31) + self::visaDeductionSum($employeeId, $prev, 26, 31);
+        $penalties = round($penThis + $penCarryIn, 2);
+        $penaltyEffective = round(min($penalties, $gross), 2);
+        $penaltyCapped = $penaltyEffective + 0.005 < $penalties;
+        $total = round($gross - $penaltyEffective, 2);
+
+        $planShifts = self::shiftCount($employeeId, $period, 'plan_hours');
+        $factShifts = self::shiftCount($employeeId, $period, 'fact_hours');
+
+        return [
+            'period'           => $period,
+            'schedule_type'    => '2_2',
+            'oklad'            => $rate,
+            'rate_volume'      => 1.0,
+            'allowance'        => 0.0,
+            'norm_days'        => $planShifts,
+            'worked_days'      => $useFact ? $factShifts : $planShifts,
+            'prorate'          => 1.0,
+            'oklad_guaranteed' => $accrued,
+            'allow_guaranteed' => 0.0,
+            'floor'            => $accrued,
+            'anketa_count' => 0, 'anketa_sum' => 0.0, 'anketa_breakdown' => [],
+            'ops_sum' => 0.0, 'ops_breakdown' => [], 'piecework' => 0.0,
+            'fix_sum' => 0.0, 'fix_breakdown' => [], 'earned' => 0.0,
+            'reached_oklad' => true, 'reached_level' => true,
+            'norm_model' => false, 'anketa_norm_weekly' => null, 'anketa_checked' => 0,
+            'anketa_covered' => 0, 'anketa_above_count' => 0, 'anketa_above_sum' => 0.0,
+            'gross'            => $gross,
+            'penalties'        => $penalties,
+            'penalty_effective'=> $penaltyEffective,
+            'penalty_capped'   => $penaltyCapped,
+            'piece_settled' => 0.0, 'piece_carry' => 0.0,
+            'penalty_carry_in' => round($penCarryIn, 2), 'penalty_deferred' => 0.0,
+            'stim_monthly' => 0.0, 'stim_onetime' => 0.0, 'stim_total' => 0.0,
+            'min_total' => $gross, 'over_total' => 0.0, 'oklad_cap' => $accrued,
+            's_ank' => 0.0, 's_viz' => 0.0, 's_total' => 0.0, 'b1_sdelka' => 0.0, 'b1_dopl' => 0.0,
+            'g_ank' => 0.0, 'g_viz' => 0.0, 'g_oth' => 0.0, 'stim_guaranteed' => 0.0,
+            'ovf_total' => 0.0, 'ovf_ank' => 0.0, 'ovf_viz' => 0.0, 'absorbed' => 0.0, 'leftover_overflow' => 0.0,
+            'b2_ank_sdelka' => 0.0, 'b2_ank_dopl' => 0.0, 'b2_viz_sdelka' => 0.0, 'b2_viz_dopl' => 0.0, 'b2_oth_dopl' => 0.0,
+            'b3_onetime' => 0.0, 'b3_leftover' => 0.0, 'b3_fix' => 0.0, 'b3_total' => 0.0,
+            'penalty_details_flag' => $penalties > 0.0049,
+            'total'            => $total,
+            'dossier_count'    => 0,
+            // ===== почасовые ключи =====
+            'is_hourly'      => true,
+            'hourly_rate'    => round($rate, 2),
+            'used_basis'     => $basis,            // fact | plan | none
+            'plan_hours'     => round($planHours, 2),
+            'fact_hours'     => round($factHours, 2),
+            'hours_paid'     => round($H, 2),
+            'night_hours'    => round($Hn, 2),
+            'holiday_hours'  => round($Hh, 2),
+            'overtime_hours' => round($Ho, 2),
+            'base_pay'       => $base,
+            'night_pay'      => $nightPay,
+            'night_pct'      => $nightPct,
+            'holiday_pay'    => $holidayPay,
+            'holiday_mult'   => $holidayMult,
+            'overtime_pay'   => $overtimePay,
+            'overtime_mult'  => $overtimeMult,
+            'personal_bonus' => $personalBonus,
+            'bonus_pct'      => $bpct,
+            'accrued'        => $accrued,
+        ];
+    }
+
+    /** Сумма колонки часов из shift_days за период YYYY-MM (PG-safe substr). */
+    private static function shiftHours(int $employeeId, string $period, string $col): float
+    {
+        if (!in_array($col, ['plan_hours','plan_night','fact_hours','fact_night','holiday_hours','overtime_hours'], true)) {
+            return 0.0;
+        }
+        return (float) Database::scalar(
+            "SELECT COALESCE(SUM($col),0) FROM shift_days WHERE employee_id = ? AND substr(work_date,1,7) = ?",
+            [$employeeId, $period]);
+    }
+
+    /** Число смен (дней с >0 часами) в графике/факте за период — для инфо. */
+    private static function shiftCount(int $employeeId, string $period, string $col): int
+    {
+        if (!in_array($col, ['plan_hours','fact_hours'], true)) { return 0; }
+        return (int) Database::scalar(
+            "SELECT COUNT(*) FROM shift_days WHERE employee_id = ? AND substr(work_date,1,7) = ? AND $col > 0",
+            [$employeeId, $period]);
     }
 
     /** Календарные рабочие дни месяца (Пн–Пт) — норма по умолчанию, если нет табеля. Никогда 0. */

@@ -432,7 +432,7 @@ class AdminController extends Controller
         // does_anketas/does_operations — из ролей (Оргструктура → syncLegacyFlags).
         // Надбавка НЕ здесь: её устанавливает только бухгалтерия (setAllowance), кадры её не трогают.
         Database::run(
-            'UPDATE users SET full_name=?, role=?, position=?, position_id=?, oklad=?, rate_volume=?, schedule_type=?, email=?, is_active=? WHERE id=?',
+            'UPDATE users SET full_name=?, role=?, position=?, position_id=?, oklad=?, rate_volume=?, schedule_type=?, email=?, is_active=?, hourly_bonus_pct=?, hourly_bonus_rub=? WHERE id=?',
             [
                 $this->input('full_name'),
                 $this->input('role', 'employee'),
@@ -441,6 +441,8 @@ class AdminController extends Controller
                 $this->input('schedule_type', '5_2'),
                 trim((string) $this->input('email', '')),
                 (int) ($this->input('is_active') ? 1 : 0),
+                max(0.0, (float) str_replace(',', '.', (string) $this->input('hourly_bonus_pct', 0))),
+                max(0.0, (float) str_replace(',', '.', (string) $this->input('hourly_bonus_rub', 0))),
                 $id,
             ]
         );
@@ -714,6 +716,9 @@ class AdminController extends Controller
             'penaltyStep'          => Settings::penaltyStep(),
             'penaltyMaxMultiplier' => Settings::penaltyMaxMultiplier(),
             'dailyNorm'            => Settings::dailyNorm(),
+            'nightPct'             => Settings::nightPct(),
+            'holidayMult'          => Settings::holidayMult(),
+            'overtimeMult'         => Settings::overtimeMult(),
             'or' => [
                 'key_set' => Secrets::isSet('openrouter_key'),
                 'model'   => (string) Settings::get('openrouter_model'),
@@ -740,6 +745,10 @@ class AdminController extends Controller
         Settings::set('penalty_step', (float) $this->input('penalty_step', 0.5));
         Settings::set('penalty_max_multiplier', (float) $this->input('penalty_max_multiplier', 2.0));
         Settings::set('daily_norm', (float) $this->input('daily_norm', 60));
+        // Почасовая оплата (колл-центр 2/2) — только если отправлена форма с этими полями
+        if ($this->input('night_pct') !== null) { Settings::set('night_pct', (float) $this->input('night_pct', 20)); }
+        if ($this->input('holiday_mult') !== null) { Settings::set('holiday_mult', (float) $this->input('holiday_mult', 2)); }
+        if ($this->input('overtime_mult') !== null) { Settings::set('overtime_mult', (float) $this->input('overtime_mult', 1.5)); }
         // OpenRouter (ИИ для виз)
         if ($this->input('openrouter_key') !== '' && $this->input('openrouter_key') !== null) {
             Secrets::set('openrouter_key', trim((string) $this->input('openrouter_key')));

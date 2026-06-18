@@ -38,6 +38,22 @@ $tables['users'] = "CREATE TABLE IF NOT EXISTS users (
     created_at  TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
+// Сменный график колл-центра (2/2): план и факт по дням. Полумесяц/месяц = диапазон дат.
+// plan_* — план (часы/смену, из них ночные); fact_* — факт; holiday/overtime — только факт.
+$tables['shift_days'] = "CREATE TABLE IF NOT EXISTS shift_days (
+    id $ID,
+    employee_id    INT NOT NULL,
+    work_date      DATE NOT NULL,
+    plan_hours     $MONEY NOT NULL DEFAULT 0,
+    plan_night     $MONEY NOT NULL DEFAULT 0,
+    fact_hours     $MONEY NOT NULL DEFAULT 0,
+    fact_night     $MONEY NOT NULL DEFAULT 0,
+    holiday_hours  $MONEY NOT NULL DEFAULT 0,
+    overtime_hours $MONEY NOT NULL DEFAULT 0,
+    updated_at     TIMESTAMP DEFAULT $NOW,
+    UNIQUE (employee_id, work_date)
+) $ENGINE";
+
 $tables['countries'] = "CREATE TABLE IF NOT EXISTS countries (
     code     VARCHAR(10) NOT NULL PRIMARY KEY,
     name     VARCHAR(150) NOT NULL,
@@ -663,6 +679,9 @@ foreach ([
     // Недельный норматив проверки анкет «за оклад»: NULL = классическая модель max(оклад, сделка);
     // задан (>=0) = аддитивная модель (оклад+надбавка покрывают норматив, доплата по тарифу только сверх; 0 = чистый сдельщик).
     'anketa_norm'        => 'INT NULL DEFAULT NULL',
+    // Персональная надбавка по ТК для почасовиков (2/2): % важнее, иначе фикс ₽/мес.
+    'hourly_bonus_pct'   => 'NUMERIC NOT NULL DEFAULT 0',
+    'hourly_bonus_rub'   => "$MONEY NOT NULL DEFAULT 0",
 ] as $col => $ddl) {
     if (!columnExists('users', $col)) {
         $pdo->exec($ddlFix("ALTER TABLE users ADD COLUMN $col $ddl"));

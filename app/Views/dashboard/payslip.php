@@ -4,8 +4,10 @@ $doesAnketas = (int) ($user['does_anketas'] ?? 1) === 1;
 $doesOps = (int) ($user['does_operations'] ?? 0) === 1;
 $p = $payroll;
 $normModel = !empty($p['norm_model']);
+$isHourly = !empty($p['is_hourly']);
 $over = round((float) $p['total'] - (float) $p['min_total'], 2); // сверх минимума (после снижения за ошибки)
 $penaltyRows = $penaltyRows ?? [];
+$hnum = fn($v) => rtrim(rtrim(number_format((float) $v, 2, '.', ' '), '0'), '.'); // часы без лишних нулей
 ?>
 <div class="chat-head">
     <a class="btn btn-mini" href="/">← Главная</a>
@@ -21,7 +23,11 @@ $penaltyRows = $penaltyRows ?? [];
     <div class="card">
         <div class="card-label">Ожидаемая ЗП за <?= e($p['period']) ?></div>
         <div class="card-value big"><?= money($p['total']) ?></div>
-        <div class="muted">не ниже минимума <?= money($p['min_total']) ?></div>
+        <?php if ($isHourly): ?>
+            <div class="muted"><?= ($p['used_basis'] ?? 'none') === 'fact' ? 'итог по факту' : (($p['used_basis'] ?? 'none') === 'plan' ? 'прогноз по плану' : 'график не заполнен') ?></div>
+        <?php else: ?>
+            <div class="muted">не ниже минимума <?= money($p['min_total']) ?></div>
+        <?php endif; ?>
     </div>
     <div class="card">
         <div class="card-label">Место в рейтинге</div>
@@ -58,13 +64,22 @@ $penaltyRows = $penaltyRows ?? [];
 <section class="panel">
     <h2>Расчётный лист за <?= e($p['period']) ?></h2>
 
+    <?php if ($isHourly): ?>
+    <table class="table payslip" style="max-width:560px">
+        <tr><td>Ставка за час</td><td class="num"><?= money($p['hourly_rate']) ?>/ч</td></tr>
+        <tr><td>Смен по графику (план)</td><td class="num"><?= (int) $p['norm_days'] ?></td></tr>
+        <tr><td>Отработано смен (факт)</td><td class="num"><?= (int) $p['worked_days'] ?></td></tr>
+        <tr><td>Часы: план / факт</td><td class="num"><?= $hnum($p['plan_hours']) ?> / <?= $hnum($p['fact_hours']) ?> ч</td></tr>
+    </table>
+    <?php else: ?>
     <table class="table payslip" style="max-width:520px">
         <tr><td>Количество рабочих дней</td><td class="num"><?= (int) $p['norm_days'] ?> <?= $unit ?></td></tr>
         <tr><td>Количество дней отработано</td><td class="num"><?= (int) $p['worked_days'] ?> <?= $unit ?></td></tr>
     </table>
+    <?php endif; ?>
 
     <?php // ----- Детализация сделки (как есть): анкеты/операции + подработки ----- ?>
-    <?php if ($doesAnketas || $doesOps): ?>
+    <?php if (!$isHourly && ($doesAnketas || $doesOps)): ?>
     <h3 class="sub">Сделка — детализация</h3>
     <?php if ($normModel): ?>
         <p class="muted" style="margin:.2rem 0 .4rem">Анкеты — только <strong>сверх норматива</strong>: проверено
@@ -104,6 +119,27 @@ $penaltyRows = $penaltyRows ?? [];
     <?php // ===================== Начисления по видам ===================== ?>
     <h3 class="sub">Начислено</h3>
     <table class="table payslip">
+        <?php if ($isHourly): ?>
+        <!-- Почасовая оплата (2/2) -->
+        <tr class="pay-head"><td><strong>Оплата по часам</strong> <span class="muted" style="font-weight:400">(<?= ($p['used_basis'] ?? 'none') === 'fact' ? 'факт' : (($p['used_basis'] ?? 'none') === 'plan' ? 'план/прогноз' : 'график не заполнен') ?>)</span></td><td class="num"><strong><?= money($p['base_pay']) ?></strong></td></tr>
+        <tr><td class="sub-row"><?= $hnum($p['hours_paid']) ?> ч × <?= money($p['hourly_rate']) ?>/ч</td><td class="num"><?= money($p['base_pay']) ?></td></tr>
+        <?php if (($p['night_pay'] ?? 0) > 0): ?>
+        <tr><td class="sub-row">+ ночные (<?= $hnum($p['night_hours']) ?> ч × +<?= rtrim(rtrim(number_format((float)$p['night_pct'],1,'.',''),'0'),'.') ?>%)</td><td class="num plus">+<?= money($p['night_pay']) ?></td></tr>
+        <?php endif; ?>
+        <?php if (($p['holiday_pay'] ?? 0) > 0): ?>
+        <tr><td class="sub-row">+ праздничные (<?= $hnum($p['holiday_hours']) ?> ч, ×<?= rtrim(rtrim(number_format((float)$p['holiday_mult'],2,'.',''),'0'),'.') ?>)</td><td class="num plus">+<?= money($p['holiday_pay']) ?></td></tr>
+        <?php endif; ?>
+        <?php if (($p['overtime_pay'] ?? 0) > 0): ?>
+        <tr><td class="sub-row">+ сверхурочные (<?= $hnum($p['overtime_hours']) ?> ч, ×<?= rtrim(rtrim(number_format((float)$p['overtime_mult'],2,'.',''),'0'),'.') ?>)</td><td class="num plus">+<?= money($p['overtime_pay']) ?></td></tr>
+        <?php endif; ?>
+        <?php if (($p['personal_bonus'] ?? 0) > 0): ?>
+        <tr><td class="sub-row">+ персональная надбавка<?= ($p['bonus_pct'] ?? 0) > 0 ? ' (' . rtrim(rtrim(number_format((float)$p['bonus_pct'],2,'.',''),'0'),'.') . '%)' : '' ?></td><td class="num plus">+<?= money($p['personal_bonus']) ?></td></tr>
+        <?php endif; ?>
+        <tr class="pay-head"><td><strong>Начислено всего</strong></td><td class="num"><strong><?= money($p['gross']) ?></strong></td></tr>
+        <?php if (($p['used_basis'] ?? 'none') === 'none'): ?>
+        <tr><td colspan="2" class="muted">График на этот месяц не заполнен — ожидаемая ЗП 0. Заполните сменный график.</td></tr>
+        <?php endif; ?>
+        <?php else: ?>
         <!-- Блок 1: оклад -->
         <tr class="pay-head"><td><strong>Начислено оклад</strong></td><td class="num"><strong><?= money($p['oklad_cap']) ?></strong></td></tr>
         <?php if ($normModel): ?>
@@ -142,6 +178,7 @@ $penaltyRows = $penaltyRows ?? [];
             <tr><td class="sub-row">в т.ч. подработки</td><td class="num"><?= money($p['b3_fix']) ?></td></tr>
             <?php endif; ?>
         <?php endif; ?>
+        <?php endif; /* isHourly / 5-2 */ ?>
 
         <!-- Снижение за ошибки -->
         <tr>
@@ -176,7 +213,7 @@ $penaltyRows = $penaltyRows ?? [];
 
         <!-- ИТОГО -->
         <tr class="total">
-            <td>ИТОГО к выплате <span class="muted" style="font-weight:400">(минимум <?= money($p['min_total']) ?> + сверх минимума <?= money($over) ?>)</span></td>
+            <td>ИТОГО к выплате <?php if (!$isHourly): ?><span class="muted" style="font-weight:400">(минимум <?= money($p['min_total']) ?> + сверх минимума <?= money($over) ?>)</span><?php else: ?><span class="muted" style="font-weight:400">(<?= ($p['used_basis'] ?? 'none') === 'fact' ? 'итог по факту' : (($p['used_basis'] ?? 'none') === 'plan' ? 'прогноз по плану' : 'график не заполнен') ?>)</span><?php endif; ?></td>
             <td class="num"><strong><?= money($p['total']) ?></strong></td>
         </tr>
     </table>

@@ -69,6 +69,7 @@ if ($uid) {
         $g = [];
         if ($isTimekeeper || $isHrMgr || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacations', 'Отпуска', $vacInbox]; }
         if ($isTimekeeper) { $g[] = ['/timesheet2', 'Эл. табель', 0]; }
+        if ($isTimekeeper || $isHrMgr || $isHrAcc) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; }
         if ($isHrAcc) { $g[] = ['/timesheet2/coverage', 'Покрытие табелями', 0]; }
         if ($canSeeStaff) { $g[] = ['/admin/employees', 'Сотрудники', 0]; }
         // управление оргструктурой/должностями/табелем — только менеджер проекта кадры или кадровик

@@ -53,4 +53,22 @@ class Settings
     {
         return (float) self::get('daily_norm', 60);
     }
+
+    /** Доплата за ночные часы, % к часовой ставке (ТК ст.154, минимум 20%). */
+    public static function nightPct(): float
+    {
+        return (float) self::get('night_pct', 20);
+    }
+
+    /** Множитель оплаты праздничного часа (ТК ст.153, минимум ×2). */
+    public static function holidayMult(): float
+    {
+        return (float) self::get('holiday_mult', 2);
+    }
+
+    /** Множитель оплаты сверхурочного часа (ТК ст.152). */
+    public static function overtimeMult(): float
+    {
+        return (float) self::get('overtime_mult', 1.5);
+    }
 }

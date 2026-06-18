@@ -50,9 +50,12 @@ $rate = rtrim(rtrim(number_format((float)$u['rate_volume'], 2, '.', ''), '0'), '
             <label>Режим
                 <select name="schedule_type">
                     <option value="5_2" <?= ($u['schedule_type']??'5_2')==='5_2'?'selected':'' ?>>5/2 (дни)</option>
-                    <option value="2_2" <?= ($u['schedule_type']??'')==='2_2'?'selected':'' ?>>2/2 Call-центр (смены)</option>
+                    <option value="2_2" <?= ($u['schedule_type']??'')==='2_2'?'selected':'' ?>>2/2 Call-центр (часы)</option>
                 </select>
+                <?php if (($u['schedule_type']??'')==='2_2'): ?><span class="muted" style="font-size:.78rem">для 2/2 «оклад» = ставка ₽/час; ЗП — по сменному графику</span><?php endif; ?>
             </label>
+            <label>Персональная надбавка, %<input type="number" step="0.1" name="hourly_bonus_pct" value="<?= e(rtrim(rtrim(number_format((float)($u['hourly_bonus_pct']??0),2,'.',''),'0'),'.')) ?>" title="надбавка по ТК, % от начисленного (для почасовиков)"></label>
+            <label>…или фикс, ₽/мес<input type="number" step="0.01" name="hourly_bonus_rub" value="<?= e(rtrim(rtrim(number_format((float)($u['hourly_bonus_rub']??0),2,'.',''),'0'),'.')) ?>" title="если % не задан"></label>
             <label>Email<input type="email" name="email" value="<?= e($u['email'] ?? '') ?>" placeholder="user@org.ru"></label>
             <label>Новый пароль<input type="text" name="password" placeholder="оставьте пустым"></label>
             <label class="chk-field"><span>Активен</span><input type="checkbox" name="is_active" value="1" <?= (int)$u['is_active']?'checked':'' ?>></label>

@@ -15,6 +15,15 @@
         <label>Потолок множителя штрафа
             <input type="number" step="0.1" name="penalty_max_multiplier" value="<?= e($penaltyMaxMultiplier) ?>">
         </label>
+        <label>Ночные (колл-центр 2/2), % к часу
+            <input type="number" step="1" name="night_pct" value="<?= e($nightPct) ?>">
+        </label>
+        <label>Множитель праздничных часов (×)
+            <input type="number" step="0.1" name="holiday_mult" value="<?= e($holidayMult) ?>">
+        </label>
+        <label>Множитель сверхурочных часов (×)
+            <input type="number" step="0.1" name="overtime_mult" value="<?= e($overtimeMult) ?>">
+        </label>
         <button class="btn btn-primary">Сохранить</button>
     </form>
 </section>
