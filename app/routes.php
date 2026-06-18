@@ -115,6 +115,7 @@ $router->get('/visas/done',             [\App\Controllers\VisaController::class,
 $router->get('/visas/row/{id}',         [\App\Controllers\VisaController::class, 'row']);
 $router->post('/visas/row/{id}/save',   [\App\Controllers\VisaController::class, 'rowSave']);
 $router->post('/visas/row/{id}/rework', [\App\Controllers\VisaController::class, 'rowRework']);
+$router->post('/visas/row/{id}/passport-rework', [\App\Controllers\VisaController::class, 'rowPassportRework']);
 $router->post('/visas/export',          [\App\Controllers\VisaController::class, 'export']);
 $router->get('/visas/batch/{id}/rows',  [\App\Controllers\VisaController::class, 'batchRows']);
 $router->post('/visas/defaults',        [\App\Controllers\VisaController::class, 'saveDefaults']);
@@ -122,6 +123,8 @@ $router->post('/visas/batch/{id}/params', [\App\Controllers\VisaController::clas
 $router->get('/visas/report',           [\App\Controllers\VisaController::class, 'report']);
 $router->get('/visas/report/status',     [\App\Controllers\VisaController::class, 'statusReport']);
 $router->get('/visas/report/status/export', [\App\Controllers\VisaController::class, 'statusReportExport']);
+$router->get('/visas/report/period',      [\App\Controllers\VisaController::class, 'periodReport']);
+$router->get('/visas/report/period/export', [\App\Controllers\VisaController::class, 'periodReportExport']);
 $router->get('/visas/rating',           [\App\Controllers\VisaController::class, 'rating']);
 $router->get('/visas/batch/{id}/zip',   [\App\Controllers\VisaController::class, 'exportZip']);
 $router->get('/visas/batch/{id}/pdf',   [\App\Controllers\VisaController::class, 'exportPdf']);
@@ -268,6 +271,7 @@ $router->get('/admin',                    [AdminController::class, 'index']);
 $router->get('/admin/employees',          [AdminController::class, 'employees']);
 $router->get('/admin/employees/{id}',     [AdminController::class, 'employeeCard']);
 $router->post('/admin/employees',         [AdminController::class, 'storeEmployee']);
+$router->post('/admin/employees/import',   [AdminController::class, 'importEmployees']);
 $router->post('/admin/employees/{id}/update', [AdminController::class, 'updateEmployee']);
 $router->post('/admin/employees/{id}/delete', [AdminController::class, 'deleteEmployee']);
 $router->post('/admin/employees/{id}/allowance', [AdminController::class, 'setAllowance']);

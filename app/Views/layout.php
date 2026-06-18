@@ -57,6 +57,7 @@ if ($uid) {
             $g[] = ['/visas/rework', 'МИД: на доработке', \App\Controllers\VisaOpisController::reworkCount()];
             $g[] = ['/visas/report', 'Отчёт', 0];
             $g[] = ['/visas/report/status', 'Сводный отчёт', 0];
+            $g[] = ['/visas/report/period', 'Динамика за период', 0];
         }
         if ($can('visa_worker', 'visa_manager')) { $g[] = ['/visas/rating', 'Рейтинг', 0]; }
         if ($can('piecework_worker')) { $g[] = ['/piecework', 'Визы/операции (учёт)', 0]; }

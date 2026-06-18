@@ -34,6 +34,7 @@ class VisaController extends Controller
         'in_opis'    => 'В описи',
         'instructed' => 'Указание получено',
         'rework'     => 'Доработка (отказ МИД)',
+        'rework_pass'=> 'Доработка (срок паспорта)',
     ];
 
     /** Базовые настройки бланка (применяются к новым партиям; меняются виз-менеджером). */
@@ -60,6 +61,34 @@ class VisaController extends Controller
         return $me['role'] === 'admin' || (int) ($me['is_visa_manager'] ?? 0) === 1;
     }
 
+    /**
+     * Класс подсветки срока действия паспорта (от сегодняшней даты):
+     * '' (норма) | 'exp-warn' (жёлтый, остаётся < 1 года 7 мес) | 'exp-bad' (красный, < 1 года 6 мес).
+     * Принимает дату вида ДД.ММ.ГГ или ДД.ММ.ГГГГ.
+     */
+    public static function expiryClass(?string $expiry): string
+    {
+        $expiry = trim((string) $expiry);
+        if ($expiry === '' || !preg_match('#^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$#', $expiry, $m)) { return ''; }
+        $d = (int) $m[1]; $mo = (int) $m[2]; $y = (int) $m[3];
+        if ($y < 100) { $y += 2000; }
+        if (!checkdate($mo, $d, $y)) { return ''; }
+        $exp  = mktime(0, 0, 0, $mo, $d, $y);
+        $today = strtotime('today');
+        if ($exp < strtotime('+1 year +6 months', $today)) { return 'exp-bad'; }
+        if ($exp < strtotime('+1 year +7 months', $today)) { return 'exp-warn'; }
+        return '';
+    }
+
+    /** Журнал смены статуса визовой строки (для отчёта динамики за период). Не ломает основную работу. */
+    public static function logStatus(int $rowId, string $status): void
+    {
+        try {
+            Database::insert('INSERT INTO visa_status_events (row_id, status, changed_at, changed_by) VALUES (?,?,?,?)',
+                [$rowId, $status, date('Y-m-d H:i:s'), (int) (Auth::id() ?? 0) ?: null]);
+        } catch (\Throwable $e) { /* таблица может отсутствовать до миграции — игнорируем */ }
+    }
+
     public static function inboxCount(int $uid): int
     {
         return (int) Database::scalar('SELECT COUNT(*) FROM visa_rows WHERE assigned_to = ? AND checked_at IS NULL', [$uid]);
@@ -73,13 +102,30 @@ class VisaController extends Controller
         $me = Auth::user();
         if (!$this->isVisaManager($me)) { flash('Раздел виз-менеджера.', 'error'); $this->redirect('/'); }
 
+        // Фильтр по дате загрузки + пагинация (10/стр) + «показать все».
+        $d = trim((string) $this->input('d', ''));
+        $all = $this->input('all') === '1';
+        $page = max(1, (int) $this->input('page', 1));
+        $perPage = 10;
+        $where = ''; $wp = [];
+        if ($d !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) { $where = " WHERE substr(b.created_at,1,10) = ?"; $wp[] = $d; }
+        $totalBatches = (int) Database::scalar("SELECT COUNT(*) FROM visa_batches b" . $where, $wp);
+        $pages = max(1, (int) ceil($totalBatches / $perPage));
+        if (!$all) { $page = min($page, $pages); }
+        $limit = $all ? '' : (" LIMIT $perPage OFFSET " . (($page - 1) * $perPage));
         $batches = Database::all(
             "SELECT b.*,
                     (SELECT COUNT(*) FROM visa_rows r WHERE r.batch_id=b.id) AS total,
                     (SELECT COUNT(*) FROM visa_rows r WHERE r.batch_id=b.id AND (r.ai_address IS NULL OR r.ai_address='')) AS no_ai,
                     (SELECT COUNT(*) FROM visa_rows r WHERE r.batch_id=b.id AND r.assigned_to IS NULL) AS unassigned,
                     (SELECT COUNT(*) FROM visa_rows r WHERE r.batch_id=b.id AND r.checked_at IS NOT NULL) AS checked
-               FROM visa_batches b ORDER BY b.id DESC");
+               FROM visa_batches b" . $where . " ORDER BY b.id DESC" . $limit, $wp);
+        // Страна(ы) партии — по гражданству её строк (driver-safe, в PHP).
+        foreach ($batches as &$b) {
+            $cs = Database::all("SELECT DISTINCT citizenship FROM visa_rows WHERE batch_id=? AND citizenship<>'' ORDER BY citizenship", [$b['id']]);
+            $b['country'] = implode(', ', array_map(fn($r) => $r['citizenship'], $cs));
+        }
+        unset($b);
 
         $specialists = Database::all(
             "SELECT u.id, u.full_name,
@@ -100,6 +146,7 @@ class VisaController extends Controller
             'aiReady' => OpenRouter::configured(),
             'defaults' => self::blankDefaults(),
             'csrf' => \App\Core\Auth::csrf(),
+            'flt' => ['d' => $d, 'all' => $all, 'page' => $page, 'pages' => $pages, 'total' => $totalBatches],
         ]);
     }
 
@@ -149,6 +196,7 @@ class VisaController extends Controller
                 $vals = [$batchId];
                 foreach ($cols as $c) { $vals[] = (string) ($r[$c] ?? ''); }
                 $ins->execute($vals);
+                self::logStatus((int) $pdo->lastInsertId(), 'loaded');
                 $added++;
             }
         }
@@ -253,6 +301,7 @@ class VisaController extends Controller
         $stmt = Database::run("UPDATE visa_rows SET assigned_to = ?, status = ? WHERE id IN ($place) AND checked_at IS NULL AND status != 'rework'",
             array_merge([$assignTo, $newStatus], $ids));
         $moved = $stmt->rowCount();
+        foreach ($ids as $rid) { self::logStatus((int) $rid, $newStatus); }
         if ($assignTo && $moved) {
             NotificationService::create($assignTo, 'Назначены визовые анкеты', "Вам назначено {$moved} анкет на проверку виз.");
         }
@@ -320,6 +369,7 @@ class VisaController extends Controller
             if (!$set) { continue; }
             $vals[] = (int) $id;
             Database::run('UPDATE visa_rows SET ' . implode(', ', $set) . ' WHERE id = ?', $vals);
+            if ($finalize) { self::logStatus((int) $id, 'checked'); }
             $saved++;
         }
         $pdo->commit();
@@ -437,8 +487,26 @@ class VisaController extends Controller
             NotificationService::create((int) $row['assigned_to'], 'Визовая анкета возвращена на доработку',
                 'Анкета ' . ($row['out_no'] ?: '#' . $row['id']) . ($note !== '' ? ': ' . $note : '') . ' — она снова в вашей очереди проверки.');
         }
+        self::logStatus((int) $id, 'assigned');
         flash('Анкета возвращена на доработку — снова в очереди специалиста.');
         $this->redirect($this->isVisaManager($me) ? '/visas/batch/' . (int) $row['batch_id'] . '/rows' : '/visas');
+    }
+
+    /** Доработка по сроку действия паспорта (с грида специалиста или карточки) — без штрафа. */
+    public function rowPassportRework(string $id): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        $rid = (int) $id;
+        $row = Database::one('SELECT id, assigned_to, batch_id, out_no FROM visa_rows WHERE id = ?', [$rid]);
+        if (!$row) { $this->redirect('/visas'); }
+        $own = (int) ($row['assigned_to'] ?? 0) === (int) $me['id'];
+        if (!$own && !$this->isVisaManager($me)) { flash('Строка недоступна.', 'error'); $this->redirect('/visas'); }
+        \App\Services\VisaReworkService::passportRework($rid, (int) $me['id']);
+        self::logStatus($rid, 'rework_pass');
+        flash('Анкета ' . ($row['out_no'] ?: '#' . $rid) . ' отправлена на доработку (срок действия паспорта).');
+        $this->redirect($this->isVisaManager($me) ? '/visas/rework' : '/visas');
     }
 
     // ================= СТРОКИ ПАРТИИ (менеджер) =================
@@ -743,16 +811,90 @@ class VisaController extends Controller
                FROM users u JOIN visa_rows r ON r.assigned_to = u.id
               GROUP BY u.id, u.full_name ORDER BY u.full_name");
         $byBatch = Database::all(
-            "SELECT b.name,
+            "SELECT b.id, b.name,
                     COUNT(r.id) AS total,
                     SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
                     SUM(CASE WHEN r.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
                FROM visa_batches b LEFT JOIN visa_rows r ON r.batch_id = b.id
               GROUP BY b.id, b.name ORDER BY b.id DESC");
+        foreach ($byBatch as &$bb) {
+            $cs = Database::all("SELECT DISTINCT citizenship FROM visa_rows WHERE batch_id=? AND citizenship<>'' ORDER BY citizenship", [$bb['id']]);
+            $bb['country'] = implode(', ', array_map(fn($r) => $r['citizenship'], $cs));
+        }
+        unset($bb);
         $this->view('visas/report', [
             'title' => 'Отчёт по визам',
             'overall' => $overall, 'byEmployee' => $byEmployee, 'byBatch' => $byBatch,
         ]);
+    }
+
+    /** Динамика за период: статусы по странам на начало/конец + новые загрузки + внесённые указания. */
+    public function periodReport(): void
+    {
+        Auth::requireLogin();
+        if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
+        [$from, $to, $country, $data] = $this->periodData();
+        $this->view('visas/period_report', array_merge($data, [
+            'title' => 'Визы: динамика за период',
+            'from' => $from, 'to' => $to, 'country' => $country,
+            'statuses' => self::STATUS_LABELS,
+            'countries' => array_map(fn($r) => $r['c'], Database::all("SELECT DISTINCT UPPER(TRIM(citizenship)) AS c FROM visa_rows WHERE citizenship<>'' ORDER BY c")),
+        ]));
+    }
+
+    /** Расчёт данных динамики (используется отчётом и экспортом). */
+    private function periodData(): array
+    {
+        $from = (string) $this->input('from', date('Y-m-01'));
+        $to   = (string) $this->input('to', date('Y-m-d'));
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) { $from = date('Y-m-01'); }
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) { $to = date('Y-m-d'); }
+        $country = mb_strtoupper(trim((string) $this->input('country', '')), 'UTF-8');
+
+        $params = [$from . ' 00:00:00', $to . ' 23:59:59'];
+        $cWhere = '';
+        if ($country !== '') { $cWhere = " WHERE UPPER(TRIM(r.citizenship)) = ?"; $params[] = $country; }
+        $rows = Database::all(
+            "SELECT UPPER(TRIM(r.citizenship)) AS country,
+                    (SELECT e.status FROM visa_status_events e WHERE e.row_id=r.id AND e.changed_at < ?  ORDER BY e.changed_at DESC, e.id DESC LIMIT 1) AS st_start,
+                    (SELECT e.status FROM visa_status_events e WHERE e.row_id=r.id AND e.changed_at <= ? ORDER BY e.changed_at DESC, e.id DESC LIMIT 1) AS st_end
+               FROM visa_rows r" . $cWhere, $params);
+
+        $matrix = []; // country => status => ['start'=>n,'end'=>n]
+        foreach ($rows as $r) {
+            $c = $r['country'] !== '' ? $r['country'] : '—';
+            foreach (['start' => $r['st_start'], 'end' => $r['st_end']] as $k => $st) {
+                if ($st === null || $st === '') { continue; }
+                $matrix[$c][$st][$k] = ($matrix[$c][$st][$k] ?? 0) + 1;
+            }
+        }
+        ksort($matrix);
+        $newLoaded   = (int) Database::scalar("SELECT COUNT(*) FROM visa_rows WHERE substr(created_at,1,10) BETWEEN ? AND ?", [$from, $to]);
+        $instructions = (int) Database::scalar("SELECT COUNT(*) FROM visa_opis WHERE instructed_at IS NOT NULL AND substr(instructed_at,1,10) BETWEEN ? AND ?", [$from, $to]);
+        return [$from, $to, $country, ['matrix' => $matrix, 'newLoaded' => $newLoaded, 'instructions' => $instructions]];
+    }
+
+    public function periodReportExport(): void
+    {
+        Auth::requireLogin();
+        if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
+        [$from, $to, $country, $data] = $this->periodData();
+        $rows = [];
+        foreach ($data['matrix'] as $c => $byStatus) {
+            foreach (self::STATUS_LABELS as $st => $label) {
+                $s = (int) ($byStatus[$st]['start'] ?? 0);
+                $e = (int) ($byStatus[$st]['end'] ?? 0);
+                if ($s === 0 && $e === 0) { continue; }
+                $rows[] = [$c, $label, $s, $e, $e - $s];
+            }
+        }
+        $rows[] = ['—', 'Новых загружено за период', '', $data['newLoaded'], ''];
+        $rows[] = ['—', 'Визовых указаний внесено за период', '', $data['instructions'], ''];
+        \App\Services\Xlsx::download("visas-dynamics-{$from}_{$to}.xlsx", [[
+            'name'    => 'Динамика',
+            'headers' => ['Страна', 'Статус', 'На начало', 'На конец', 'Δ'],
+            'rows'    => $rows,
+        ]]);
     }
 
     /** Рейтинг специалистов по визам за период (проверено; качество — по доработкам). */
@@ -802,6 +944,9 @@ class VisaController extends Controller
             $where .= ' AND (LOWER(r.out_no) LIKE ? OR LOWER(r.surname_lat) LIKE ? OR LOWER(r.surname_ru) LIKE ?)';
             array_push($params, "%$q%", "%$q%", "%$q%");
         }
+        if (!empty($f['from']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $f['from'])) { $where .= ' AND substr(r.created_at,1,10) >= ?'; $params[] = $f['from']; }
+        if (!empty($f['to'])   && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $f['to']))   { $where .= ' AND substr(r.created_at,1,10) <= ?'; $params[] = $f['to']; }
+        if (!empty($f['checker'])) { $where .= ' AND r.assigned_to = ?'; $params[] = (int) $f['checker']; }
         $rows = Database::all(
             "SELECT r.id, r.out_no, r.citizenship, r.surname_lat, r.names_lat, r.surname_ru, r.status,
                     r.recheck, r.rework_count, r.checked_at, r.created_at, r.mid_refused_at, r.mid_refuse_note,
@@ -834,6 +979,9 @@ class VisaController extends Controller
             'batch_id' => (string) $this->input('batch_id', ''),
             'country'  => (string) $this->input('country', ''),
             'q'        => (string) $this->input('q', ''),
+            'from'     => (string) $this->input('from', ''),
+            'to'       => (string) $this->input('to', ''),
+            'checker'  => (string) $this->input('checker', ''),
         ];
     }
 
@@ -843,11 +991,15 @@ class VisaController extends Controller
         Auth::requireLogin();
         if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
         $f = $this->statusFilters();
-        $maxRows = 1000;
-        $rows = $this->statusRows($f, $maxRows + 1);
-        $truncated = count($rows) > $maxRows;
-        if ($truncated) { $rows = array_slice($rows, 0, $maxRows); }
+        $all = $this->input('all') === '1';
+        $page = max(1, (int) $this->input('page', 1));
+        $perPage = 50;
+        $rows = $this->statusRows($f, 0);     // все по фильтрам (страна фильтруется в PHP внутри)
+        $total = count($rows);
+        $pages = max(1, (int) ceil($total / $perPage));
+        if (!$all) { $page = min($page, $pages); $rows = array_slice($rows, ($page - 1) * $perPage, $perPage); }
 
+        $checkers = Database::all("SELECT DISTINCT u.id, u.full_name FROM users u JOIN visa_rows r ON r.assigned_to=u.id ORDER BY u.full_name");
         $batches = Database::all('SELECT id, name FROM visa_batches ORDER BY id DESC');
         $countries = [];
         foreach (Database::all('SELECT citizenship FROM visa_rows') as $r) {
@@ -863,8 +1015,8 @@ class VisaController extends Controller
             'batches' => $batches,
             'countries' => $countries,
             'filters' => $f,
-            'truncated' => $truncated,
-            'maxRows' => $maxRows,
+            'checkers' => $checkers,
+            'page' => $page, 'pages' => $pages, 'total' => $total, 'all' => $all, 'perPage' => $perPage,
         ]);
     }
 

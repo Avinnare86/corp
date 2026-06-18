@@ -50,6 +50,24 @@ class VisaReworkService
     }
 
     /**
+     * Доработка по сроку действия паспорта (не вина оператора): строка → статус 'rework_pass',
+     * возвращается в пул доработки БЕЗ вычета. Оператора не исключаем — он может поправить даты
+     * (если есть другой паспорт) и вернуть строку в работу.
+     */
+    public static function passportRework(int $rowId, int $byUserId): void
+    {
+        $now = date('Y-m-d H:i:s');
+        Database::run(
+            "UPDATE visa_rows
+                SET status='rework_pass', recheck=1, source_row_id=COALESCE(source_row_id, id),
+                    rework_note=?, rework_by=?, rework_at=?,
+                    assigned_to=NULL, checked_at=NULL, opis_id=NULL, credited_at=NULL
+              WHERE id=?",
+            ['Срок действия паспорта', $byUserId ?: null, $now, $rowId]);
+        // Вычет НЕ создаётся — это не ошибка проверяющего.
+    }
+
+    /**
      * Удалить строку из УЖЕ внесённого визового указания → доработка («повторно»).
      * Равнозначно отказу МИД, но с обязательным комментарием и пометкой об удалении из указания.
      * Сохраняет исходную (отклонённую) строку source_row_id и исключает первичного проверяющего.

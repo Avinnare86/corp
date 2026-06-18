@@ -1,11 +1,15 @@
 <?php
 // Сводная таблица всех визовых анкет со статусом (для отслеживания) + выгрузка в Excel.
-$qs = http_build_query(array_filter([
+$qf = array_filter([
     'status'   => $filters['status'] ?? '',
     'batch_id' => $filters['batch_id'] ?? '',
     'country'  => $filters['country'] ?? '',
     'q'        => $filters['q'] ?? '',
-], fn($v) => $v !== ''));
+    'from'     => $filters['from'] ?? '',
+    'to'       => $filters['to'] ?? '',
+    'checker'  => $filters['checker'] ?? '',
+], fn($v) => $v !== '');
+$qs = http_build_query($qf);
 ?>
 <div class="chat-head" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <h1 style="margin:0;font-size:1.2rem">Сводный отчёт по визовым анкетам</h1>
@@ -38,6 +42,16 @@ $qs = http_build_query(array_filter([
                 <?php endforeach; ?>
             </select>
         </label>
+        <label>Кто проверяет
+            <select name="checker">
+                <option value="">— все —</option>
+                <?php foreach ($checkers as $u): ?>
+                    <option value="<?= (int)$u['id'] ?>" <?= (string)($filters['checker'] ?? '') === (string)$u['id'] ? 'selected' : '' ?>><?= e($u['full_name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Загружены с<input type="date" name="from" value="<?= e($filters['from'] ?? '') ?>"></label>
+        <label>по<input type="date" name="to" value="<?= e($filters['to'] ?? '') ?>"></label>
         <label>Поиск (№/фамилия)<input type="text" name="q" value="<?= e($filters['q'] ?? '') ?>"></label>
         <button class="btn">Показать</button>
         <a class="btn btn-mini" href="/visas/report/status">Сброс</a>
@@ -45,9 +59,18 @@ $qs = http_build_query(array_filter([
 </section>
 
 <section class="panel">
-    <?php if ($truncated): ?>
-        <p class="flash flash-error" style="margin-top:0">Показаны первые <?= (int)$maxRows ?> строк. Уточните фильтры или выгрузите полный список в Excel.</p>
-    <?php endif; ?>
+    <?php $pageQs = $qs ? '&' . e($qs) : ''; ?>
+    <div class="form-inline" style="margin-bottom:8px;gap:10px;flex-wrap:wrap">
+        <span class="muted">Всего по фильтру: <strong><?= (int)$total ?></strong></span>
+        <?php if (!$all && $pages > 1): ?>
+            <?php if ($page > 1): ?><a class="btn btn-mini" href="/visas/report/status?page=<?= $page-1 . $pageQs ?>">← Назад</a><?php endif; ?>
+            <span class="muted">стр. <?= (int)$page ?> из <?= (int)$pages ?></span>
+            <?php if ($page < $pages): ?><a class="btn btn-mini" href="/visas/report/status?page=<?= $page+1 . $pageQs ?>">Вперёд →</a><?php endif; ?>
+            <a class="btn btn-mini" href="/visas/report/status?all=1<?= $pageQs ?>">Показать все</a>
+        <?php elseif ($all && $total > $perPage): ?>
+            <a class="btn btn-mini" href="/visas/report/status?page=1<?= $pageQs ?>">← По страницам (<?= (int)$perPage ?>)</a>
+        <?php endif; ?>
+    </div>
     <table class="table">
         <thead><tr>
             <th>Исх. №</th><th>Страна</th><th>Фамилия</th><th>Статус</th><th>Партия</th>

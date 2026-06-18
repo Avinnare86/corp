@@ -33,6 +33,7 @@ main.container{max-width:none;width:auto;margin:0 18px}</style>
                 <th title="отметить все"><input type="checkbox" id="vAll"> ✓</th>
                 <th>#</th>
                 <?php foreach ($fields as $f => $label): ?><th><?= e($label) ?></th><?php endforeach; ?>
+                <th>Действие</th>
             </tr></thead>
             <tbody>
             <?php foreach ($rows as $i => $r): $id=(int)$r['id'];
@@ -41,10 +42,13 @@ main.container{max-width:none;width:auto;margin:0 18px}</style>
                     <td style="text-align:center"><input type="checkbox" class="vdone" name="done[<?= $id ?>]" value="1"></td>
                     <td class="muted" style="padding:4px 6px;white-space:nowrap"><?= $i+1 ?><?= $isRework ? ' <span title="'.e($r['rework_note'] ?? 'доработка').'">⚠</span>' : '' ?>
                         <a href="/visas/row/<?= $id ?>" title="Открыть анкету отдельно" style="text-decoration:none">↗</a></td>
-                    <?php foreach ($fields as $f => $label): ?>
-                        <td><textarea name="row[<?= $id ?>][<?= $f ?>]" rows="1"
+                    <?php foreach ($fields as $f => $label): $expCls = $f==='expiry_date' ? \App\Controllers\VisaController::expiryClass($r['expiry_date'] ?? '') : ''; ?>
+                        <td<?= $expCls ? ' class="'.e($expCls).'" title="срок действия паспорта истекает менее чем через 1 год '.($expCls==='exp-bad'?'6':'7').' мес."' : '' ?>><textarea name="row[<?= $id ?>][<?= $f ?>]" rows="1"
                             class="vcell<?= $f==='ai_address' ? ' vai' : '' ?>" style="min-width:<?= (int)($w[$f] ?? 100) ?>px"><?= e($r[$f] ?? '') ?></textarea></td>
                     <?php endforeach; ?>
+                    <td><button type="submit" class="btn btn-mini" formaction="/visas/row/<?= $id ?>/passport-rework" formmethod="post"
+                        onclick="return confirm('Отправить анкету на доработку — срок действия паспорта? Строка уйдёт в пул доработки.')"
+                        title="Доработка: срок действия паспорта">⏳ Паспорт</button></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>

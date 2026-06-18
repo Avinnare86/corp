@@ -30,18 +30,19 @@
 <section class="panel">
     <h2>По партиям</h2>
     <table class="table">
-        <thead><tr><th>Партия</th><th class="num">Всего</th><th class="num">Проверено</th><th class="num">Не распред.</th><th class="num">Прогресс</th></tr></thead>
+        <thead><tr><th>Партия</th><th>Страна</th><th class="num">Всего</th><th class="num">Проверено</th><th class="num">Не распред.</th><th class="num">Прогресс</th></tr></thead>
         <tbody>
         <?php foreach ($byBatch as $b): $t=(int)$b['total']; $c=(int)$b['checked']; ?>
             <tr>
                 <td><?= e($b['name']) ?></td>
+                <td><?= e($b['country'] ?? '') ?: '<span class="muted">—</span>' ?></td>
                 <td class="num"><?= $t ?></td>
                 <td class="num"><?= $c ?></td>
                 <td class="num"><?= (int)$b['unassigned'] ?></td>
                 <td class="num"><?= $t>0?round($c/$t*100):0 ?>%</td>
             </tr>
         <?php endforeach; ?>
-        <?php if (!$byBatch): ?><tr><td colspan="5" class="muted">Партий нет.</td></tr><?php endif; ?>
+        <?php if (!$byBatch): ?><tr><td colspan="6" class="muted">Партий нет.</td></tr><?php endif; ?>
         </tbody>
     </table>
 </section>

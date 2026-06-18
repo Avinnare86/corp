@@ -81,16 +81,14 @@ class VisaDocs
      */
     public static function gpLiterals(string $signerName, string $signerPosition): array
     {
-        $lit = [];
-        $signerName = trim($signerName);
-        $signerPosition = trim($signerPosition);
-        if ($signerName !== '' && $signerName !== self::DEFAULT_SIGNER) {
-            $lit[self::DEFAULT_SIGNER] = $signerName;
-        }
-        if ($signerPosition !== '' && $signerPosition !== self::DEFAULT_POSITION) {
-            $lit[self::DEFAULT_POSITION] = $signerPosition;
-        }
-        return $lit;
+        $signerName = trim($signerName) ?: self::DEFAULT_SIGNER;
+        $signerPosition = trim($signerPosition) ?: self::DEFAULT_POSITION;
+        // Заменяем литералы шаблона на варианты с неразрывными пробелами (должность и инициалы+фамилия
+        // не рвутся переносом) — даже если значения совпадают с дефолтными.
+        return [
+            self::DEFAULT_SIGNER   => DocxWriter::nbsp($signerName),
+            self::DEFAULT_POSITION => DocxWriter::nbsp($signerPosition),
+        ];
     }
 
     /** Люди для ОПИСИ из строк (как create_opis_document: B/C/H/J → ФИО, дата, пол). */

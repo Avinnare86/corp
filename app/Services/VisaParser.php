@@ -67,40 +67,81 @@ class VisaParser
             $row = array_fill_keys(array_values(self::BOOKMARKS), '');
             $row['visit_places'] = '';
 
+            // 1) ПЕРВИЧНО — по закладкам Word: <w:bookmarkStart name="X"/> … <w:bookmarkEnd>.
+            // Закладка обёрнута прямо вокруг значения, поэтому данные не сдвигаются и не путаются.
+            foreach (self::BOOKMARKS as $bm => $field) {
+                if (preg_match('/<w:bookmarkStart\b[^>]*\bw:name="' . preg_quote($bm, '/') . '"[^>]*\/>(.*?)<w:bookmarkEnd\b/s', $tbl, $m)) {
+                    $v = self::runsText($m[1]);
+                    if ($v !== '') { $row[$field] = $v; }
+                }
+            }
+
+            // 2) FALLBACK — по подписям (без учёта пробелов/регистра): значение = следующая непустая
+            // ячейка строки. Чинит подписи с «рваными» пробелами («Фамилия ( рус )», «Имен а( рус)»).
+            $rowsVals = [];
             foreach ($trs[0] as $tr) {
                 preg_match_all('/<w:tc(?:>| ).*?<\/w:tc>/s', $tr, $tcs);
-                $cells = [];
+                $vals = [];
                 foreach ($tcs[0] as $tc) {
-                    // закладки в ячейке
-                    preg_match_all('/<w:bookmarkStart[^>]*w:name="([^"]+)"/', $tc, $bms);
-                    $cells[] = ['text' => self::cellText($tc), 'bookmarks' => $bms[1]];
+                    $t = self::cellText($tc);
+                    if ($t !== '') { $vals[] = $t; }
                 }
-                // 1) по закладкам
-                foreach ($cells as $c) {
-                    foreach ($c['bookmarks'] as $bm) {
-                        if (isset(self::BOOKMARKS[$bm]) && $c['text'] !== '') {
-                            $row[self::BOOKMARKS[$bm]] = $c['text'];
-                        }
-                    }
-                }
-                // 2) fallback по подписям (берём следующую непустую ячейку)
-                $vals = array_values(array_filter(array_map(fn($c) => $c['text'], $cells), fn($v) => $v !== ''));
+                $rowsVals[] = $vals;
                 foreach ($vals as $i => $v) {
+                    if (!isset($vals[$i + 1])) { continue; }
+                    $vn = self::norm($v);
+                    if ($vn === '') { continue; }
                     foreach (self::LABELS as $label => $field) {
-                        if ($row[$field] === '' && mb_stripos($v, $label) === 0 && isset($vals[$i + 1])) {
+                        if ($row[$field] === '' && mb_strpos($vn, self::norm($label)) === 0) {
                             $row[$field] = $vals[$i + 1];
                         }
                     }
                 }
             }
+            // out_date: «Исходящий № … от <дата>» — берём ячейку строго после «от».
+            if ($row['out_date'] === '') {
+                foreach ($rowsVals as $vals) {
+                    foreach ($vals as $i => $v) {
+                        if (self::norm($v) === 'от' && isset($vals[$i + 1])) { $row['out_date'] = $vals[$i + 1]; break 2; }
+                    }
+                }
+            }
+            // work_address: часто значение в СЛЕДУЮЩЕЙ строке отдельной ячейкой после подписи «Адрес места работы…».
+            if ($row['work_address'] === '') {
+                $addrLab = self::norm('Адрес места работы');
+                foreach ($rowsVals as $ri => $vals) {
+                    foreach ($vals as $ci => $v) {
+                        if (mb_strpos(self::norm($v), $addrLab) !== 0) { continue; }
+                        $cand = (isset($vals[$ci + 1]) && $vals[$ci + 1] !== '') ? $vals[$ci + 1] : ($rowsVals[$ri + 1][0] ?? '');
+                        $isLabel = false;
+                        foreach (self::LABELS as $lab => $f) { if ($cand !== '' && mb_strpos(self::norm($cand), self::norm($lab)) === 0) { $isLabel = true; break; } }
+                        if ($cand !== '' && !$isLabel) { $row['work_address'] = $cand; }
+                        break 2;
+                    }
+                }
+            }
 
             // отбраковка пустышек
-            if ($row['surname_ru'] === '' && $row['passport_no'] === '' && $row['out_no'] === '') { continue; }
+            if ($row['surname_ru'] === '' && $row['surname_lat'] === '' && $row['passport_no'] === '' && $row['out_no'] === '') { continue; }
             $row['source_file'] = $origName;
             $row['table_no'] = $ti + 1;
             $out[] = $row;
         }
         return $out;
+    }
+
+    /** Нормализация для сравнения подписей: без пробелов, в нижнем регистре. */
+    private static function norm(string $s): string
+    {
+        return mb_strtolower(preg_replace('/\s+/u', '', $s) ?? '', 'UTF-8');
+    }
+
+    /** Склейка текста ранов <w:t> внутри спана закладки (без лишних пробелов). */
+    private static function runsText(string $frag): string
+    {
+        preg_match_all('/<w:t(?:\s[^>]*)?>(.*?)<\/w:t>/s', $frag, $ts);
+        $t = html_entity_decode(implode('', $ts[1]), ENT_QUOTES, 'UTF-8');
+        return trim(preg_replace('/\s+/u', ' ', $t));
     }
 
     private static function cellText(string $tc): string

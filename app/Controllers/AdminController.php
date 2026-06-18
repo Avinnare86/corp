@@ -414,6 +414,28 @@ class AdminController extends Controller
         $this->redirect('/admin/employees');
     }
 
+    /** Импорт сотрудников из xlsx-штатки: создаёт недостающие отделы/должности, дубли по ФИО пропускает. */
+    public function importEmployees(): void
+    {
+        Auth::requireRole('admin', 'hr_manager', 'hr');
+        Auth::verifyCsrf();
+        if (empty($_FILES['file']['tmp_name']) || ($_FILES['file']['error'] ?? 1) !== UPLOAD_ERR_OK) {
+            flash('Выберите файл .xlsx со штатным расписанием.', 'error');
+            $this->redirect('/admin/employees');
+        }
+        $people = \App\Services\EmployeeImport::parse($_FILES['file']['tmp_name']);
+        if (!$people) {
+            flash('Не удалось распознать сотрудников (ожидается выгрузка штатки: № / Сотрудник / Должность / Оклад, отделы — отдельными строками).', 'error');
+            $this->redirect('/admin/employees');
+        }
+        $report = \App\Services\EmployeeImport::import($people, (int) Auth::id());
+        $this->view('admin/import_result', [
+            'title'  => 'Импорт сотрудников из штатки',
+            'report' => $report,
+            'total'  => count($people),
+        ]);
+    }
+
     public function updateEmployee(string $id): void
     {
         Auth::requireRole('admin', 'hr_manager', 'hr');

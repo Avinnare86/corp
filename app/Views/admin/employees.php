@@ -1,5 +1,22 @@
 <h1>Сотрудники</h1>
 
+<?php if (\App\Core\Auth::has('hr_manager') || \App\Core\Auth::isAdmin()): ?>
+<section class="panel">
+    <h2>Загрузить из штатки (xlsx)</h2>
+    <form method="post" action="/admin/employees/import" enctype="multipart/form-data" class="form-inline">
+        <?= csrf_field() ?>
+        <label class="file-btn" style="align-self:flex-end">📎 Файл штатки .xlsx
+            <input type="file" name="file" accept=".xlsx" required
+                   onchange="document.getElementById('staffFile').textContent=this.files.length?this.files[0].name:''"></label>
+        <span id="staffFile" class="muted" style="align-self:flex-end"></span>
+        <button class="btn btn-primary">Загрузить</button>
+    </form>
+    <p class="muted">Грузим ФИО, должность, отдел и объём ставки. Отделы и должности создаются, если их ещё нет.
+        Уже существующие сотрудники (по ФИО) <strong>не дублируются</strong> — будет показан список пропущенных.
+        Новым сотрудникам генерируются логин и временный пароль (со сменой при первом входе).</p>
+</section>
+<?php endif; ?>
+
 <section class="panel">
     <h2>Добавить сотрудника</h2>
     <form method="post" action="/admin/employees" class="grid-form">

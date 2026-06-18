@@ -43,7 +43,7 @@ class VisaOpisController extends Controller
     {
         $sp = Database::all(
             "SELECT u.id, u.full_name,
-                    (SELECT COUNT(*) FROM visa_rows r WHERE r.assigned_to=u.id AND r.status='rework') AS rework
+                    (SELECT COUNT(*) FROM visa_rows r WHERE r.assigned_to=u.id AND r.status IN ('rework','rework_pass')) AS rework
                FROM users u
               WHERE (u.role='employee' OR u.role='admin') AND u.is_active=1
                 AND (u.role='admin'
@@ -55,7 +55,7 @@ class VisaOpisController extends Controller
     /** Для бейджа меню: сколько строк «на доработке» (после отказа МИД). */
     public static function reworkCount(): int
     {
-        return (int) Database::scalar("SELECT COUNT(*) FROM visa_rows WHERE status='rework'");
+        return (int) Database::scalar("SELECT COUNT(*) FROM visa_rows WHERE status IN ('rework','rework_pass')");
     }
 
     // ============ Формирование описей по странам ============
@@ -136,6 +136,7 @@ class VisaOpisController extends Controller
         $vplace = implode(',', array_fill(0, count($valid), '?'));
         Database::run("UPDATE visa_rows SET opis_id=?, status='in_opis' WHERE id IN ($vplace) AND status='checked' AND opis_id IS NULL",
             array_merge([$opisId], $valid));
+        foreach ($valid as $rid) { \App\Controllers\VisaController::logStatus((int) $rid, 'in_opis'); }
         $pdo->commit();
 
         flash('Опись сформирована: ' . $country . ' — ' . count($valid) . ' чел. Скачайте документы и после ответа МИД внесите визовое указание.');
@@ -219,6 +220,7 @@ class VisaOpisController extends Controller
             $refusedSet[$rid] = true;
             $amount = ((string) ($deduct[$rid] ?? '0') === '1') ? $price : 0.0;
             VisaReworkService::refuse($byId[$rid], (int) $id, $amount, (int) $me['id'], $note !== '' ? $note : 'Отказ МИД');
+            \App\Controllers\VisaController::logStatus($rid, 'rework');
         }
         // Остальные строки описи → «указание получено».
         $keep = [];
@@ -226,6 +228,7 @@ class VisaOpisController extends Controller
         if ($keep) {
             $kp = implode(',', array_fill(0, count($keep), '?'));
             Database::run("UPDATE visa_rows SET status='instructed' WHERE id IN ($kp)", $keep);
+            foreach ($keep as $rid) { \App\Controllers\VisaController::logStatus((int) $rid, 'instructed'); }
         }
         Database::run(
             "UPDATE visa_opis SET instruction_no=?, instruction_date=?, status='instructed', instructed_at=? WHERE id=?",
@@ -320,7 +323,7 @@ class VisaOpisController extends Controller
         $this->guard();
         // Доступные страны среди строк на доработке (для фильтра «передать по одной стране»).
         $countries = [];
-        foreach (Database::all("SELECT citizenship FROM visa_rows WHERE status='rework'") as $r) {
+        foreach (Database::all("SELECT citizenship FROM visa_rows WHERE status IN ('rework','rework_pass')") as $r) {
             $c = self::norm((string) $r['citizenship']); if ($c === '') { $c = 'БЕЗ СТРАНЫ'; }
             $countries[$c] = ($countries[$c] ?? 0) + 1;
         }
@@ -342,7 +345,7 @@ class VisaOpisController extends Controller
         $q = mb_strtolower(trim((string) $this->input('q')), 'UTF-8');
         $country = self::norm((string) $this->input('country'));
 
-        $where = "status='rework'";
+        $where = "status IN ('rework','rework_pass')";
         $params = [];
         if ($owner === 'pool') { $where .= ' AND assigned_to IS NULL'; }
         else { $where .= ' AND assigned_to = ?'; $params[] = (int) $owner; }
@@ -388,7 +391,7 @@ class VisaOpisController extends Controller
         }
 
         $place = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = Database::run("UPDATE visa_rows SET assigned_to = ? WHERE id IN ($place) AND status='rework'",
+        $stmt = Database::run("UPDATE visa_rows SET assigned_to = ? WHERE id IN ($place) AND status IN ('rework','rework_pass')",
             array_merge([$assignTo], $ids));
         $moved = $stmt->rowCount();
         if ($assignTo && $moved) {

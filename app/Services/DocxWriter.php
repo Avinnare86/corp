@@ -71,11 +71,11 @@ class DocxWriter
             $body .= self::para('Указанные иностранные граждане будут въезжать в Россию через аэропорт Шереметьево.', ['indent' => 709]);
             $body .= self::para('');
             $body .= self::para('');
-            // Должность подписанта целиком — отдельной строкой; Ф.И.О. с табуляцией ниже.
-            $body .= self::para($signerPosition);
+            // Подпись одним абзацем: должность (неразрывные пробелы) + обычный пробел + Ф.И.О.
+            // (инициалы неразрывны с фамилией) + мягкий перенос (Shift+Enter в Word) в конце — без рваных переносов.
+            $text = self::nbsp($signerPosition) . ' ' . self::nbsp($signer);
             $runs = '<w:r><w:rPr>' . self::rpr() . '</w:rPr>'
-                . str_repeat('<w:tab/>', 6)
-                . '<w:t xml:space="preserve">' . self::esc($signer) . '</w:t></w:r>';
+                . '<w:t xml:space="preserve">' . self::esc($text) . '</w:t><w:br/></w:r>';
             $body .= '<w:p><w:pPr><w:spacing w:after="0" w:line="276" w:lineRule="auto"/></w:pPr>' . $runs . '</w:p>';
         }
         $sect = '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="567" w:bottom="1134" w:left="1134"/></w:sectPr>';
@@ -129,5 +129,11 @@ class DocxWriter
     private static function esc(string $s): string
     {
         return htmlspecialchars($s, ENT_QUOTES | ENT_XML1, 'UTF-8');
+    }
+
+    /** Заменить обычные пробелы на неразрывные (U+00A0) — чтобы фраза не рвалась переносом. */
+    public static function nbsp(string $s): string
+    {
+        return str_replace(' ', "\u{00A0}", trim($s));
     }
 }

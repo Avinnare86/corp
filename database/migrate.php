@@ -472,6 +472,15 @@ $tables['visa_deductions'] = "CREATE TABLE IF NOT EXISTS visa_deductions (
     created_at  TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
+// Журнал смены статуса визовой строки — для сводного отчёта динамики за период.
+$tables['visa_status_events'] = "CREATE TABLE IF NOT EXISTS visa_status_events (
+    id $ID,
+    row_id     INT NOT NULL,
+    status     VARCHAR(20) NOT NULL,
+    changed_at TIMESTAMP DEFAULT $NOW,
+    changed_by INT NULL
+) $ENGINE";
+
 // Журнал действий: кто и что сделал.
 $tables['audit_log'] = "CREATE TABLE IF NOT EXISTS audit_log (
     id $ID,
@@ -1235,6 +1244,22 @@ if (\App\Services\Settings::get('dorabotka_clean_v2', '') !== '1') {
 }
 // Защита от повторных дублей по тексту.
 try { $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS ux_dorabotka_text ON dorabotka_comments(text)'); } catch (\Throwable $e) {}
+try { $pdo->exec('CREATE INDEX IF NOT EXISTS ix_vse_row ON visa_status_events(row_id, changed_at)'); } catch (\Throwable $e) {}
+
+// Бэкофилл журнала статусов визовых строк (один раз): событие «loaded» на дату загрузки +
+// текущий статус на лучшую известную дату. Даёт приближённую историю для отчёта динамики.
+if (\App\Services\Settings::get('visa_status_backfill_v1', '') !== '1') {
+    try {
+        if ((int) \App\Core\Database::scalar('SELECT COUNT(*) FROM visa_status_events') === 0
+            && (int) \App\Core\Database::scalar('SELECT COUNT(*) FROM visa_rows') > 0) {
+            $pdo->exec("INSERT INTO visa_status_events (row_id, status, changed_at) SELECT id, 'loaded', created_at FROM visa_rows");
+            $pdo->exec("INSERT INTO visa_status_events (row_id, status, changed_at)
+                        SELECT id, status, COALESCE(rework_at, mid_refused_at, checked_at, created_at)
+                          FROM visa_rows WHERE status <> 'loaded'");
+        }
+        \App\Services\Settings::set('visa_status_backfill_v1', '1');
+    } catch (\Throwable $e) { /* при отсутствии части колонок — пропускаем бэкофилл */ }
+}
 
 // Демо-номенклатура дел текущего года (если пусто).
 if ((int) \App\Core\Database::scalar('SELECT COUNT(*) FROM nomenclature_cases') === 0) {

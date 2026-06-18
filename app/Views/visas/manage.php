@@ -30,12 +30,19 @@
 
 <section class="panel">
     <h2>Партии</h2>
+    <form method="get" action="/visas/manage" class="form-inline" style="margin-bottom:10px">
+        <label>Дата загрузки<input type="date" name="d" value="<?= e($flt['d'] ?? '') ?>"></label>
+        <button class="btn btn-mini btn-primary">Фильтр</button>
+        <?php if (!empty($flt['d']) || !empty($flt['all'])): ?><a class="btn btn-mini" href="/visas/manage">Сбросить</a><?php endif; ?>
+        <span class="muted">всего партий: <?= (int)($flt['total'] ?? 0) ?></span>
+    </form>
     <table class="table">
-        <thead><tr><th>Партия</th><th class="num">Анкет</th><th class="num">Без ИИ-адреса</th><th class="num">Не распред.</th><th class="num">Проверено</th><th>Действия</th></tr></thead>
+        <thead><tr><th>Партия</th><th>Страна</th><th class="num">Анкет</th><th class="num">Без ИИ-адреса</th><th class="num">Не распред.</th><th class="num">Проверено</th><th>Действия</th></tr></thead>
         <tbody>
         <?php foreach ($batches as $b): ?>
             <tr>
                 <td><strong><?= e($b['name']) ?></strong><br><span class="muted" style="font-size:.76rem"><?= e(substr((string)$b['created_at'],0,16)) ?></span></td>
+                <td><?= e($b['country'] ?? '') ?: '<span class="muted">—</span>' ?></td>
                 <td class="num"><?= (int)$b['total'] ?></td>
                 <td class="num <?= (int)$b['no_ai']?'minus':'' ?>"><?= (int)$b['no_ai'] ?></td>
                 <td class="num"><?= (int)$b['unassigned'] ?></td>
@@ -51,7 +58,7 @@
                 </td>
             </tr>
             <tr id="bp<?= (int)$b['id'] ?>" style="display:none">
-                <td colspan="6" style="background:rgba(38,54,139,.04)">
+                <td colspan="7" style="background:rgba(38,54,139,.04)">
                     <form method="post" action="/visas/batch/<?= (int)$b['id'] ?>/params" class="form-inline" style="align-items:flex-end">
                         <?= csrf_field() ?>
                         <label>Дата письма («от …»)<input type="text" name="letter_date" value="<?= e($b['letter_date'] ?? '') ?>" placeholder="02.05.25" style="max-width:120px"></label>
@@ -64,9 +71,20 @@
                 </td>
             </tr>
         <?php endforeach; ?>
-        <?php if (!$batches): ?><tr><td colspan="6" class="muted">Партий нет.</td></tr><?php endif; ?>
+        <?php if (!$batches): ?><tr><td colspan="7" class="muted">Партий нет.</td></tr><?php endif; ?>
         </tbody>
     </table>
+    <?php if (empty($flt['all']) && ($flt['pages'] ?? 1) > 1): $qd = !empty($flt['d']) ? '&d=' . e($flt['d']) : ''; ?>
+    <div class="form-inline" style="margin-top:10px;gap:6px;flex-wrap:wrap">
+        <?php for ($pp = 1; $pp <= (int)$flt['pages']; $pp++): ?>
+            <a class="btn btn-mini <?= $pp === (int)$flt['page'] ? 'btn-primary' : '' ?>" href="/visas/manage?page=<?= $pp . $qd ?>"><?= $pp ?></a>
+        <?php endfor; ?>
+        <a class="btn btn-mini" href="/visas/manage?all=1<?= $qd ?>">Показать все</a>
+        <span class="muted">стр. <?= (int)$flt['page'] ?> из <?= (int)$flt['pages'] ?></span>
+    </div>
+    <?php elseif (!empty($flt['all']) && ($flt['total'] ?? 0) > 10): ?>
+    <div class="form-inline" style="margin-top:10px"><a class="btn btn-mini" href="/visas/manage">← По страницам (10)</a></div>
+    <?php endif; ?>
     <?php if (!$aiReady): ?>
         <p class="muted">⚠ ИИ-подстановка недоступна: укажите ключ и модель OpenRouter в <a href="/admin/settings">настройках</a>.</p>
     <?php endif; ?>

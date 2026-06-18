@@ -208,6 +208,9 @@ button.btn{font-family:var(--body)}
 .msg-file{display:inline-block;margin-top:6px;font-size:.88rem;text-decoration:underline}
 .chat-send{display:flex;gap:10px;align-items:center;border-top:1px solid var(--line);padding-top:14px}
 .chat-send textarea{flex:1;margin-top:0;resize:none}
+.exp-warn{background:#fff3cd}
+.exp-bad{background:#f8d7da}
+.exp-warn textarea,.exp-bad textarea{background:transparent}
 .file-btn{position:relative;cursor:pointer;font-size:1.3rem;margin:0;padding:.4rem;border:1px solid var(--line);border-radius:10px;line-height:1}
 .file-btn input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
 

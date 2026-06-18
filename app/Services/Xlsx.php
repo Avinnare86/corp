@@ -74,6 +74,39 @@ class Xlsx
         exit;
     }
 
+    /** Чтение первого листа .xlsx → массив строк, каждая = [буква_колонки => значение]. Только чтение. */
+    public static function readRows(string $path): array
+    {
+        if (!class_exists('ZipArchive') || !is_file($path)) { return []; }
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) { return []; }
+        $shared = [];
+        $sx = $zip->getFromName('xl/sharedStrings.xml');
+        if ($sx !== false && $sx !== '') {
+            preg_match_all('#<si>(.*?)</si>#s', $sx, $m);
+            foreach ($m[1] as $si) {
+                preg_match_all('#<t[^>]*>(.*?)</t>#s', $si, $tt);
+                $shared[] = html_entity_decode(implode('', $tt[1]), ENT_QUOTES | ENT_XML1, 'UTF-8');
+            }
+        }
+        $sheet = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $zip->close();
+        if ($sheet === false) { return []; }
+        $out = [];
+        preg_match_all('#<row[^>]*>(.*?)</row>#s', $sheet, $rm);
+        foreach ($rm[1] as $rowXml) {
+            preg_match_all('#<c\s+r="([A-Z]+)\d+"(?:[^>]*\st="([^"]+)")?[^>]*>(?:<v>(.*?)</v>|<is>.*?<t[^>]*>(.*?)</t>.*?</is>)?</c>#s', $rowXml, $cm, PREG_SET_ORDER);
+            $cells = [];
+            foreach ($cm as $c) {
+                $col = $c[1]; $t = $c[2] ?? ''; $v = $c[3] ?? ''; $isv = $c[4] ?? '';
+                $val = $t === 's' ? ($shared[(int) $v] ?? '') : ($isv !== '' ? html_entity_decode($isv, ENT_QUOTES | ENT_XML1, 'UTF-8') : $v);
+                $cells[$col] = is_string($val) ? trim($val) : $val;
+            }
+            if ($cells) { $out[] = $cells; }
+        }
+        return $out;
+    }
+
     private static function sheetXml(array $headers, array $rows): string
     {
         $all = [];
