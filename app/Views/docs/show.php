@@ -221,7 +221,7 @@ foreach ($route as $r) { $stages[(int)$r['step_no']][] = $r; }
     <?php endif; ?>
 </div>
 
-<div>
+<div class="route-first">
     <section class="panel">
         <h2>Маршрут</h2>
         <?php if (!$stages): ?><p class="muted">Маршрут не задан.</p><?php endif; ?>
