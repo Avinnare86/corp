@@ -6,7 +6,9 @@
         <?= csrf_field() ?>
         <label>Название партии<input type="text" name="name" placeholder="напр. СДН-010"></label>
         <label class="file-btn" style="align-self:flex-end">📎 Файлы .docx (можно несколько)
-            <input type="file" name="files[]" accept=".docx" multiple required></label>
+            <input type="file" name="files[]" accept=".docx" multiple required
+                   onchange="var n=this.files.length; document.getElementById('visaFiles').textContent = n? (n===1? this.files[0].name : 'выбрано файлов: '+n) : '';"></label>
+        <span id="visaFiles" class="muted" style="align-self:flex-end"></span>
         <button class="btn btn-primary">Загрузить и распознать</button>
     </form>
     <p class="muted">Каждая таблица-анкета в файле распознаётся в строку (по закладкам Word: №, ФИО, паспорт, адрес…).

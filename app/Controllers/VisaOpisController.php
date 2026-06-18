@@ -45,10 +45,9 @@ class VisaOpisController extends Controller
             "SELECT u.id, u.full_name,
                     (SELECT COUNT(*) FROM visa_rows r WHERE r.assigned_to=u.id AND r.status='rework') AS rework
                FROM users u
-              WHERE (u.role='employee' OR u.role='admin') AND u.is_active=1 AND COALESCE(u.is_visa_manager,0)=0
+              WHERE (u.role='employee' OR u.role='admin') AND u.is_active=1
                 AND (u.role='admin'
-                     OR u.id IN (SELECT user_id FROM user_roles WHERE role_slug='visa_worker')
-                     OR u.id IN (SELECT user_id FROM user_projects WHERE project_code='visa'))
+                     OR u.id IN (SELECT user_id FROM user_roles WHERE role_slug='visa_worker'))
               ORDER BY u.full_name");
         return $sp;
     }

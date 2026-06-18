@@ -199,7 +199,7 @@ if ($uid) {
 </main>
 
 <footer class="footer">
-    <?= e($appName) ?> · <?= date('Y') ?>
+    <?= e($appName) ?> · <?= date('Y') ?><?php if (!empty($appVersion)): ?> · версия <?= e($appVersion) ?><?php endif; ?>
 </footer>
 
 <?php if (Auth::check()) { include __DIR__ . '/partials/widget.php'; } ?>

@@ -29,6 +29,7 @@ $config = require __DIR__ . '/../config/config.php';
 
 // Общие данные для всех шаблонов.
 \App\Core\View::share('appName', $config['app_name']);
+\App\Core\View::share('appVersion', $config['app_version'] ?? '');
 \App\Core\View::share('authUser', \App\Core\Auth::user());
 \App\Core\View::share('flashMsg', flash());
 
