@@ -280,7 +280,11 @@ class VisaController extends Controller
         ]);
     }
 
-    /** Сохранить пачку (все поля) и отметить проверенными → следующие 10. */
+    /**
+     * Сохранить введённые поля по показанным анкетам. Режимы:
+     *   finalize — отметить проверенными ТОЛЬКО анкеты с галочкой (done[id]); остальные сохранить как черновик;
+     *   draft    — только записать данные, без отметки «проверено» (анкеты остаются в очереди).
+     */
     public function saveGrid(): void
     {
         Auth::requireLogin();
@@ -290,12 +294,14 @@ class VisaController extends Controller
             flash('Рабочий день не открыт. Нажмите «Приступить к работе» в кабинете.', 'error');
             $this->redirect('/dashboard');
         }
-        $data = $_POST['row'] ?? []; // row[id][field]
+        $mode = $this->input('mode') === 'draft' ? 'draft' : 'finalize';
+        $data = $_POST['row'] ?? [];   // row[id][field]
+        $done = $_POST['done'] ?? [];  // done[id] = '1' — отметить проверенной (только в режиме finalize)
         $editable = array_keys(self::FIELDS);
         $now = date('Y-m-d H:i:s');
         $pdo = Database::pdo();
         $pdo->beginTransaction();
-        $saved = 0; $credited = 0;
+        $saved = 0; $checked = 0; $credited = 0;
         foreach ($data as $id => $fields) {
             $row = Database::one('SELECT id, credited_at FROM visa_rows WHERE id=? AND assigned_to=? AND checked_at IS NULL', [(int) $id, $uid]);
             if (!$row) { continue; }
@@ -303,17 +309,26 @@ class VisaController extends Controller
             foreach ($editable as $f) {
                 if (array_key_exists($f, $fields)) { $set[] = "$f = ?"; $vals[] = trim((string) $fields[$f]); }
             }
-            $set[] = 'checked_at = ?'; $vals[] = $now;
-            $set[] = "status = 'checked'";
-            // зачёт в сделку один раз (повторная проверка после доработки не удваивает)
-            if (empty($row['credited_at'])) { $set[] = 'credited_at = ?'; $vals[] = $now; $credited++; }
+            $finalize = $mode === 'finalize' && !empty($done[$id]);
+            if ($finalize) {
+                $set[] = 'checked_at = ?'; $vals[] = $now;
+                $set[] = "status = 'checked'";
+                // зачёт в сделку один раз (повторная проверка после доработки не удваивает)
+                if (empty($row['credited_at'])) { $set[] = 'credited_at = ?'; $vals[] = $now; $credited++; }
+                $checked++;
+            }
+            if (!$set) { continue; }
             $vals[] = (int) $id;
             Database::run('UPDATE visa_rows SET ' . implode(', ', $set) . ' WHERE id = ?', $vals);
             $saved++;
         }
         $pdo->commit();
         if ($credited) { self::creditStage2($uid, $credited); }
-        flash("Сохранено и проверено: {$saved}." . ($credited ? " Зачтено в сделку («Виза — этап 2»): {$credited}." : ''));
+        if ($mode === 'draft') {
+            flash("Черновик сохранён: {$saved} анкет (без отметки «проверено» — остаются в очереди).");
+        } else {
+            flash("Сохранено: {$saved}. Отмечено проверенными: {$checked}." . ($credited ? " Зачтено в сделку («Виза — этап 2»): {$credited}." : ''));
+        }
         $this->redirect('/visas');
     }
 
