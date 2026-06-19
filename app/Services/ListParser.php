@@ -28,6 +28,60 @@ class ListParser
         return self::matchAll($text);
     }
 
+    /**
+     * Извлечь рег. номера С УЧЁТОМ секций «линии прибытия» (только .docx).
+     * Заголовок-строка «Линия прибытия … детализированным Планом приема …: ЗНАЧЕНИЕ»
+     * делит таблицу на секции: все номера после неё относятся к этой ДЛП.
+     * Возвращает упорядоченный список ['reg'=>..., 'detail'=>...] (dedup по reg, первый выигрывает).
+     * Не-docx / нет заголовков → detail='' (обратная совместимость).
+     */
+    public static function extractStructured(string $path, string $origName): array
+    {
+        $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+        if ($ext === 'docx' && class_exists('ZipArchive')) {
+            return self::docxRows($path);
+        }
+        // Прочие форматы — без секций: номера с пустой линией.
+        $out = [];
+        foreach (self::extract($path, $origName) as $reg) { $out[] = ['reg' => $reg, 'detail' => '']; }
+        return $out;
+    }
+
+    /** Построчный разбор word/document.xml: заголовки «Линия прибытия» → ДЛП, рег. номера → секция. */
+    private static function docxRows(string $path): array
+    {
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) { return []; }
+        $xml = $zip->getFromName('word/document.xml');
+        $zip->close();
+        if ($xml === false) { return []; }
+        // Границы абзацев/строк таблицы → переводы строк, затем снять теги.
+        $xml = str_replace(['</w:p>', '</w:tr>'], ["\n", "\n"], $xml);
+        $text = html_entity_decode(preg_replace('/<[^>]+>/', '', $xml), ENT_QUOTES, 'UTF-8');
+
+        $current = '';
+        $seen = [];
+        $out = [];
+        foreach (preg_split('/\n/', $text) as $line) {
+            $line = trim($line);
+            if ($line === '') { continue; }
+            // Заголовок секции: «Линия прибытия … : <ДЛП>».
+            if (preg_match('/Лини[ия]\s*прибыт.*?:\s*(.+)$/ui', $line, $m)) {
+                $current = preg_replace('/\s+/u', ' ', trim($m[1]));
+                continue;
+            }
+            // Рег. номера в строке.
+            if (preg_match_all(self::PATTERN, strtoupper($line), $r)) {
+                foreach ($r[1] as $reg) {
+                    if (isset($seen[$reg])) { continue; }
+                    $seen[$reg] = true;
+                    $out[] = ['reg' => $reg, 'detail' => $current];
+                }
+            }
+        }
+        return $out;
+    }
+
     private static function matchAll(string $text): array
     {
         $text = strtoupper($text);

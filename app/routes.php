@@ -64,6 +64,15 @@ $router->get('/manager/items',            [ManagerController::class, 'items']);
 $router->post('/manager/move',            [ManagerController::class, 'move']);
 $router->post('/manager/distribute',      [ManagerController::class, 'distribute']);
 $router->post('/manager/recall',          [ManagerController::class, 'recall']);
+// Справочники линий прибытия (квота) + массовая правка. Статические пути — без конфликтов.
+$router->get('/manager/arrival',                    [\App\Controllers\ArrivalController::class, 'index']);
+$router->post('/manager/arrival/assign',            [\App\Controllers\ArrivalController::class, 'assign']);
+$router->post('/manager/arrival/line',              [\App\Controllers\ArrivalController::class, 'storeLine']);
+$router->post('/manager/arrival/line/merge',        [\App\Controllers\ArrivalController::class, 'mergeLine']);
+$router->post('/manager/arrival/line/{id}/delete',  [\App\Controllers\ArrivalController::class, 'deleteLine']);
+$router->post('/manager/arrival/detail',            [\App\Controllers\ArrivalController::class, 'storeDetail']);
+$router->post('/manager/arrival/detail/merge',      [\App\Controllers\ArrivalController::class, 'mergeDetail']);
+$router->post('/manager/arrival/detail/{id}/delete',[\App\Controllers\ArrivalController::class, 'deleteDetail']);
 
 // --- Журнал действий ---
 $router->get('/audit',                    [AuditController::class, 'index']);
@@ -210,6 +219,8 @@ $router->post('/memos/reasons',     [\App\Controllers\ReasonController::class, '
 $router->post('/memos/reasons/{id}/delete', [\App\Controllers\ReasonController::class, 'delete']);
 $router->post('/memos/line/{id}/override', [\App\Controllers\StimulusController::class, 'override']);
 $router->post('/memos',             [\App\Controllers\StimulusController::class, 'store']);
+$router->get('/memos/batch/{id}',   [\App\Controllers\StimulusController::class, 'showBatch']);
+$router->post('/memos/batch/{id}/sign', [\App\Controllers\StimulusController::class, 'signBatch']);
 $router->get('/memos/{id}',         [\App\Controllers\StimulusController::class, 'show']);
 $router->get('/memos/{id}/edit',    [\App\Controllers\StimulusController::class, 'edit']);
 $router->get('/memos/{id}/print',   [\App\Controllers\StimulusController::class, 'printDoc']);

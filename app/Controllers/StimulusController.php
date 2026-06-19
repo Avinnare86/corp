@@ -97,15 +97,37 @@ class StimulusController extends Controller
         $this->view('stimulus/index', [
             'title' => 'Служебки о стимуле',
             'mine' => $mine, 'todo' => $todo, 'accountant' => $accountant,
-            'canCreate' => !empty($roles['dept_head']) || !empty($roles['admin']),
+            'canCreate' => !empty($roles['dept_head']) || !empty($roles['deputy_director']) || !empty($roles['admin']),
             'canCreateMgmt' => !empty($roles['director']) || !empty($roles['admin']),
         ]);
     }
 
     public function create(): void
     {
-        Auth::requireRole('dept_head', 'admin');
+        Auth::requireRole('dept_head', 'deputy_director', 'admin');
         $this->memoForm(null, (int) Auth::id(), 'staff');
+    }
+
+    /** Уже назначенный стимул по сотрудникам за период: [user_id => [m_appr,m_proj,o_appr,o_proj]]. */
+    private function assignedByUser(string $period, ?int $excludeMemoId = null): array
+    {
+        $where = "m.status <> 'rejected' AND m.period = ?"; $params = [$period];
+        if ($excludeMemoId) { $where .= ' AND m.id <> ?'; $params[] = $excludeMemoId; }
+        $raw = Database::all(
+            "SELECT l.user_id, l.pay_kind, l.amount, m.status,
+                    (SELECT o.new_amount FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1) AS ov_amount
+               FROM stimulus_memo_lines l JOIN stimulus_memos m ON m.id=l.memo_id
+              WHERE $where", $params);
+        $out = [];
+        foreach ($raw as $r) {
+            $uid = (int) $r['user_id'];
+            if (!isset($out[$uid])) { $out[$uid] = ['m_appr' => 0.0, 'm_proj' => 0.0, 'o_appr' => 0.0, 'o_proj' => 0.0]; }
+            $eff = $r['ov_amount'] !== null ? (float) $r['ov_amount'] : (float) $r['amount'];
+            $appr = $r['status'] === 'approved';
+            if ($r['pay_kind'] === 'onetime') { $out[$uid][$appr ? 'o_appr' : 'o_proj'] += $eff; }
+            else { $out[$uid][$appr ? 'm_appr' : 'm_proj'] += $eff; }
+        }
+        return $out;
     }
 
     /** Отдельная служебка директора: стимул заместителям и главному бухгалтеру (Прил.№2). */
@@ -143,6 +165,9 @@ class StimulusController extends Controller
         $period = (string) ($memo['period'] ?? date('Y-m'));
         $isMgmt = $kind === 'mgmt';
         $deptOpts = null;
+        $globalMembers = false;   // создание по всей ветке (список всех сотрудников, разные отделы)
+        $canSeeAll = true;        // видеть «уже назначено» по всем строкам (в общем списке — гейт по ветке)
+        $pieceDeptIds = [];       // отделы, по которым считаем сделку (квота/визы)
 
         if ($isMgmt) {
             // Стимул замам и гл. бухгалтеру: пул — заместители директора и бухгалтерия.
@@ -166,29 +191,61 @@ class StimulusController extends Controller
                 [$deptId]) : [];
             $cats = self::CATS_STAFF;
             $forecast = $deptId ? \App\Services\StimulusBudgetService::forecast((int) $deptId, $period) : null;
-        } else {
-            // отдел автора (начальник ведёт служебку по своему отделу)
-            $deptId = $memo['department_id'] ?? (int) Database::scalar('SELECT department_id FROM users WHERE id = ?', [$authorId]);
-            $headDept = Database::scalar('SELECT id FROM departments WHERE head_id = ?', [$authorId]);
-            if ($headDept) { $deptId = (int) $headDept; }
-            $members = Database::all(
-                'SELECT id, full_name, position, oklad, rate_volume, position_id FROM users WHERE department_id = ? AND is_active = 1 ORDER BY full_name',
-                [$deptId]);
+        } elseif ($memo) {
+            // Редактирование — в пределах отдела служебки (один отдел, legacy).
             $cats = self::CATS_STAFF;
-            $forecast = \App\Services\StimulusBudgetService::forecast((int) $deptId, $period);
+            $deptId = (int) ($memo['department_id'] ?: 0);
+            $members = $deptId ? Database::all(
+                'SELECT id, full_name, position, oklad, rate_volume, position_id FROM users WHERE department_id = ? AND is_active = 1 ORDER BY full_name',
+                [$deptId]) : [];
+            $forecast = $deptId ? \App\Services\StimulusBudgetService::forecast($deptId, $period) : null;
+        } else {
+            // Создание — по всей ветке подчинённости: список всех активных сотрудников,
+            // отдел берётся из сотрудника каждой строки при сохранении (веер по отделам).
+            $cats = self::CATS_STAFF;
+            $globalMembers = true;
+            $canSeeAll = false;   // цифры «уже назначено» — только по своей ветке
+            $deptId = 0;
+            $members = Database::all(
+                'SELECT u.id, u.full_name, u.position, u.oklad, u.rate_volume, u.position_id, u.department_id, d.name AS dept_name
+                   FROM users u LEFT JOIN departments d ON d.id = u.department_id
+                  WHERE u.is_active = 1 ORDER BY d.name, u.full_name');
+            // Сделку (квота/визы) считаем только по головным отделам автора — ограничение по производительности.
+            $own = [];
+            foreach (Org::headedDeptIds($authorId) as $hid) {
+                foreach (Org::withDescendants($hid) as $d) { $own[$d] = true; }
+            }
+            $pieceDeptIds = array_keys($own);
+            // Forecast (остаток ФОТ) — только если у автора ровно один свой отдел.
+            $headed = Org::headedDeptIds($authorId);
+            $forecast = count($headed) === 1 ? \App\Services\StimulusBudgetService::forecast((int) $headed[0], $period) : null;
         }
 
+        $assigned = $this->assignedByUser($period, $memo['id'] ?? null);
+        $branch = $globalMembers ? array_flip(Org::branchDeptIds($authorId)) : [];
+        $isDir = Org::tier($authorId) === 'director';
+        $pieceSet = array_flip($pieceDeptIds);
         foreach ($members as &$m) {
             $okl = (float) ($m['oklad'] ?? 0);
             if ($m['position_id']) { $po = Database::scalar('SELECT oklad FROM positions WHERE id=?', [$m['position_id']]); if ($po !== false) { $okl = (float) $po; } }
             $m['oklad_load'] = round($okl * (float) ($m['rate_volume'] ?? 1), 2);
-            // Сделка к 25-му (перенос из квоты/виз) — только для рядовых служебок.
-            if ($isMgmt) {
-                $m['kvota'] = 0; $m['visy'] = 0; $m['piece'] = 0;
-            } else {
+            // Сделка к 25-му (перенос из квоты/виз): для одиночного отдела — всегда; для общего списка — только по головным отделам автора.
+            $wantPiece = !$isMgmt && (!$globalMembers || isset($pieceSet[(int) ($m['department_id'] ?? 0)]));
+            if ($wantPiece) {
                 $pk = \App\Services\PayrollService::pieceByKind((int) $m['id'], $period, 1, 25);
                 $m['kvota'] = $pk['anketa']; $m['visy'] = $pk['ops']; $m['piece'] = $pk['total'];
+            } else {
+                $m['kvota'] = 0; $m['visy'] = 0; $m['piece'] = 0;
             }
+            // Видимость «уже назначено»: вся ветка автора (или директор); чужим подразделениям — вслепую.
+            $canSee = $canSeeAll || $isDir || isset($branch[(int) ($m['department_id'] ?? 0)]);
+            $a = $assigned[(int) $m['id']] ?? null;
+            $m['can_see']   = $canSee ? 1 : 0;
+            $m['ex_m_appr'] = $canSee && $a ? $a['m_appr'] : 0;
+            $m['ex_m_proj'] = $canSee && $a ? $a['m_proj'] : 0;
+            $m['ex_o_appr'] = $canSee && $a ? $a['o_appr'] : 0;
+            $m['ex_o_proj'] = $canSee && $a ? $a['o_proj'] : 0;
+            $m['dept_name'] = $m['dept_name'] ?? '';
         }
         unset($m);
 
@@ -203,11 +260,14 @@ class StimulusController extends Controller
             'deptOpts' => $deptOpts,
             'deptId' => $isMgmt ? 0 : (int) $deptId,
             'showPiece' => !$isMgmt,
-            'dept' => $isMgmt ? null : Database::one('SELECT * FROM departments WHERE id = ?', [$deptId]),
+            'branchMode' => $globalMembers,
+            'dept' => ($isMgmt || $globalMembers) ? null : Database::one('SELECT * FROM departments WHERE id = ?', [$deptId]),
             'members' => $members,
             'lines' => $lines,
             'grounds' => Database::all("SELECT * FROM stimulus_grounds WHERE is_active = 1 AND category IN ($ph) ORDER BY category, percent DESC, text", $cats),
-            'reasons' => Database::all('SELECT id, text FROM stimulus_reasons WHERE is_active = 1 AND (department_id = ? OR department_id IS NULL) ORDER BY (department_id IS NULL), text', [(int) $deptId]),
+            'reasons' => $globalMembers
+                ? Database::all('SELECT id, text FROM stimulus_reasons WHERE is_active = 1 ORDER BY (department_id IS NULL), text')
+                : Database::all('SELECT id, text FROM stimulus_reasons WHERE is_active = 1 AND (department_id = ? OR department_id IS NULL) ORDER BY (department_id IS NULL), text', [(int) $deptId]),
             'sources' => Database::all('SELECT * FROM pay_sources ORDER BY id'),
             'selGrounds' => $memo ? array_filter(array_map('intval', explode(',', (string)$memo['grounds_ids']))) : [],
             'forecast' => $forecast,
@@ -322,6 +382,53 @@ class StimulusController extends Controller
             }
         }
 
+        // Новая служебка по сотрудникам (staff, без прямого назначения) → веер по отделам:
+        // одна служебка на каждый отдел сотрудника, связанные общим batch_id; маршрут — курирующему заму отдела.
+        if (!$id && $kind === 'staff' && !$direct) {
+            $pfrom = $period . '-01';
+            $pto = date('Y-m-t', strtotime($pfrom));
+            $byDept = []; $noDept = [];
+            foreach ($lines as $ln) {
+                $d = (int) Database::scalar('SELECT department_id FROM users WHERE id=?', [$ln['user_id']]);
+                if (!$d) { $noDept[] = (string) Database::scalar('SELECT full_name FROM users WHERE id=?', [$ln['user_id']]); continue; }
+                $byDept[$d][] = $ln;
+            }
+            if ($noDept) {
+                flash('У сотрудников не указан отдел — некуда направить служебку: ' . implode(', ', array_unique($noDept)) . '. Сначала назначьте им отдел.', 'error');
+                $this->backToForm($id, $kind);
+            }
+            $isDir = Org::tier($uid) === 'director' || Auth::isAdmin();
+            $pdo = Database::pdo();
+            $pdo->beginTransaction();
+            $batchId = null; $created = []; $noCurator = [];
+            foreach ($byDept as $d => $dlines) {
+                $curator = (int) Database::scalar('SELECT curator_id FROM departments WHERE id=?', [$d]);
+                $ctier = $isDir ? 'director' : ($curator === $uid ? 'deputy' : null);
+                if (!$isDir && $ctier === null && !$curator) { $noCurator[] = (string) Database::scalar('SELECT name FROM departments WHERE id=?', [$d]); }
+                $memoId = Database::insert(
+                    'INSERT INTO stimulus_memos (department_id, author_id, period, pay_kind, source_id, grounds, grounds_ids, kind, direct_tier, status, batch_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                    [$d, $uid, $period, $payKind, $sourceId, implode('; ', $groundTexts), implode(',', $groundIds), 'staff', $ctier, 'draft', null]);
+                if ($batchId === null) { $batchId = $memoId; }
+                foreach ($dlines as $ln) {
+                    Database::insert(
+                        'INSERT INTO stimulus_memo_lines (memo_id, user_id, amount, pay_kind, period_from, period_to, oklad_load, percent, purpose, reason_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                        [$memoId, $ln['user_id'], $ln['amount'], $ln['pay_kind'], $pfrom, $pto, $ln['oklad_load'], $ln['percent'], $ln['purpose'], $ln['reason_id']]);
+                }
+                $created[] = $memoId;
+            }
+            Database::run('UPDATE stimulus_memos SET batch_id=? WHERE id IN (' . implode(',', array_fill(0, count($created), '?')) . ')',
+                array_merge([$batchId], $created));
+            $pdo->commit();
+            if (count($created) === 1) {
+                flash('Служебка сохранена как черновик. Подпишите её, чтобы отправить курирующему заму.');
+                $this->redirect('/memos/' . (int) $created[0]);
+            }
+            $msg = 'Создано служебок: ' . count($created) . ' (по числу отделов). Подпишите — каждая уйдёт курирующему заму своего отдела.';
+            if ($noCurator) { $msg .= ' Внимание: не назначен куратор у отдела(ов): ' . implode(', ', array_unique($noCurator)) . ' — там служебка остановится на этапе зама (назначьте куратора в Оргструктуре).'; }
+            flash($msg);
+            $this->redirect('/memos/batch/' . (int) $batchId);
+        }
+
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         if ($id) {
@@ -390,6 +497,9 @@ class StimulusController extends Controller
         $isMgmt = ($memo['kind'] ?? 'staff') === 'mgmt';
         $canMgmtSign = $isMgmt && in_array($memo['status'], ['draft','revision'], true) && $isDirector;
         $direct = $memo['direct_tier'] ?? null;
+        // Кросс-ветка: автор не является начальником отдела служебки → первый этап подписи он ставит как инициатор.
+        $deptHead = $memo['department_id'] ? (int) Database::scalar('SELECT head_id FROM departments WHERE id=?', [$memo['department_id']]) : 0;
+        $isCross = !$isMgmt && !$direct && (int) $memo['author_id'] !== $deptHead;
         $canHeadSign = !$isMgmt && !$direct && $isAuthor && $memo['status'] === 'draft';
         $canDeputySign = !$isMgmt && !$direct && (($memo['status'] === 'head_signed' && (!empty($roles['deputy_director']) && ((int)$memo['curator_id']===$uid))) || ($memo['status']==='head_signed' && Auth::isAdmin()));
         $canDirectorSign = !$isMgmt && !$direct && $memo['status'] === 'deputy_signed' && ($isDirector);
@@ -407,6 +517,9 @@ class StimulusController extends Controller
             'memo' => $memo, 'lines' => $lines, 'groundRows' => $groundRows,
             'kind' => $memo['kind'] ?? 'staff',
             'direct' => $direct,
+            'isCross' => $isCross,
+            'batchId' => $memo['batch_id'] ?? null,
+            'batchCount' => !empty($memo['batch_id']) ? (int) Database::scalar('SELECT COUNT(*) FROM stimulus_memos WHERE batch_id=?', [$memo['batch_id']]) : 0,
             'total' => array_sum(array_map(fn($l)=>(float)$l['amount'], $lines)),
             'source' => $memo['source_id'] ? Database::one('SELECT * FROM pay_sources WHERE id=?', [$memo['source_id']]) : null,
             'canEdit' => $isAuthor && in_array($memo['status'], ['draft','revision'], true),
@@ -419,6 +532,97 @@ class StimulusController extends Controller
             'canReject' => ($canDeputySign || $canDirectorSign || ($direct === 'deputy' && $memo['status'] === 'deputy_signed' && $isDirector)),
             'csrf' => Auth::csrf(),
         ]);
+    }
+
+    /** Страница пакета: служебки, созданные одной формой по разным отделам (общий batch_id). */
+    public function showBatch(string $id): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        $batchId = (int) $id;
+        $memos = Database::all(
+            "SELECT m.*, d.name AS dept_name, d.curator_id, c.full_name AS curator_name, a.full_name AS author_name,
+                    (SELECT COALESCE(SUM(l.amount),0) FROM stimulus_memo_lines l WHERE l.memo_id=m.id) AS total,
+                    (SELECT COUNT(*) FROM stimulus_memo_lines l WHERE l.memo_id=m.id) AS people
+               FROM stimulus_memos m
+               LEFT JOIN departments d ON d.id=m.department_id
+               LEFT JOIN users c ON c.id=d.curator_id
+               JOIN users a ON a.id=m.author_id
+              WHERE m.batch_id=? ORDER BY d.name", [$batchId]);
+        if (!$memos) { flash('Пакет служебок не найден.', 'error'); $this->redirect('/memos'); }
+        $uid = (int) Auth::id();
+        $author = (int) $memos[0]['author_id'];
+        $canView = $author === $uid || Auth::has('director', 'accountant') || Auth::isAdmin();
+        if (!$canView) {
+            foreach ($memos as $m) {
+                if (Org::isSuperiorOfDept($uid, $m['department_id'] ? (int) $m['department_id'] : null)) { $canView = true; break; }
+            }
+        }
+        if (!$canView) { flash('Нет доступа к пакету.', 'error'); $this->redirect('/memos'); }
+        $draftMine = $author === $uid ? count(array_filter($memos, fn($m) => $m['status'] === 'draft')) : 0;
+        $this->view('stimulus/batch', [
+            'title' => 'Пакет служебок о стимуле',
+            'memos' => $memos,
+            'batchId' => $batchId,
+            'statusLabels' => self::STATUS,
+            'isAuthor' => $author === $uid,
+            'authorName' => $memos[0]['author_name'],
+            'period' => $memos[0]['period'],
+            'draftMine' => $draftMine,
+            'total' => array_sum(array_map(fn($m) => (float) $m['total'], $memos)),
+            'csrf' => Auth::csrf(),
+        ]);
+    }
+
+    /** Пакетная подпись инициатором: одна ПЭП на все черновики пакета (каждая уходит своему маршруту). */
+    public function signBatch(string $id): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'admin');
+        Auth::verifyCsrf();
+        $uid = (int) Auth::id();
+        $batchId = (int) $id;
+        $memos = Database::all(
+            "SELECT m.*, d.curator_id FROM stimulus_memos m LEFT JOIN departments d ON d.id=m.department_id
+              WHERE m.batch_id=? AND m.author_id=? AND m.status='draft' ORDER BY m.id", [$batchId, $uid]);
+        if (!$memos) { flash('Нет черновиков пакета для подписи.', 'error'); $this->redirect('/memos/batch/' . $batchId); }
+        // ПЭП — подтверждение паролем (один раз на пакет).
+        $pass = (string) $this->input('password');
+        $hash = (string) Database::scalar('SELECT password_hash FROM users WHERE id=?', [$uid]);
+        if (!password_verify($pass, $hash)) { flash('Неверный пароль — подпись отклонена.', 'error'); $this->redirect('/memos/batch/' . $batchId); }
+        $roles = Auth::roles();
+        $isDir = !empty($roles['director']) || Auth::isAdmin();
+        $isDep = !empty($roles['deputy_director']) || Auth::isAdmin();
+        $secret = (string) Settings::get('sign_secret', 'uchet');
+        $signed = 0;
+        foreach ($memos as $memo) {
+            $mid = (int) $memo['id'];
+            $now = date('Y-m-d H:i:s');
+            $sig = substr(hash_hmac('sha256', $mid . '|' . $uid . '|' . $now, $secret), 0, 24);
+            $direct = $memo['direct_tier'] ?? null;
+            $num = $memo['number'] ?: self::nextNumber();
+            if ($direct === 'director' && $isDir) {
+                Database::run('UPDATE stimulus_memos SET status=?, number=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=? WHERE id=?',
+                    ['approved', $num, $uid, 'PEP', $now, $sig, $mid]);
+                foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='accountant'") as $acc) {
+                    NotificationService::create((int) $acc['id'], 'Стимул назначен директором', "Директор назначил стимул напрямую (№{$num}).");
+                }
+            } elseif ($direct === 'deputy' && $isDep) {
+                Database::run('UPDATE stimulus_memos SET status=?, number=?, deputy_id=?, deputy_sign_type=?, deputy_signed_at=?, deputy_sign_hash=? WHERE id=?',
+                    ['deputy_signed', $num, $uid, 'PEP', $now, $sig, $mid]);
+                foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='director'") as $dir) {
+                    NotificationService::create((int) $dir['id'], 'Служебка на утверждение директором', "Зам назначил стимул напрямую (№{$num}), ожидает вашего утверждения.");
+                }
+            } else {
+                // Обычный маршрут: инициатор подписывает → head_signed → курирующему заму отдела.
+                Database::run('UPDATE stimulus_memos SET status=?, number=?, head_id=?, head_sign_type=?, head_signed_at=?, head_sign_hash=? WHERE id=?',
+                    ['head_signed', $num, $uid, 'PEP', $now, $sig, $mid]);
+                if ($memo['curator_id']) {
+                    NotificationService::create((int) $memo['curator_id'], 'Служебка на утверждение', "Поступила служебка о стимуле №{$num} на ваше утверждение.");
+                }
+            }
+            $signed++;
+        }
+        flash("Подписано как инициатор: {$signed} служебок(и). Каждая направлена курирующему заму своего отдела.");
+        $this->redirect('/memos/batch/' . $batchId);
     }
 
     /** Данные одной служебки для печатной формы (А4). */

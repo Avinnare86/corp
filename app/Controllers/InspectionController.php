@@ -61,11 +61,14 @@ class InspectionController extends Controller
 
         $items = Database::all(
             "SELECT i.*, d.reg_number, d.country_code, u.full_name AS employee_name,
-                    et.name AS error_name, d.comment_text AS dorabotka
+                    et.name AS error_name, d.comment_text AS dorabotka,
+                    al.code AS arrival_code, ad.text AS arrival_detail
                FROM inspections i
                JOIN assignment_items d ON d.id = i.dossier_id
                JOIN users u    ON u.id = i.employee_id
                LEFT JOIN error_types et ON et.id = i.error_type_id
+               LEFT JOIN arrival_lines al ON al.id = d.arrival_line_id
+               LEFT JOIN arrival_details ad ON ad.id = d.arrival_detail_id
               WHERE i.batch_id = ?
               ORDER BY u.full_name, i.id",
             [$batch['id']]

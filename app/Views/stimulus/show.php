@@ -1,6 +1,9 @@
 <?php use App\Controllers\StimulusController; $st = StimulusController::STATUS;
 $isMgmt = ($kind ?? 'staff') === 'mgmt';
 $direct = $direct ?? ($memo['direct_tier'] ?? null);
+$isCross = $isCross ?? false;
+$batchId = $batchId ?? ($memo['batch_id'] ?? null);
+$batchCount = $batchCount ?? 0;
 $dirStep = ['director', 'Директор', $memo['director_signed_at'] ?? null, $memo['director_sign_type'] ?? null];
 $depStep = ['deputy', 'Зам (прямое назначение)', $memo['deputy_signed_at'] ?? null, $memo['deputy_sign_type'] ?? null];
 if ($isMgmt) {
@@ -11,7 +14,7 @@ if ($isMgmt) {
     $steps = [$depStep, $dirStep];
 } else {
     $steps = [
-        ['head', 'Начальник отдела', $memo['head_signed_at'] ?? null, $memo['head_sign_type'] ?? null],
+        ['head', $isCross ? 'Инициатор (вышестоящий)' : 'Начальник отдела', $memo['head_signed_at'] ?? null, $memo['head_sign_type'] ?? null],
         ['deputy', 'Курирующий зам', $memo['deputy_signed_at'] ?? null, $memo['deputy_sign_type'] ?? null],
         $dirStep,
     ];
@@ -19,6 +22,7 @@ if ($isMgmt) {
 ?>
 <div class="chat-head">
     <a class="btn btn-mini" href="/memos">← Служебки</a>
+    <?php if ($batchCount > 1): ?><a class="btn btn-mini" href="/memos/batch/<?= (int)$batchId ?>">⊞ Пакет (<?= (int)$batchCount ?>)</a><?php endif; ?>
     <h1 style="margin:0;font-size:1.2rem">Служебка №<?= e($memo['number'] ?: $memo['id']) ?></h1>
     <span class="st <?= ['approved'=>'st-ok','revision'=>'st-rev','rejected'=>'st-rev'][$memo['status']] ?? 'st-wait' ?>"><?= e($st[$memo['status']] ?? $memo['status']) ?></span>
 </div>

@@ -18,9 +18,11 @@ class DossierController extends Controller
         $uid = Auth::id();
 
         $pending = Database::all(
-            "SELECT ai.*, c.name AS country_name
+            "SELECT ai.*, c.name AS country_name, al.code AS arrival_code, ad.text AS arrival_detail
                FROM assignment_items ai
                LEFT JOIN countries c ON c.code = ai.country_code
+               LEFT JOIN arrival_lines al ON al.id = ai.arrival_line_id
+               LEFT JOIN arrival_details ad ON ad.id = ai.arrival_detail_id
               WHERE ai.assigned_to = ? AND ai.checked_at IS NULL
               ORDER BY ai.country_code, ai.id LIMIT 500",
             [$uid]
@@ -45,9 +47,11 @@ class DossierController extends Controller
         Auth::requireRole('employee', 'admin');
         $uid = Auth::id();
         $items = Database::all(
-            "SELECT ai.*, c.name AS country_name
+            "SELECT ai.*, c.name AS country_name, al.code AS arrival_code, ad.text AS arrival_detail
                FROM assignment_items ai
                LEFT JOIN countries c ON c.code = ai.country_code
+               LEFT JOIN arrival_lines al ON al.id = ai.arrival_line_id
+               LEFT JOIN arrival_details ad ON ad.id = ai.arrival_detail_id
               WHERE ai.assigned_to = ? AND ai.checked_at IS NOT NULL
               ORDER BY ai.checked_at DESC, ai.id DESC LIMIT 500",
             [$uid]

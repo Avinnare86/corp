@@ -40,6 +40,7 @@ if ($uid) {
             $g[] = ['/admin/countries', 'Страны', 0];
             $g[] = ['/admin/comments', 'Причины', 0];
             $g[] = ['/admin/errors', 'Ошибки', 0];
+            $g[] = ['/manager/arrival', 'Линии прибытия', 0];
         }
         if ($g) { $menu['Квота'] = $g; }
     }

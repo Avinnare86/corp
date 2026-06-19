@@ -65,6 +65,8 @@ class ManagerController extends Controller
             'employees' => $employees,
             'minRemaining' => $minRemaining,
             'allCountries' => $allCountries,
+            'arrivalLines' => Database::all("SELECT id, code, name FROM arrival_lines WHERE is_active=1 ORDER BY code"),
+            'arrivalDetails' => Database::all("SELECT id, text FROM arrival_details WHERE is_active=1 ORDER BY text"),
             'csrf' => \App\Core\Auth::csrf(),
         ]);
     }
@@ -153,28 +155,40 @@ class ManagerController extends Controller
         $orig = $_FILES['file']['name'];
         $name = trim((string) $this->input('name')) ?: pathinfo($orig, PATHINFO_FILENAME);
 
-        $regs = ListParser::extract($_FILES['file']['tmp_name'], $orig);
-        if (!$regs) {
+        // Структурный разбор: рег. номера + детализированная линия прибытия (ДЛП) по секциям файла.
+        $rows = ListParser::extractStructured($_FILES['file']['tmp_name'], $orig);
+        if (!$rows) {
             flash('В файле не найдено рег. номеров формата КОД-НОМЕР/ГОД.', 'error');
             $this->redirect('/manager');
         }
 
         @set_time_limit(0);
         $listId = Database::insert('INSERT INTO assignment_lists (name, uploaded_by) VALUES (?,?)', [$name, Auth::id()]);
-        $added = 0; $dup = 0;
+        $added = 0; $dup = 0; $withLine = 0;
 
         // Транзакция: один fsync вместо тысячи — критично для больших списков (1000+ строк).
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         try {
+            // ЛП для загрузок «детализированного Плана приема» — всегда ПП (План приема).
+            $ppId = ArrivalController::resolveLine('ПП', 'План приема');
+            $detailCache = [];   // текст ДЛП → id (чтобы не плодить запросы/дубли)
             $check = $pdo->prepare('SELECT 1 FROM assignment_items WHERE reg_number = ?');
-            $ins = $pdo->prepare('INSERT INTO assignment_items (list_id, reg_number, country_code) VALUES (?,?,?)');
-            foreach ($regs as $reg) {
-                $reg = strtoupper(trim($reg));
+            $ins = $pdo->prepare('INSERT INTO assignment_items (list_id, reg_number, country_code, arrival_line_id, arrival_detail_id) VALUES (?,?,?,?,?)');
+            foreach ($rows as $row) {
+                $reg = strtoupper(trim($row['reg']));
                 $code = explode('-', $reg)[0] ?? '';
                 $check->execute([$reg]);
                 if ($check->fetchColumn()) { $dup++; continue; }
-                $ins->execute([$listId, $reg, $code]);
+                $detail = trim((string) ($row['detail'] ?? ''));
+                $lineId = null; $detailId = null;
+                if ($detail !== '') {
+                    $lineId = $ppId;
+                    if (!array_key_exists($detail, $detailCache)) { $detailCache[$detail] = ArrivalController::resolveDetail($detail); }
+                    $detailId = $detailCache[$detail];
+                    $withLine++;
+                }
+                $ins->execute([$listId, $reg, $code, $lineId, $detailId]);
                 $added++;
             }
             $pdo->commit();
@@ -184,7 +198,8 @@ class ManagerController extends Controller
             flash('Ошибка при загрузке списка.', 'error');
             $this->redirect('/manager');
         }
-        $msg = "Список «{$name}» загружен: добавлено {$added}" . ($dup ? ", пропущено дубликатов {$dup}" : '') . '.';
+        $msg = "Список «{$name}» загружен: добавлено {$added}" . ($dup ? ", пропущено дубликатов {$dup}" : '')
+            . ($withLine ? ", с линией прибытия (ПП) {$withLine}" : '') . '.';
         if ($this->isXhr()) {
             $this->json(['ok' => true, 'added' => $added, 'dup' => $dup, 'message' => $msg]);
         }
@@ -206,6 +221,14 @@ class ManagerController extends Controller
         }
         $name = trim((string) $this->input('name')) ?: ('Ручной ввод ' . date('d.m.Y H:i'));
 
+        // Линия прибытия — одна на весь пакет: выбор из справочника или новая (добавится в справочник).
+        $lineId = $this->input('line_id') ? (int) $this->input('line_id') : null;
+        $newLine = trim((string) $this->input('line_code'));
+        if (!$lineId && $newLine !== '') { $lineId = ArrivalController::resolveLine($newLine); }
+        $detailId = $this->input('detail_id') ? (int) $this->input('detail_id') : null;
+        $newDetail = trim((string) $this->input('detail_text'));
+        if (!$detailId && $newDetail !== '') { $detailId = ArrivalController::resolveDetail($newDetail); }
+
         @set_time_limit(0);
         $listId = Database::insert('INSERT INTO assignment_lists (name, uploaded_by) VALUES (?,?)', [$name, Auth::id()]);
         $added = 0; $dup = 0;
@@ -214,11 +237,11 @@ class ManagerController extends Controller
         $pdo->beginTransaction();
         try {
             $check = $pdo->prepare('SELECT 1 FROM assignment_items WHERE reg_number = ?');
-            $ins = $pdo->prepare('INSERT INTO assignment_items (list_id, reg_number, country_code) VALUES (?,?,?)');
+            $ins = $pdo->prepare('INSERT INTO assignment_items (list_id, reg_number, country_code, arrival_line_id, arrival_detail_id) VALUES (?,?,?,?,?)');
             foreach ($parsed['regs'] as $reg) {
                 $check->execute([$reg]);
                 if ($check->fetchColumn()) { $dup++; continue; }
-                $ins->execute([$listId, $reg, RegRangeParser::countryCode($reg)]);
+                $ins->execute([$listId, $reg, RegRangeParser::countryCode($reg), $lineId, $detailId]);
                 $added++;
             }
             $pdo->commit();
@@ -270,9 +293,15 @@ class ManagerController extends Controller
 
         $total = (int) Database::scalar("SELECT COUNT(*) FROM assignment_items WHERE $where", $params);
         $rows = Database::all(
-            "SELECT id, reg_number, country_code, recheck, excluded_user FROM assignment_items WHERE $where ORDER BY recheck DESC, country_code, id LIMIT $limit",
+            "SELECT ai.id, ai.reg_number, ai.country_code, ai.recheck, ai.excluded_user, al.code AS aline, ad.text AS adet
+               FROM assignment_items ai
+               LEFT JOIN arrival_lines al ON al.id = ai.arrival_line_id
+               LEFT JOIN arrival_details ad ON ad.id = ai.arrival_detail_id
+              WHERE $where ORDER BY ai.recheck DESC, ai.country_code, ai.id LIMIT $limit",
             $params
         );
+        foreach ($rows as &$r) { $r['arrival'] = arrival_label($r['aline'] ?? null, $r['adet'] ?? null); }
+        unset($r);
         $this->json(['items' => $rows, 'total' => $total, 'shown' => count($rows)]);
     }
 

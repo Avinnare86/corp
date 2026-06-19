@@ -79,6 +79,26 @@ class Org
         return array_keys($out);
     }
 
+    /**
+     * Вся ветка подчинённости вниз: отделы, где $uid начальник (с подотделами),
+     * плюс кураторские отделы (curatedDeptIds уже с подотделами). Директор/админ → все.
+     * Используется для создания служебок о стимуле по всей ветке (а не только своему отделу).
+     */
+    public static function branchDeptIds(int $uid): array
+    {
+        if (self::tier($uid) === 'director') {
+            return array_map('intval', array_column(Database::all('SELECT id FROM departments'), 'id'));
+        }
+        $out = [];
+        // headedDeptIds НЕ раскрывает подотделы — раскрываем здесь.
+        foreach (self::headedDeptIds($uid) as $hid) {
+            foreach (self::withDescendants($hid) as $d) { $out[$d] = true; }
+        }
+        // curatedDeptIds уже включает подотделы.
+        foreach (self::curatedDeptIds($uid) as $d) { $out[$d] = true; }
+        return array_keys($out);
+    }
+
     /** Подразделение + все его подотделы (обход вниз по parent_id, с защитой от циклов). */
     public static function withDescendants(int $rootId): array
     {

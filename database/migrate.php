@@ -552,6 +552,23 @@ $tables['assignment_items'] = "CREATE TABLE IF NOT EXISTS assignment_items (
     created_at   TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
+// Справочник линий прибытия (ЛП): сокращение (напр. ПП = План приема) + полное название.
+$tables['arrival_lines'] = "CREATE TABLE IF NOT EXISTS arrival_lines (
+    id $ID,
+    code      VARCHAR(30) NOT NULL,
+    name      VARCHAR(200) DEFAULT '',
+    is_active INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
+// Справочник детализированных линий прибытия (ДЛП): значение из заголовка списка.
+$tables['arrival_details'] = "CREATE TABLE IF NOT EXISTS arrival_details (
+    id $ID,
+    text      VARCHAR(255) NOT NULL,
+    is_active INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
 // Каталог комментариев-доработок (выбираются при проверке).
 $tables['dorabotka_comments'] = "CREATE TABLE IF NOT EXISTS dorabotka_comments (
     id $ID,
@@ -878,6 +895,26 @@ if (!columnExists('stimulus_memos', 'direct_tier')) {
 if (!columnExists('stimulus_memos', 'grant_id')) {
     $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN grant_id INT NULL");
     echo "OK  колонка stimulus_memos.grant_id добавлена\n";
+}
+// Пакет: служебки, созданные одной формой по разным отделам (веер), связаны общим batch_id.
+if (!columnExists('stimulus_memos', 'batch_id')) {
+    $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN batch_id INT NULL");
+    echo "OK  колонка stimulus_memos.batch_id добавлена\n";
+}
+// Линия прибытия анкеты (квота): ЛП + ДЛП (FK на справочники).
+foreach (['arrival_line_id', 'arrival_detail_id'] as $col) {
+    if (!columnExists('assignment_items', $col)) {
+        $pdo->exec("ALTER TABLE assignment_items ADD COLUMN $col INT NULL");
+        echo "OK  колонка assignment_items.$col добавлена\n";
+    }
+}
+// Сид ЛП «ПП» (План приема) — для загрузок «детализированного Плана приема».
+if (!\App\Core\Database::scalar("SELECT 1 FROM arrival_lines WHERE code = ?", ['ПП'])) {
+    \App\Core\Database::insert("INSERT INTO arrival_lines (code, name, is_active) VALUES (?,?,1)", ['ПП', 'План приема']);
+    echo "OK  сид линии прибытия: ПП (План приема)\n";
+}
+foreach (['ix_ai_aline' => 'arrival_line_id', 'ix_ai_adet' => 'arrival_detail_id'] as $ix => $col) {
+    try { $pdo->exec("CREATE INDEX IF NOT EXISTS $ix ON assignment_items($col)"); } catch (\Throwable $e) {}
 }
 // Цель строки стимула (за анкеты/визы/другое) — сделка сверх оклада «зарабатывает» стимул.
 if (!columnExists('stimulus_memo_lines', 'purpose')) {

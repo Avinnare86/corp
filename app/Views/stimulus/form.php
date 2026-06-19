@@ -26,6 +26,11 @@
         <p class="muted" style="margin-top:0">Стимул <strong>заместителям директора и главному бухгалтеру</strong> (Приложение № 2 к Положению).
             Документ оформляет и утверждает <strong>директор</strong> единолично (одна подпись ЭП), после чего его видит бухгалтерия.
             <br>% = сумма / (оклад × ставка) × 100. По каждому работнику в одном периоде основания не должны повторяться.</p>
+    <?php elseif (!empty($branchMode)): ?>
+        <p class="muted" style="margin-top:0">Служебка <strong>по всей вашей ветке подчинённости</strong>: можно добавлять сотрудников разных отделов.
+            При сохранении создаётся отдельная служебка на каждый отдел — каждая уходит <strong>курирующему заму своего отдела → директору</strong>.
+            <br>По сотрудникам вашей ветки видно «уже назначено» (стимул и единовременные за период); по чужим подразделениям — назначение вслепую (только сумма).
+            <br>% = сумма / (оклад × ставка) × 100. По каждому работнику в периоде основания не должны повторяться между служебками.</p>
     <?php else: ?>
         <p class="muted" style="margin-top:0">Отдел: <strong><?= e($dept['name'] ?? '—') ?></strong>.
             Маршрут: начальник отдела → курирующий зам → директор. Бухгалтерия видит после подписи зама.
@@ -96,7 +101,7 @@
         </div>
         <?php endif; ?>
         <table class="table" id="memoLines">
-            <thead><tr><th>Работник</th><?php if ($showPiece): ?><th class="num">Квота</th><th class="num">Визы</th><?php endif; ?><th>Оклад×ставка</th><th class="num">Сумма стимула, ₽</th><th class="num">%</th><th>Вид</th><th>Цель</th><th>Основание</th><th></th></tr></thead>
+            <thead><tr><th>Работник</th><?php if ($showPiece): ?><th class="num">Квота</th><th class="num">Визы</th><?php endif; ?><th>Оклад×ставка</th><th>Уже назначено за период</th><th class="num">Сумма стимула, ₽</th><th class="num">%</th><th>Вид</th><th>Цель</th><th>Основание</th><th></th></tr></thead>
             <tbody></tbody>
         </table>
         <button type="button" class="btn btn-mini" onclick="addLine()">+ Добавить <?= $isMgmt ? 'руководителя' : 'работника' ?></button>
@@ -110,11 +115,11 @@
 
 <script>
 var SHOW_PIECE = <?= $showPiece ? 'true' : 'false' ?>;
-var MEMBERS = <?= json_encode(array_map(fn($m)=>['id'=>(int)$m['id'],'name'=>$m['full_name'].' — '.$m['position'],'load'=>(float)$m['oklad_load'],'kvota'=>(float)$m['kvota'],'visy'=>(float)$m['visy'],'total'=>(float)$m['piece']], $members), JSON_UNESCAPED_UNICODE) ?>;
+var MEMBERS = <?= json_encode(array_map(fn($m)=>['id'=>(int)$m['id'],'name'=>$m['full_name'].' — '.$m['position'],'dept'=>$m['dept_name']??'','load'=>(float)$m['oklad_load'],'kvota'=>(float)$m['kvota'],'visy'=>(float)$m['visy'],'total'=>(float)$m['piece'],'can_see'=>!empty($m['can_see']),'ex_m_appr'=>(float)($m['ex_m_appr']??0),'ex_m_proj'=>(float)($m['ex_m_proj']??0),'ex_o_appr'=>(float)($m['ex_o_appr']??0),'ex_o_proj'=>(float)($m['ex_o_proj']??0)], $members), JSON_UNESCAPED_UNICODE) ?>;
 var EXIST = <?= json_encode(array_map(fn($l)=>['user_id'=>(int)$l['user_id'],'amount'=>(float)$l['amount'],'kind'=>$l['pay_kind'],'purpose'=>$l['purpose']??'other','reason_id'=>$l['reason_id']!==null?(int)$l['reason_id']:null], $lines), JSON_UNESCAPED_UNICODE) ?>;
 var REASONS = <?= json_encode(array_map(fn($r)=>['id'=>(int)$r['id'],'text'=>$r['text']], $reasons ?? []), JSON_UNESCAPED_UNICODE) ?>;
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
-function opt(sel){ return MEMBERS.map(function(m){ return '<option value="'+m.id+'"'+(m.id==sel?' selected':'')+'>'+esc(m.name)+'</option>'; }).join(''); }
+function opt(sel){ return MEMBERS.map(function(m){ var lbl=m.name+(m.dept?(' ('+m.dept+')'):''); return '<option value="'+m.id+'"'+(m.id==sel?' selected':'')+'>'+esc(lbl)+'</option>'; }).join(''); }
 function reasonOpts(sel){ return '<option value="">—</option>'+REASONS.map(function(r){ return '<option value="'+r.id+'"'+(r.id==sel?' selected':'')+'>'+esc(r.text)+'</option>'; }).join(''); }
 function purposeOpts(sel){ sel=sel||'other'; var o=[['other','за другое'],['anketas','за анкеты'],['visas','за визы']];
   return o.map(function(p){ return '<option value="'+p[0]+'"'+(p[0]===sel?' selected':'')+'>'+p[1]+'</option>'; }).join(''); }
@@ -123,10 +128,22 @@ function fmt(n){ return (Math.round(n*100)/100).toLocaleString('ru-RU'); }
 function recalc(tr){
   var id=tr.querySelector('.m-user').value, amt=parseFloat((tr.querySelector('.m-amount').value||'0').replace(',','.'))||0;
   var m=memOf(id), load=m?m.load:0;
+  var kindEl=tr.querySelector('.m-kind'); var kind=kindEl?kindEl.value:'monthly';
   tr.querySelector('.m-load').textContent=fmt(load);
   if (SHOW_PIECE){ tr.querySelector('.m-kvota').textContent=m?fmt(m.kvota):'—'; tr.querySelector('.m-visy').textContent=m?fmt(m.visy):'—'; }
+  var ex=tr.querySelector('.m-exist'); if(ex) ex.innerHTML=existInfo(m, amt, kind);
   tr.querySelector('.m-pct').textContent=load>0?fmt(amt/load*100)+'%':'—';
   updTotal();
+}
+/** Сколько уже назначено сотруднику за период (видно только по своей ветке) + «станет с этой строкой». */
+function existInfo(m, amt, kind){
+  if(!m) return '<span class="muted">—</span>';
+  if(!m.can_see) return '<span class="muted" title="Сотрудник вне вашей ветки подчинённости — сумма назначается вслепую">🔒 вне вашей ветки</span>';
+  var s='ежем.: '+fmt(m.ex_m_appr)+(m.ex_m_proj?(' <span class="muted">(+'+fmt(m.ex_m_proj)+' проект)</span>'):'')
+       +'<br>единовр.: '+fmt(m.ex_o_appr)+(m.ex_o_proj?(' <span class="muted">(+'+fmt(m.ex_o_proj)+' проект)</span>'):'');
+  var base=(kind==='onetime')?(m.ex_o_appr+m.ex_o_proj):(m.ex_m_appr+m.ex_m_proj);
+  if(amt>0) s+='<br><strong>станет '+(kind==='onetime'?'единовр.':'ежем.')+': '+fmt(base+amt)+'</strong>';
+  return s;
 }
 function updTotal(){
   var s=0; document.querySelectorAll('#memoLines .m-amount').forEach(function(i){ s+=parseFloat((i.value||'0').replace(',','.'))||0; });
@@ -141,15 +158,17 @@ function addLine(uid, amount, kind, purpose, reasonId){
   tr.innerHTML='<td><select class="m-user" name="row['+i+'][user_id]"><option value="">—</option>'+opt(uid)+'</select></td>'
     +piece
     +'<td class="m-load num">0</td>'
+    +'<td class="m-exist" style="font-size:.8rem;white-space:nowrap"><span class="muted">—</span></td>'
     +'<td><input class="m-amount" type="text" name="row['+i+'][amount]" value="'+(amount||'')+'" style="width:120px;text-align:right"></td>'
     +'<td class="m-pct num">—</td>'
-    +'<td><select name="row['+i+'][pay_kind]"><option value="monthly"'+((kind||def)==='monthly'?' selected':'')+'>ежемес.</option><option value="onetime"'+((kind||def)==='onetime'?' selected':'')+'>единоврем.</option></select></td>'
+    +'<td><select class="m-kind" name="row['+i+'][pay_kind]"><option value="monthly"'+((kind||def)==='monthly'?' selected':'')+'>ежемес.</option><option value="onetime"'+((kind||def)==='onetime'?' selected':'')+'>единоврем.</option></select></td>'
     +'<td><select name="row['+i+'][purpose]" title="За анкеты/визы — сделка сверх оклада закрывает стимул; за другое — гарантированная доплата">'+purposeOpts(purpose)+'</select></td>'
     +'<td><select name="row['+i+'][reason_id]">'+reasonOpts(reasonId)+'</select></td>'
     +'<td><button type="button" class="btn btn-mini btn-danger" onclick="this.closest(\'tr\').remove();updTotal()">×</button></td>';
   tb.appendChild(tr);
   tr.querySelector('.m-user').addEventListener('change',function(){recalc(tr);});
   tr.querySelector('.m-amount').addEventListener('input',function(){recalc(tr);});
+  tr.querySelector('.m-kind').addEventListener('change',function(){recalc(tr);});
   recalc(tr);
   return tr;
 }

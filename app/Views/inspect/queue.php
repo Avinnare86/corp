@@ -9,7 +9,7 @@
 <section class="panel">
     <table class="table">
         <thead>
-        <tr><th>Специалист</th><th>Рег. номер</th><th>Вердикт</th><th>Тип ошибки</th><th class="num">Снижение</th></tr>
+        <tr><th>Специалист</th><th>Рег. номер</th><th>План приема</th><th>Вердикт</th><th>Тип ошибки</th><th class="num">Снижение</th></tr>
         </thead>
         <tbody>
         <?php foreach ($items as $it):
@@ -19,6 +19,8 @@
             <tr class="<?= $reviewed ? ($isError ? 'row-error' : 'row-ok') : '' ?>">
                 <td><?= e($it['employee_name']) ?></td>
                 <td><strong><?= e($it['reg_number']) ?></strong> <span class="muted"><?= e($it['country_code']) ?></span></td>
+                <?php $al = arrival_label($it['arrival_code'] ?? null, $it['arrival_detail'] ?? null); ?>
+                <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($al) ?>"><?= $al !== '' ? e($al) : '<span class="muted">—</span>' ?></td>
                 <td colspan="3">
                     <form method="post" action="/inspect/<?= (int) $it['id'] ?>/review" class="review-form">
                         <?= csrf_field() ?>
@@ -55,7 +57,7 @@
             </tr>
         <?php endforeach; ?>
         <?php if (!$items): ?>
-            <tr><td colspan="5" class="muted">В выборке нет анкет.</td></tr>
+            <tr><td colspan="6" class="muted">В выборке нет анкет.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>

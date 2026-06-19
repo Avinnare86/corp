@@ -40,13 +40,15 @@
     <?php if (!$pending): ?><p class="muted">Нет назначенных непроверенных досье. Ожидайте распределения от менеджера.</p><?php endif; ?>
 
     <table class="table" id="pendingTable">
-        <thead><tr><th style="width:34px"></th><th>Рег. номер</th><th>Страна</th><th style="width:280px">Отметка</th></tr></thead>
+        <thead><tr><th style="width:34px"></th><th>Рег. номер</th><th>Страна</th><th>План приема</th><th style="width:280px">Отметка</th></tr></thead>
         <tbody>
         <?php foreach ($pending as $p): $id=(int)$p['id']; ?>
             <tr data-id="<?= $id ?>" data-reg="<?= e($p['reg_number']) ?>">
                 <td><input type="checkbox" class="rowchk" onchange="updSel()"></td>
                 <td class="mono"><strong><?= e($p['reg_number']) ?></strong></td>
                 <td><?= e($p['country_name'] ?? $p['country_code']) ?></td>
+                <?php $al = arrival_label($p['arrival_code'] ?? null, $p['arrival_detail'] ?? null); ?>
+                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($al) ?>"><?= $al !== '' ? e($al) : '<span class="muted">—</span>' ?></td>
                 <td>
                     <?php if ($working): ?>
                         <button class="btn btn-mini btn-gold" onclick="saveOne(<?= $id ?>,[])">✓ Без замечаний</button>

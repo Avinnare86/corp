@@ -26,6 +26,21 @@
                 <textarea name="regs" rows="3" style="font-family:monospace"
                     placeholder="RUS-0001/26 - RUS-0009/26&#10;RUS-00001/26, RUS-00005/26, RUS-00007/26"></textarea>
             </label>
+            <div class="form-inline" style="gap:8px;margin-top:8px;flex-wrap:wrap;align-items:flex-end">
+                <label>Линия (ЛП)
+                    <select name="line_id"><option value="">— нет —</option>
+                        <?php foreach (($arrivalLines ?? []) as $l): ?><option value="<?= (int)$l['id'] ?>"><?= e($l['code']) ?><?= $l['name'] ? ' — ' . e($l['name']) : '' ?></option><?php endforeach; ?>
+                    </select>
+                </label>
+                <label>или новая ЛП<input type="text" name="line_code" placeholder="ПП" style="max-width:90px"></label>
+                <label>Детализ. (ДЛП)
+                    <select name="detail_id"><option value="">— нет —</option>
+                        <?php foreach (($arrivalDetails ?? []) as $d): ?><option value="<?= (int)$d['id'] ?>"><?= e(mb_substr($d['text'], 0, 50)) ?></option><?php endforeach; ?>
+                    </select>
+                </label>
+                <label style="flex:1;min-width:220px">или новая ДЛП<input type="text" name="detail_text" placeholder="напр. У ШОС (Министерства образования КНР)" style="width:100%"></label>
+            </div>
+            <p class="muted" style="margin:4px 0">Линия прибытия применится ко всему пакету. <a href="/manager/arrival">Справочники линий →</a></p>
             <p class="muted" style="margin:4px 0 8px">Формат: <code>КОД-НОМЕР/ГОД</code>. Диапазон — через тире:
                 <code>RUS-0001/26 - RUS-0009/26</code> (9 анкет). Перечисление — через запятую или с новой строки.
                 Дубликаты пропускаются.</p>
@@ -101,11 +116,26 @@
     </div>
     <p class="muted">Слева — источник (общая корзина или сотрудник), справа — назначение. Отмечайте галочками или
         кнопкой «+ пачка» (размер задаётся) и переносите. Проверенные досье не переносятся.</p>
+
+    <div class="panel" style="background:#f5f7ff;border-left:4px solid #26368B;margin-top:10px">
+        <h3 class="sub" style="margin-top:0">Проставить линию прибытия отмеченным слева</h3>
+        <div class="form-inline" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <label>ЛП<select id="aLine"><option value="">— нет —</option>
+                <?php foreach (($arrivalLines ?? []) as $l): ?><option value="<?= (int)$l['id'] ?>"><?= e($l['code']) ?></option><?php endforeach; ?></select></label>
+            <label>или новая ЛП<input type="text" id="aLineNew" placeholder="ПП" style="max-width:80px"></label>
+            <label>ДЛП<select id="aDetail"><option value="">— нет —</option>
+                <?php foreach (($arrivalDetails ?? []) as $d): ?><option value="<?= (int)$d['id'] ?>"><?= e(mb_substr($d['text'], 0, 40)) ?></option><?php endforeach; ?></select></label>
+            <label style="flex:1;min-width:200px">или новая ДЛП<input type="text" id="aDetailNew" placeholder="напр. У ШОС (...)" style="width:100%"></label>
+            <button type="button" class="btn btn-primary" onclick="assignArrival()">Проставить</button>
+        </div>
+        <p class="muted" style="margin:4px 0 0">Применится к выбранным галочками анкетам в левой колонке (источник). <a href="/manager/arrival">Справочники →</a></p>
+    </div>
 </section>
 
 <script>
 (function(){
   var CSRF=<?= json_encode($csrf) ?>;
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
   var owners=[{key:'pool',name:'🗑 Не распределено'}<?php foreach($employees as $e): ?>,{key:'<?= (int)$e['id'] ?>',name:<?= json_encode($e['full_name']) ?>}<?php endforeach; ?>];
   var srcSel=document.getElementById('srcOwner'), dstSel=document.getElementById('dstOwner');
   owners.forEach(function(o){
@@ -129,7 +159,8 @@
         listEl.innerHTML='';
         d.items.forEach(function(it){
           var lab=document.createElement('label'); lab.className='xfer-item';
-          lab.innerHTML='<input type="checkbox" value="'+it.id+'"> <span class="mono">'+it.reg_number+'</span> <span class="muted">'+it.country_code+'</span>'
+          var arr = it.arrival ? ' <span class="muted" title="'+esc(it.arrival)+'">· '+esc(it.arrival.length>26?it.arrival.slice(0,26)+'…':it.arrival)+'</span>' : '';
+          lab.innerHTML='<input type="checkbox" value="'+it.id+'"> <span class="mono">'+esc(it.reg_number)+'</span> <span class="muted">'+esc(it.country_code)+'</span>'+arr
             +(parseInt(it.recheck)?' <span class="tag off" title="повторная проверка после брака">🔁 повторная</span>':'');
           lab.querySelector('input').addEventListener('change',function(){ updSel(side); });
           listEl.appendChild(lab);
@@ -152,6 +183,19 @@
     var body='to='+encodeURIComponent(to)+'&_csrf='+encodeURIComponent(CSRF)+ids.map(function(i){return '&ids[]='+i;}).join('');
     fetch('/manager/move',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'fetch'},body:body})
       .then(function(r){return r.json();}).then(function(){ loadPanel('src'); loadPanel('dst'); });
+  };
+  window.assignArrival=function(){
+    var ids=[].slice.call(document.querySelectorAll('#srcList input:checked')).map(function(c){return c.value;});
+    if(!ids.length){ alert('Отметьте анкеты слева (источник)'); return; }
+    var p='_csrf='+encodeURIComponent(CSRF)
+      +'&line_id='+encodeURIComponent(document.getElementById('aLine').value)
+      +'&line_code='+encodeURIComponent(document.getElementById('aLineNew').value)
+      +'&detail_id='+encodeURIComponent(document.getElementById('aDetail').value)
+      +'&detail_text='+encodeURIComponent(document.getElementById('aDetailNew').value)
+      +ids.map(function(i){return '&ids[]='+i;}).join('');
+    fetch('/manager/arrival/assign',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'fetch'},body:p})
+      .then(function(r){return r.json();}).then(function(d){ if(!d.ok){ alert(d.message||'Не удалось'); return; }
+        alert('Проставлено анкетам: '+d.updated+(d.label?(' → '+d.label):'')); loadPanel('src'); });
   };
 
   ['fList','fCountry','fSearch'].forEach(function(id){ document.getElementById(id).addEventListener('change',function(){ loadPanel('src'); loadPanel('dst'); }); });

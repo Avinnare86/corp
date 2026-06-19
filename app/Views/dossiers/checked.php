@@ -9,12 +9,14 @@
     <p class="muted" style="margin-bottom:12px">Статус: «Без замечаний» либо список причин-доработок. Можно изменить или вернуть в работу.</p>
     <?php if (!$items): ?><p class="muted">Проверенных досье пока нет.</p><?php endif; ?>
     <table class="table">
-        <thead><tr><th>Рег. номер</th><th>Страна</th><th>Проверено</th><th>Статус / причины</th><th>Действия</th></tr></thead>
+        <thead><tr><th>Рег. номер</th><th>Страна</th><th>План приема</th><th>Проверено</th><th>Статус / причины</th><th>Действия</th></tr></thead>
         <tbody>
         <?php foreach ($items as $it): $id=(int)$it['id']; $reasons=trim((string)$it['comment_text']); ?>
             <tr data-id="<?= $id ?>" data-reg="<?= e($it['reg_number']) ?>" data-sel="<?= e(implode(',', $selected[$id] ?? [])) ?>">
                 <td class="mono"><strong><?= e($it['reg_number']) ?></strong></td>
                 <td><?= e($it['country_name'] ?? $it['country_code']) ?></td>
+                <?php $al = arrival_label($it['arrival_code'] ?? null, $it['arrival_detail'] ?? null); ?>
+                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($al) ?>"><?= $al !== '' ? e($al) : '<span class="muted">—</span>' ?></td>
                 <td class="muted"><?= e(substr((string)$it['checked_at'],0,16)) ?></td>
                 <td class="cmt"><?= $reasons!=='' ? e($reasons) : '<span class="tag ok">Без замечаний</span>' ?></td>
                 <td>

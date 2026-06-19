@@ -50,6 +50,17 @@ if (!function_exists('ep_stamp')) {
     }
 }
 
+if (!function_exists('arrival_label')) {
+    /** Линия прибытия для отображения: «ЛП.code/ДЛП.text» (напр. ПП/У ШОС (…)). '' если пусто. */
+    function arrival_label(?string $code, ?string $detail): string
+    {
+        $code = trim((string) $code);
+        $detail = trim((string) $detail);
+        if ($code === '' && $detail === '') { return ''; }
+        return $code !== '' ? ($code . ($detail !== '' ? '/' . $detail : '')) : $detail;
+    }
+}
+
 if (!function_exists('old')) {
     /** Значение из flash-данных предыдущего ввода. */
     function old(string $key, $default = ''): string
