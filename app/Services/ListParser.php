@@ -30,10 +30,10 @@ class ListParser
 
     /**
      * Извлечь рег. номера С УЧЁТОМ секций «линии прибытия» (только .docx).
-     * Заголовок-строка «Линия прибытия … детализированным Планом приема …: ЗНАЧЕНИЕ»
-     * делит таблицу на секции: все номера после неё относятся к этой ДЛП.
-     * Возвращает упорядоченный список ['reg'=>..., 'detail'=>...] (dedup по reg, первый выигрывает).
-     * Не-docx / нет заголовков → detail='' (обратная совместимость).
+     * Заголовок «… детализированным Планом приема …: ЗНАЧЕНИЕ» → ЛП=ПП + ДЛП=ЗНАЧЕНИЕ;
+     * заголовок «… Планом приема …» без «детализированного» (или без значения) → только ЛП=ПП (ДЛП нет).
+     * Возвращает ['reg'=>..., 'line'=>'ПП'|'', 'detail'=>...] (dedup по reg, первый выигрывает).
+     * Не-docx / нет заголовков → line='' и detail='' (обратная совместимость).
      */
     public static function extractStructured(string $path, string $origName): array
     {
@@ -41,13 +41,13 @@ class ListParser
         if ($ext === 'docx' && class_exists('ZipArchive')) {
             return self::docxRows($path);
         }
-        // Прочие форматы — без секций: номера с пустой линией.
+        // Прочие форматы — без секций: номера без линии.
         $out = [];
-        foreach (self::extract($path, $origName) as $reg) { $out[] = ['reg' => $reg, 'detail' => '']; }
+        foreach (self::extract($path, $origName) as $reg) { $out[] = ['reg' => $reg, 'line' => '', 'detail' => '']; }
         return $out;
     }
 
-    /** Построчный разбор word/document.xml: заголовки «Линия прибытия» → ДЛП, рег. номера → секция. */
+    /** Построчный разбор word/document.xml: заголовки «Линия прибытия» → ЛП(ПП)/ДЛП, рег. номера → секция. */
     private static function docxRows(string $path): array
     {
         $zip = new \ZipArchive();
@@ -59,15 +59,18 @@ class ListParser
         $xml = str_replace(['</w:p>', '</w:tr>'], ["\n", "\n"], $xml);
         $text = html_entity_decode(preg_replace('/<[^>]+>/', '', $xml), ENT_QUOTES, 'UTF-8');
 
-        $current = '';
+        $curLine = '';    // ЛП (для загрузок «Плана приема» — ПП)
+        $curDetail = '';  // ДЛП (только из «детализированного» заголовка)
         $seen = [];
         $out = [];
         foreach (preg_split('/\n/', $text) as $line) {
             $line = trim($line);
             if ($line === '') { continue; }
-            // Заголовок секции: «Линия прибытия … : <ДЛП>».
-            if (preg_match('/Лини[ия]\s*прибыт.*?:\s*(.+)$/ui', $line, $m)) {
-                $current = preg_replace('/\s+/u', ' ', trim($m[1]));
+            // Заголовок секции: «Линия прибытия … [детализированным] Планом приема … [: значение]».
+            if (preg_match('/Лини[ия]\s*прибыт.*?:\s*(.*)$/ui', $line, $m)) {
+                $curLine = 'ПП'; // линия прибытия для загрузок — всегда План приема
+                // ДЛП берём только из «детализированного» заголовка; иначе остаётся просто ПП.
+                $curDetail = preg_match('/детализир/ui', $line) ? preg_replace('/\s+/u', ' ', trim($m[1])) : '';
                 continue;
             }
             // Рег. номера в строке.
@@ -75,7 +78,7 @@ class ListParser
                 foreach ($r[1] as $reg) {
                     if (isset($seen[$reg])) { continue; }
                     $seen[$reg] = true;
-                    $out[] = ['reg' => $reg, 'detail' => $current];
+                    $out[] = ['reg' => $reg, 'line' => $curLine, 'detail' => $curDetail];
                 }
             }
         }

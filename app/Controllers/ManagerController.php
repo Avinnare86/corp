@@ -180,13 +180,13 @@ class ManagerController extends Controller
                 $code = explode('-', $reg)[0] ?? '';
                 $check->execute([$reg]);
                 if ($check->fetchColumn()) { $dup++; continue; }
+                $lineCode = trim((string) ($row['line'] ?? ''));
                 $detail = trim((string) ($row['detail'] ?? ''));
                 $lineId = null; $detailId = null;
+                if ($lineCode !== '') { $lineId = $ppId; $withLine++; }   // линия (ПП) — даже без ДЛП
                 if ($detail !== '') {
-                    $lineId = $ppId;
                     if (!array_key_exists($detail, $detailCache)) { $detailCache[$detail] = ArrivalController::resolveDetail($detail); }
                     $detailId = $detailCache[$detail];
-                    $withLine++;
                 }
                 $ins->execute([$listId, $reg, $code, $lineId, $detailId]);
                 $added++;
