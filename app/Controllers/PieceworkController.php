@@ -16,7 +16,7 @@ class PieceworkController extends Controller
 
         $operations = Database::all('SELECT * FROM operations WHERE is_active = 1 ORDER BY name');
         $entries = Database::all(
-            "SELECT pw.*, o.name AS op_name, o.unit_price
+            "SELECT pw.*, o.name AS op_name, o.unit_price, o.stage
                FROM piecework pw
                JOIN operations o ON o.id = pw.operation_id
               WHERE pw.employee_id = ? AND substr(pw.work_date,1,7) = ?

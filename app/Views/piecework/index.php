@@ -1,5 +1,10 @@
 <h1>Визы и операции</h1>
 
+<div class="flash" style="background:#fff3cd;color:#5b4a00;border-left:4px solid #d9a400;margin-bottom:12px">
+    Этапы 1 и 3 идут в расчёт ЗП <strong>только после акцепта менеджером виз</strong> (по итогам дня).
+    Этап 2 (из грида проверки) учитывается сразу.
+</div>
+
 <?php if (!$working): ?>
 <section class="panel attendance" style="border-left:4px solid var(--accent)">
     <div>
@@ -43,7 +48,7 @@
 
     <table class="table">
         <thead>
-        <tr><th>Дата</th><th>Операция</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th><th></th></tr>
+        <tr><th>Дата</th><th>Операция</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th><th>Статус</th><th></th></tr>
         </thead>
         <tbody>
         <?php $total = 0; ?>
@@ -55,6 +60,13 @@
                 <td class="num"><?= money($en['unit_price']) ?></td>
                 <td class="num"><?= money($sum) ?></td>
                 <td>
+                    <?php if (in_array((int)($en['stage'] ?? 0), [1,3], true)): ?>
+                        <?= !empty($en['accepted_at']) ? '<span class="tag ok">принято</span>' : '<span class="tag off">ожидает акцепта</span>' ?>
+                    <?php else: ?>
+                        <span class="muted">учтено</span>
+                    <?php endif; ?>
+                </td>
+                <td>
                     <form method="post" action="/piecework/<?= (int) $en['id'] ?>/delete" onsubmit="return confirm('Удалить запись?')">
                         <?= csrf_field() ?>
                         <button class="btn btn-mini btn-danger">×</button>
@@ -63,10 +75,10 @@
             </tr>
         <?php endforeach; ?>
         <?php if (!$entries): ?>
-            <tr><td colspan="6" class="muted">За период записей нет.</td></tr>
+            <tr><td colspan="7" class="muted">За период записей нет.</td></tr>
         <?php endif; ?>
         <?php if ($entries): ?>
-            <tr class="total"><td colspan="4">Итого за период</td><td class="num"><?= money($total) ?></td><td></td></tr>
+            <tr class="total"><td colspan="4">Итого за период</td><td class="num"><?= money($total) ?></td><td colspan="2"></td></tr>
         <?php endif; ?>
         </tbody>
     </table>

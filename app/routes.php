@@ -115,6 +115,9 @@ $router->post('/docs/{id}/unvisa',  [DocumentController::class, 'unvisa']);
 // --- Визы: ходатайства ---
 $router->get('/visas',                  [\App\Controllers\VisaController::class, 'grid']);
 $router->post('/visas/save',            [\App\Controllers\VisaController::class, 'saveGrid']);
+$router->get('/visas/timesheet',          [\App\Controllers\VisaController::class, 'timesheet']);
+$router->post('/visas/timesheet/save',    [\App\Controllers\VisaController::class, 'timesheetSave']);
+$router->post('/visas/timesheet/revoke',  [\App\Controllers\VisaController::class, 'timesheetRevoke']);
 $router->get('/visas/manage',           [\App\Controllers\VisaController::class, 'manage']);
 $router->post('/visas/upload',          [\App\Controllers\VisaController::class, 'upload']);
 $router->post('/visas/ai-batch',        [\App\Controllers\VisaController::class, 'aiBatch']);

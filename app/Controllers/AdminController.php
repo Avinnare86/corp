@@ -193,15 +193,17 @@ class AdminController extends Controller
         $name = $this->input('name');
         $price = (float) $this->input('unit_price', 0);
         $active = (int) ($this->input('is_active') ? 1 : 0);
+        $stageIn = (int) $this->input('stage', 0);
+        $stage = in_array($stageIn, [1, 2, 3], true) ? $stageIn : null;  // этап визы (для акцепта/гейта ЗП)
         if (!$name) {
             flash('Укажите название операции.', 'error');
             $this->redirect('/admin/operations');
         }
         if ($id) {
-            Database::run('UPDATE operations SET name=?, unit_price=?, is_active=? WHERE id=?', [$name, $price, $active, $id]);
+            Database::run('UPDATE operations SET name=?, unit_price=?, is_active=?, stage=? WHERE id=?', [$name, $price, $active, $stage, $id]);
             flash('Операция обновлена.');
         } else {
-            Database::insert('INSERT INTO operations (name, unit_price, is_active) VALUES (?,?,?)', [$name, $price, $active]);
+            Database::insert('INSERT INTO operations (name, unit_price, is_active, stage) VALUES (?,?,?,?)', [$name, $price, $active, $stage]);
             flash('Операция добавлена.');
         }
         $this->redirect('/admin/operations');

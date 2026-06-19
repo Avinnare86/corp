@@ -53,6 +53,7 @@ if ($uid) {
         }
         if ($can('visa_manager')) {
             $g[] = ['/visas/manage', 'Загрузка и распределение', 0];
+            $g[] = ['/visas/timesheet', 'Учёт и акцепт работы', 0];
             $g[] = ['/visas/opis', 'Формирование описей', 0];
             $g[] = ['/visas/opis/list', 'Описи / Указания', 0];
             $g[] = ['/visas/rework', 'МИД: на доработке', \App\Controllers\VisaOpisController::reworkCount()];
@@ -61,7 +62,7 @@ if ($uid) {
             $g[] = ['/visas/report/period', 'Динамика за период', 0];
         }
         if ($can('visa_worker', 'visa_manager')) { $g[] = ['/visas/rating', 'Рейтинг', 0]; }
-        if ($can('piecework_worker')) { $g[] = ['/piecework', 'Визы/операции (учёт)', 0]; }
+        if ($can('piecework_worker', 'visa_worker')) { $g[] = ['/piecework', 'Визы/операции (учёт)', 0]; }
         if ($can('visa_manager'))     { $g[] = ['/admin/operations', 'Каталог операций', 0]; }
         if ($g) { $menu['Визы'] = $g; }
     }

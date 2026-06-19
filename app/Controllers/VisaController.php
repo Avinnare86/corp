@@ -385,9 +385,10 @@ class VisaController extends Controller
     /** Автозачёт проверки виз как операции «Виза — этап 2» (сделка), N штук за сегодня. */
     private static function creditStage2(int $uid, int $qty): void
     {
-        $opId = Database::scalar("SELECT id FROM operations WHERE name LIKE '%этап 2%' AND is_active=1 ORDER BY id LIMIT 1");
+        $opId = Database::scalar("SELECT id FROM operations WHERE stage=2 AND is_active=1 ORDER BY id LIMIT 1")
+             ?: Database::scalar("SELECT id FROM operations WHERE name LIKE '%этап 2%' AND is_active=1 ORDER BY id LIMIT 1");
         if (!$opId) {
-            $opId = Database::insert('INSERT INTO operations (name, unit_price, is_active) VALUES (?,?,1)', ['Виза — этап 2', 15]);
+            $opId = Database::insert('INSERT INTO operations (name, unit_price, is_active, stage) VALUES (?,?,1,2)', ['Виза — этап 2', 15]);
         }
         $today = date('Y-m-d');
         $pw = Database::one('SELECT id, quantity FROM piecework WHERE employee_id=? AND operation_id=? AND work_date=?', [$uid, $opId, $today]);
@@ -396,6 +397,122 @@ class VisaController extends Controller
         } else {
             Database::insert('INSERT INTO piecework (employee_id, operation_id, work_date, quantity) VALUES (?,?,?,?)', [$uid, (int) $opId, $today, $qty]);
         }
+    }
+
+    // ================= МЕНЕДЖЕР: учёт и акцепт работы по этапам 1/3 =================
+
+    /** Единая таблица за день: этап2 (авто, readonly) + проставление/акцепт этапов 1 и 3. */
+    public function timesheet(): void
+    {
+        $me = Auth::user();
+        if (!$this->isVisaManager($me)) { $this->redirect('/'); }
+        $date = (string) ($this->input('date') ?: date('Y-m-d'));
+
+        // Этап-операции (1/2/3) и их цены.
+        $stageOps = [];
+        foreach (Database::all("SELECT id, name, unit_price, stage FROM operations WHERE stage IN (1,2,3) AND is_active=1 ORDER BY stage, id") as $o) {
+            if (!isset($stageOps[(int) $o['stage']])) { $stageOps[(int) $o['stage']] = ['id' => (int) $o['id'], 'price' => (float) $o['unit_price'], 'name' => $o['name']]; }
+        }
+        // Специалисты: все активные visa_worker + у кого есть записи этапов за день.
+        $specialists = Database::all(
+            "SELECT u.id, u.full_name FROM users u JOIN user_roles r ON r.user_id=u.id
+              WHERE u.is_active=1 AND r.role_slug='visa_worker'
+             UNION
+             SELECT u.id, u.full_name FROM users u
+               JOIN piecework pw ON pw.employee_id=u.id JOIN operations o ON o.id=pw.operation_id
+              WHERE o.stage IN (1,2,3) AND pw.work_date=?
+             ORDER BY 2", [$date]);
+
+        $rows = [];
+        foreach ($specialists as $s) {
+            $uid = (int) $s['id'];
+            $q = [1 => 0, 2 => 0, 3 => 0]; $acceptedAt = null; $acceptedBy = 0; $has13 = 0; $pending13 = 0;
+            foreach (Database::all(
+                "SELECT o.stage, pw.quantity, pw.accepted_at, pw.accepted_by
+                   FROM piecework pw JOIN operations o ON o.id=pw.operation_id
+                  WHERE pw.employee_id=? AND pw.work_date=? AND o.stage IN (1,2,3)", [$uid, $date]) as $pw) {
+                $st = (int) $pw['stage'];
+                $q[$st] = ($q[$st] ?? 0) + (int) $pw['quantity'];
+                if ($st === 1 || $st === 3) {
+                    $has13++;
+                    if (empty($pw['accepted_at'])) { $pending13++; }
+                    else { $acceptedAt = $pw['accepted_at']; $acceptedBy = (int) $pw['accepted_by']; }
+                }
+            }
+            $rows[] = [
+                'id' => $uid, 'name' => $s['full_name'],
+                's1' => (int) $q[1], 's2' => (int) $q[2], 's3' => (int) $q[3],
+                'has13' => $has13, 'pending13' => $pending13,
+                'accepted' => ($has13 > 0 && $pending13 === 0),
+                'accepted_at' => $acceptedAt,
+                'accepted_by_name' => $acceptedBy ? (string) Database::scalar('SELECT full_name FROM users WHERE id=?', [$acceptedBy]) : '',
+            ];
+        }
+        $this->view('visas/timesheet', [
+            'title' => 'Учёт и акцепт работы (визы)',
+            'date' => $date, 'rows' => $rows, 'stageOps' => $stageOps,
+            'csrf' => Auth::csrf(),
+        ]);
+    }
+
+    /** Найти/создать операцию этапа (1/2/3). */
+    private static function stageOpId(int $stage): int
+    {
+        $id = Database::scalar("SELECT id FROM operations WHERE stage=? AND is_active=1 ORDER BY id LIMIT 1", [$stage])
+            ?: Database::scalar("SELECT id FROM operations WHERE name LIKE ? AND is_active=1 ORDER BY id LIMIT 1", ['%этап ' . $stage . '%']);
+        if (!$id) {
+            $id = Database::insert("INSERT INTO operations (name, unit_price, is_active, stage) VALUES (?,?,1,?)", ['Виза — этап ' . $stage, 10, $stage]);
+        }
+        return (int) $id;
+    }
+
+    /** Проставить количество этапов 1 и 3 за день и акцептовать работу специалиста. */
+    public function timesheetSave(): void
+    {
+        $me = Auth::user();
+        if (!$this->isVisaManager($me)) { $this->redirect('/'); }
+        Auth::verifyCsrf();
+        $uid  = (int) $this->input('employee_id');
+        $date = (string) ($this->input('date') ?: date('Y-m-d'));
+        if (!$uid) { flash('Не выбран специалист.', 'error'); $this->redirect('/visas/timesheet?date=' . urlencode($date)); }
+        $vals = [1 => max(0, (int) $this->input('s1', 0)), 3 => max(0, (int) $this->input('s3', 0))];
+        $mgr = (int) $me['id'];
+        $now = date('Y-m-d H:i:s');
+
+        $pdo = Database::pdo();
+        $pdo->beginTransaction();
+        foreach ($vals as $stage => $qty) {
+            $opId = self::stageOpId($stage);
+            $pw = Database::one('SELECT id FROM piecework WHERE employee_id=? AND operation_id=? AND work_date=?', [$uid, $opId, $date]);
+            if ($pw) {
+                Database::run('UPDATE piecework SET quantity=?, accepted_at=?, accepted_by=? WHERE id=?', [$qty, $now, $mgr, (int) $pw['id']]);
+            } elseif ($qty > 0) {
+                Database::insert('INSERT INTO piecework (employee_id, operation_id, work_date, quantity, accepted_at, accepted_by) VALUES (?,?,?,?,?,?)', [$uid, $opId, $date, $qty, $now, $mgr]);
+            }
+        }
+        // Акцептовать все строки этапов 1/3 за день (в т.ч. ранее введённые оператором).
+        Database::run(
+            "UPDATE piecework SET accepted_at=?, accepted_by=? WHERE employee_id=? AND work_date=? AND accepted_at IS NULL
+               AND operation_id IN (SELECT id FROM operations WHERE stage IN (1,3))", [$now, $mgr, $uid, $date]);
+        $pdo->commit();
+        NotificationService::create($uid, 'Работа по визам принята', "Менеджер принял вашу работу за {$date} (этапы 1 и 3) — она пойдёт в расчёт.");
+        flash("Принято: этапы 1 и 3 за {$date} пойдут в расчёт.");
+        $this->redirect('/visas/timesheet?date=' . urlencode($date));
+    }
+
+    /** Снять акцепт за день (этапы 1/3 перестают идти в расчёт). */
+    public function timesheetRevoke(): void
+    {
+        $me = Auth::user();
+        if (!$this->isVisaManager($me)) { $this->redirect('/'); }
+        Auth::verifyCsrf();
+        $uid  = (int) $this->input('employee_id');
+        $date = (string) ($this->input('date') ?: date('Y-m-d'));
+        Database::run(
+            "UPDATE piecework SET accepted_at=NULL, accepted_by=NULL WHERE employee_id=? AND work_date=?
+               AND operation_id IN (SELECT id FROM operations WHERE stage IN (1,3))", [$uid, $date]);
+        flash("Акцепт снят за {$date}: этапы 1 и 3 не идут в расчёт до повторного подтверждения.");
+        $this->redirect('/visas/timesheet?date=' . urlencode($date));
     }
 
     /** Отработанное специалистом: сводка по датам и партиям + строки за выбранный день. */

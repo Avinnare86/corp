@@ -108,11 +108,13 @@ class PayrollService
         }
 
         // --- Сделка: операции (визы и пр.) ---
+        // Этапы 1 и 3 идут в расчёт только после акцепта менеджером виз; этап 2 (авто) и прочее — всегда.
         $opsRows = Database::all(
             "SELECT o.id, o.name, o.unit_price, COALESCE(SUM(pw.quantity),0) AS qty
                FROM piecework pw
                JOIN operations o ON o.id = pw.operation_id
               WHERE pw.employee_id = ? AND substr(pw.work_date,1,7) = ?
+                AND (COALESCE(o.stage,0) NOT IN (1,3) OR pw.accepted_at IS NOT NULL)
               GROUP BY o.id, o.name, o.unit_price
               ORDER BY o.name",
             [$employeeId, $period]
@@ -527,7 +529,8 @@ class PayrollService
         return (float) Database::scalar(
             "SELECT COALESCE(SUM(pw.quantity*o.unit_price),0) FROM piecework pw JOIN operations o ON o.id=pw.operation_id
               WHERE pw.employee_id=? AND substr(pw.work_date,1,7)=?
-                AND CAST(substr(pw.work_date,9,2) AS INTEGER) BETWEEN ? AND ?", [$employeeId, $period, $dayFrom, $dayTo]);
+                AND CAST(substr(pw.work_date,9,2) AS INTEGER) BETWEEN ? AND ?
+                AND (COALESCE(o.stage,0) NOT IN (1,3) OR pw.accepted_at IS NOT NULL)", [$employeeId, $period, $dayFrom, $dayTo]);
     }
 
     /**

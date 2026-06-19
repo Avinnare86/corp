@@ -916,6 +916,28 @@ if (!\App\Core\Database::scalar("SELECT 1 FROM arrival_lines WHERE code = ?", ['
 foreach (['ix_ai_aline' => 'arrival_line_id', 'ix_ai_adet' => 'arrival_detail_id'] as $ix => $col) {
     try { $pdo->exec("CREATE INDEX IF NOT EXISTS $ix ON assignment_items($col)"); } catch (\Throwable $e) {}
 }
+// Этап визовой операции (1/2/3): для единой таблицы акцепта и гейта ЗП по этапам 1 и 3.
+if (!columnExists('operations', 'stage')) {
+    $pdo->exec("ALTER TABLE operations ADD COLUMN stage INT NULL");
+    echo "OK  колонка operations.stage добавлена\n";
+}
+// Проставить этап базовым визовым операциям по имени (только там, где ещё не задан).
+foreach ([1 => '%этап 1%', 2 => '%этап 2%', 3 => '%этап 3%'] as $st => $like) {
+    \App\Core\Database::run("UPDATE operations SET stage=? WHERE stage IS NULL AND name LIKE ?", [$st, $like]);
+}
+// Акцепт сделки менеджером виз (этапы 1 и 3): кто и когда подтвердил.
+foreach (['accepted_at' => 'DATETIME NULL', 'accepted_by' => 'INT NULL'] as $col => $ddl) {
+    if (!columnExists('piecework', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE piecework ADD COLUMN $col $ddl"));
+        echo "OK  колонка piecework.$col добавлена\n";
+    }
+}
+// Бэкофилл (разово): существующие записи сделки считаются принятыми — прошлые/текущие расчёты не обнуляются.
+if (\App\Services\Settings::get('piecework_accept_backfill_v1', '') !== '1') {
+    \App\Core\Database::run("UPDATE piecework SET accepted_at = created_at WHERE accepted_at IS NULL");
+    \App\Services\Settings::set('piecework_accept_backfill_v1', '1');
+    echo "OK  бэкофилл акцепта сделки: существующие записи приняты\n";
+}
 // Цель строки стимула (за анкеты/визы/другое) — сделка сверх оклада «зарабатывает» стимул.
 if (!columnExists('stimulus_memo_lines', 'purpose')) {
     $pdo->exec("ALTER TABLE stimulus_memo_lines ADD COLUMN purpose VARCHAR(10) NOT NULL DEFAULT 'other'"); // anketas|visas|other
