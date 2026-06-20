@@ -468,7 +468,7 @@ class StimulusController extends Controller
 
     public function show(string $id): void
     {
-        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager', 'admin');
         $memo = Database::one(
             'SELECT m.*, d.name AS dept_name, d.curator_id, a.full_name AS author_name
                FROM stimulus_memos m LEFT JOIN departments d ON d.id=m.department_id
@@ -481,9 +481,10 @@ class StimulusController extends Controller
         $isCurator = !empty($roles['deputy_director']) && ((int)$memo['curator_id'] === $uid || Auth::isAdmin());
         $isDirector = !empty($roles['director']) || Auth::isAdmin();
         $isAcc = (!empty($roles['accountant']) || Auth::isAdmin()) && in_array($memo['status'], ['deputy_signed','approved'], true);
+        $isFin = !empty($roles['finance_manager']);   // менеджер финансов видит весь стимул
         // вышестоящий по структуре видит служебки подчинённых подразделений
         $isSuperior = Org::isSuperiorOfDept($uid, $memo['department_id'] ? (int)$memo['department_id'] : null);
-        if (!($isAuthor || $isCurator || $isDirector || $isAcc || $isSuperior || Auth::isAdmin())) {
+        if (!($isAuthor || $isCurator || $isDirector || $isAcc || $isFin || $isSuperior || Auth::isAdmin())) {
             flash('Нет доступа к этой служебке.', 'error'); $this->redirect('/memos');
         }
         $lines = Database::all(
@@ -551,7 +552,7 @@ class StimulusController extends Controller
         if (!$memos) { flash('Пакет служебок не найден.', 'error'); $this->redirect('/memos'); }
         $uid = (int) Auth::id();
         $author = (int) $memos[0]['author_id'];
-        $canView = $author === $uid || Auth::has('director', 'accountant') || Auth::isAdmin();
+        $canView = $author === $uid || Auth::has('director', 'accountant', 'finance_manager') || Auth::isAdmin();
         if (!$canView) {
             foreach ($memos as $m) {
                 if (Org::isSuperiorOfDept($uid, $m['department_id'] ? (int) $m['department_id'] : null)) { $canView = true; break; }
@@ -705,14 +706,15 @@ class StimulusController extends Controller
               WHERE $where ORDER BY d.name, m.pay_kind DESC, m.id", $params);
         if ($this->seesAllStimulus()) { return $rows; }
         $uid = (int) Auth::id();
+        $scope = array_flip(Org::branchDeptIds($uid));
         return array_values(array_filter($rows, fn($m) =>
-            Org::isSuperiorOfDept($uid, $m['department_id'] ? (int) $m['department_id'] : null) || (int) $m['author_id'] === $uid));
+            (int) $m['author_id'] === $uid || (($m['department_id'] ?? 0) && isset($scope[(int) $m['department_id']]))));
     }
 
     /** Отчёт для бухгалтерии: помесячное покрытие сотрудников стимулом (ежемес./единовр.). */
     public function coverage(): void
     {
-        Auth::requireRole('accountant', 'director', 'admin');
+        Auth::requireRole('accountant', 'director', 'finance_manager', 'admin');
         $period = (string) $this->input('period', date('Y-m'));
         $this->view('stimulus/coverage', [
             'title' => 'Покрытие стимулом (бухгалтерия)',
@@ -753,7 +755,7 @@ class StimulusController extends Controller
     /** Выгрузка отчёта покрытия в Excel. */
     public function coverageExport(): void
     {
-        Auth::requireRole('accountant', 'director', 'admin');
+        Auth::requireRole('accountant', 'director', 'finance_manager', 'admin');
         $rows = $this->coverageRows((string) $this->input('period', date('Y-m')));
         $headers = ['Месяц', 'Отдел', 'Сотрудник', 'Ежемес. (утв.)', 'Единовр. (утв.)', 'Ежемес. (проект)', 'Единовр. (проект)', 'Итого'];
         $data = array_map(fn($a) => [
@@ -885,10 +887,112 @@ class StimulusController extends Controller
         $this->redirect('/memos');
     }
 
-    /** Видит ли пользователь весь стимул (директор/бухгалтер/админ). */
+    /** Утверждённые служебки прошлого месяца, видимые пользователю (для переноса). */
+    private function carrySource(int $uid, string $period): array
+    {
+        $rows = Database::all(
+            "SELECT m.id, m.department_id, m.author_id, d.name AS dept_name
+               FROM stimulus_memos m LEFT JOIN departments d ON d.id=m.department_id
+              WHERE m.period=? AND m.status='approved' AND (m.kind IS NULL OR m.kind='staff')
+              ORDER BY d.name, m.id", [$period]);
+        if ($this->seesAllStimulus()) { return $rows; }
+        $scope = array_flip(Org::branchDeptIds($uid));
+        return array_values(array_filter($rows, fn($m) =>
+            (int) $m['author_id'] === $uid || (($m['department_id'] ?? 0) && isset($scope[(int) $m['department_id']]))));
+    }
+
+    /** Экран переноса выплат с прошлого месяца (справочно — суммы прошлого месяца по видам). */
+    public function carry(): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'admin');
+        $uid = (int) Auth::id();
+        $cur = (string) $this->input('period', date('Y-m'));
+        $prev = date('Y-m', strtotime($cur . '-01 -1 month'));
+        $src = $this->carrySource($uid, $prev);
+        $ids = array_map(fn($m) => (int) $m['id'], $src);
+        $sum = ['monthly' => ['cnt' => 0, 'amt' => 0.0], 'onetime' => ['cnt' => 0, 'amt' => 0.0]];
+        if ($ids) {
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            foreach (Database::all("SELECT l.pay_kind AS lk, m.pay_kind AS mk, l.amount FROM stimulus_memo_lines l JOIN stimulus_memos m ON m.id=l.memo_id WHERE l.memo_id IN ($ph)", $ids) as $l) {
+                $k = (($l['lk'] ?: $l['mk']) === 'onetime') ? 'onetime' : 'monthly';
+                $sum[$k]['cnt']++; $sum[$k]['amt'] += (float) $l['amount'];
+            }
+        }
+        $this->view('stimulus/carry', [
+            'title' => 'Перенос выплат с прошлого месяца',
+            'cur' => $cur, 'prev' => $prev, 'sum' => $sum, 'memos' => count($src),
+            'csrf' => Auth::csrf(),
+        ]);
+    }
+
+    /** Перенести выплаты выбранного вида с прошлого месяца → черновики текущего (автор — текущий пользователь). */
+    public function carryRun(): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'admin');
+        Auth::verifyCsrf();
+        $uid = (int) Auth::id();
+        $kind = $this->input('kind') === 'onetime' ? 'onetime' : 'monthly';
+        $cur = (string) $this->input('period', date('Y-m'));
+        $prev = date('Y-m', strtotime($cur . '-01 -1 month'));
+        $kindRu = $kind === 'onetime' ? 'единовременные' : 'ежемесячные';
+
+        $src = $this->carrySource($uid, $prev);
+        if (!$src) { flash("Нет утверждённых выплат за {$prev} для переноса.", 'error'); $this->redirect('/memos/carry?period=' . urlencode($cur)); }
+
+        $pfrom = $cur . '-01'; $pto = date('Y-m-t', strtotime($pfrom));
+        $pdo = Database::pdo(); $pdo->beginTransaction();
+        $created = []; $batchId = null; $copied = 0; $skipped = 0;
+        foreach ($src as $s) {
+            $m = Database::one('SELECT * FROM stimulus_memos WHERE id=?', [(int) $s['id']]);
+            $lines = Database::all('SELECT * FROM stimulus_memo_lines WHERE memo_id=?', [(int) $s['id']]);
+            $newLines = [];
+            foreach ($lines as $ln) {
+                $lk = (($ln['pay_kind'] ?: $m['pay_kind']) === 'onetime') ? 'onetime' : 'monthly';
+                if ($lk !== $kind) { continue; }
+                // дедуп: получатель уже имеет неотклонённую выплату этого вида за текущий месяц от этого автора
+                $dup = Database::scalar(
+                    "SELECT 1 FROM stimulus_memo_lines l JOIN stimulus_memos mm ON mm.id=l.memo_id
+                      WHERE l.user_id=? AND mm.period=? AND mm.pay_kind=? AND mm.author_id=? AND mm.status<>'rejected' LIMIT 1",
+                    [(int) $ln['user_id'], $cur, $kind, $uid]);
+                if ($dup) { $skipped++; continue; }
+                $newLines[] = $ln;
+            }
+            if (!$newLines) { continue; }
+            $memoId = Database::insert(
+                'INSERT INTO stimulus_memos (department_id, author_id, period, pay_kind, source_id, grounds, grounds_ids, kind, status, batch_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [$m['department_id'], $uid, $cur, $kind, $m['source_id'], $m['grounds'], $m['grounds_ids'], 'staff', 'draft', null]);
+            if ($batchId === null) { $batchId = $memoId; }
+            foreach ($newLines as $ln) {
+                Database::insert(
+                    'INSERT INTO stimulus_memo_lines (memo_id, user_id, amount, pay_kind, period_from, period_to, oklad_load, percent, purpose, reason_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                    [$memoId, $ln['user_id'], $ln['amount'], $kind, $pfrom, $pto, $ln['oklad_load'], $ln['percent'], $ln['purpose'] ?? 'other', $ln['reason_id'] ?? null]);
+                $copied++;
+            }
+            $created[] = $memoId;
+        }
+        if ($created) {
+            Database::run('UPDATE stimulus_memos SET batch_id=? WHERE id IN (' . implode(',', array_fill(0, count($created), '?')) . ')', array_merge([$batchId], $created));
+        }
+        $pdo->commit();
+        if (!$created) {
+            flash("Новых черновиков не создано: получатели уже имеют {$kindRu} выплаты за {$cur}" . ($skipped ? " (пропущено дублей {$skipped})" : '') . '.', 'error');
+            $this->redirect('/memos/carry?period=' . urlencode($cur));
+        }
+        flash("Перенесены {$kindRu}: черновиков " . count($created) . ", строк {$copied}" . ($skipped ? ", пропущено дублей {$skipped}" : '') . '. Подпишите их для утверждения.');
+        $this->redirect($batchId ? '/memos/batch/' . (int) $batchId : '/memos');
+    }
+
+    /** Видит ли пользователь весь стимул (директор/бухгалтер/менеджер финансов/админ). */
     private function seesAllStimulus(): bool
     {
-        return Auth::has('director', 'accountant') || Auth::isAdmin();
+        return Auth::has('director', 'accountant', 'finance_manager') || Auth::isAdmin();
+    }
+
+    /** Ветка видимости стимула: null = видит всё; иначе set id отделов (своё + ниже по структуре). */
+    private function visibleDeptScope(int $uid): ?array
+    {
+        if ($this->seesAllStimulus()) { return null; }
+        return array_flip(Org::branchDeptIds($uid));
     }
 
     /** Корректировка (снижение/отмена) утверждённого стимула вышестоящим — с аудитом. */
@@ -946,11 +1050,15 @@ class StimulusController extends Controller
               WHERE $where
               ORDER BY m.period DESC, d.name, ur.full_name", $params);
         $seeAll = $this->seesAllStimulus();
+        $scope = $seeAll ? null : array_flip(Org::branchDeptIds($uid));   // отделы своей ветки
         $canBase = Auth::has('director') || Auth::isAdmin();
         $out = [];
         foreach ($rows as $r) {
+            // Видно: всё (директор/бух/фин/админ) | свои назначения | по сотруднику | отдел в своей ветке (ниже по структуре).
+            $dept = (int) ($r['department_id'] ?? 0);
+            $visible = $seeAll || (int) $r['author_id'] === $uid || (int) $r['user_id'] === $uid || ($dept && isset($scope[$dept]));
+            if (!$visible) { continue; }
             $oversee = Org::canOverseeUser($uid, (int) $r['user_id']);
-            if (!$seeAll && !$oversee && (int) $r['author_id'] !== $uid && (int) $r['user_id'] !== $uid) { continue; }
             $r['effective'] = $r['ov_amount'] !== null ? (float) $r['ov_amount'] : (float) $r['amount'];
             $r['can_override'] = $r['status'] === 'approved' && ($canBase || $oversee);
             $out[] = $r;
@@ -961,7 +1069,7 @@ class StimulusController extends Controller
     /** Сводная таблица: кто кому какой стимул назначил по месяцам (+ корректировки). */
     public function summary(): void
     {
-        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager', 'admin');
         $period = (string) $this->input('period', date('Y-m'));
         $rows = $this->summaryRows((int) Auth::id(), $period);
         $periods = array_column(Database::all('SELECT DISTINCT period FROM stimulus_memos ORDER BY period DESC'), 'period');
@@ -978,7 +1086,7 @@ class StimulusController extends Controller
     /** Выгрузка сводной в Excel (с учётом видимости и фильтра периода). */
     public function summaryExport(): void
     {
-        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager', 'admin');
         $rows = $this->summaryRows((int) Auth::id(), (string) $this->input('period', date('Y-m')));
         $headers = ['Месяц', 'Отдел', 'Получатель', 'Вид', 'Назначено', 'Корректировка', 'Кто снизил', 'Причина', 'Итог', 'Назначил', 'Прямое', 'Статус', '№ служебки'];
         $data = [];

@@ -84,12 +84,13 @@ if ($uid) {
         if ($g) { $menu['Кадры'] = $g; }
     }
     // Служебки о стимуле — начальники/замы/директор/бухгалтерия (вне привязки к проектам)
-    if ($can('dept_head', 'deputy_director', 'director', 'accountant')) {
+    if ($can('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager')) {
         $memoInbox = \App\Controllers\StimulusController::inboxCount((int) $uid);
         $g = [['/memos', 'Служебки о стимуле', $memoInbox], ['/memos/summary', 'Сводная по стимулу', 0]];
+        if ($can('dept_head', 'deputy_director', 'director')) { $g[] = ['/memos/carry', 'Перенос с прошлого месяца', 0]; }
         if ($can('director', 'deputy_director')) { $g[] = ['/memos/direct/new', 'Назначить напрямую', 0]; }
         $g[] = ['/memos/print-report', 'Служебки на печать', 0];
-        if ($can('accountant', 'director')) { $g[] = ['/memos/coverage', 'Покрытие (бухгалтерия)', 0]; }
+        if ($can('accountant', 'director', 'finance_manager')) { $g[] = ['/memos/coverage', 'Покрытие (бухгалтерия)', 0]; }
         if ($can('dept_head', 'deputy_director', 'director')) { $g[] = ['/memos/reasons', 'Основания (справочник)', 0]; }
         $menu['Стимул'] = $g;
     }
@@ -146,8 +147,10 @@ if ($uid) {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/assets/style.css">
+    <script defer src="/assets/app.js?v=2"></script>
 </head>
-<body>
+<?php $mob = $_COOKIE['mobmode'] ?? ''; ?>
+<body class="<?= $mob === 'on' ? 'mobile-mode' : ($mob === 'off' ? 'force-desktop' : '') ?>">
 <header class="topbar">
     <a class="brand" href="/">
         <span class="mark">
@@ -187,6 +190,7 @@ if ($uid) {
     });
     </script>
     <div class="user">
+        <button type="button" id="mobToggle" class="btn-mob" onclick="toggleMobile()" title="Телефонный вид: авто / включить / выключить">📱 Телефон: авто</button>
         <span><?= e($authUser['full_name'] ?? '') ?></span>
         <a href="/password/change" title="Сменить пароль">Пароль</a>
         <a class="btn-logout" href="/logout">Выход</a>

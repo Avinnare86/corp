@@ -30,17 +30,17 @@ main.container{max-width:none;width:auto;margin:0 18px}</style>
         <div style="overflow-x:auto">
         <table class="vgrid" style="width:100%">
             <thead><tr>
-                <th title="отметить все"><input type="checkbox" id="vAll"> ✓</th>
-                <th>#</th>
+                <th class="nosort" title="отметить все"><input type="checkbox" id="vAll"> ✓</th>
+                <th title="Порядковый номер загрузки — можно упорядочить">Загр. №</th>
                 <?php foreach ($fields as $f => $label): ?><th><?= e($label) ?></th><?php endforeach; ?>
-                <th>Действие</th>
+                <th class="nosort">Действие</th>
             </tr></thead>
             <tbody>
             <?php foreach ($rows as $i => $r): $id=(int)$r['id'];
                 $isRework = (int)$r['rework_count'] > 0; ?>
                 <tr<?= $isRework ? ' class="vrw"' : '' ?>>
                     <td style="text-align:center"><input type="checkbox" class="vdone" name="done[<?= $id ?>]" value="1"></td>
-                    <td class="muted" style="padding:4px 6px;white-space:nowrap"><?= $i+1 ?><?= $isRework ? ' <span title="'.e($r['rework_note'] ?? 'доработка').'">⚠</span>' : '' ?>
+                    <td class="muted" style="padding:4px 6px;white-space:nowrap"><?= $id ?><?= $isRework ? ' <span title="'.e($r['rework_note'] ?? 'доработка').'">⚠</span>' : '' ?>
                         <a href="/visas/row/<?= $id ?>" title="Открыть анкету отдельно" style="text-decoration:none">↗</a></td>
                     <?php foreach ($fields as $f => $label): $expCls = $f==='expiry_date' ? \App\Controllers\VisaController::expiryClass($r['expiry_date'] ?? '') : ''; ?>
                         <td<?= $expCls ? ' class="'.e($expCls).'" title="срок действия паспорта истекает менее чем через 1 год '.($expCls==='exp-bad'?'6':'7').' мес."' : '' ?>><textarea name="row[<?= $id ?>][<?= $f ?>]" rows="1"

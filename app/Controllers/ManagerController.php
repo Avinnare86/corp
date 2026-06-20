@@ -35,13 +35,14 @@ class ManagerController extends Controller
         );
         $totalUnassigned = (int) Database::scalar('SELECT COUNT(*) FROM assignment_items WHERE assigned_to IS NULL');
 
-        // Сотрудники-анкетчики со статистикой.
+        // Сотрудники с правом проверки анкет (роль anketa_worker) — только им можно распределять.
         $employees = Database::all(
             "SELECT u.id, u.full_name,
                     (SELECT COUNT(*) FROM assignment_items a WHERE a.assigned_to=u.id) AS assigned,
                     (SELECT COUNT(*) FROM assignment_items a WHERE a.assigned_to=u.id AND a.checked_at IS NOT NULL) AS checked
                FROM users u
-              WHERE u.role IN ('employee','admin') AND u.is_active=1 AND u.does_anketas=1
+               JOIN user_roles r ON r.user_id = u.id AND r.role_slug = 'anketa_worker'
+              WHERE u.is_active = 1
               ORDER BY u.full_name"
         );
         foreach ($employees as &$e) { $e['remaining'] = (int) $e['assigned'] - (int) $e['checked']; }

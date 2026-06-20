@@ -537,3 +537,42 @@ button.btn{font-family:var(--body)}
 }
 
 /* (адаптивные правила — в конце файла) */
+
+/* ===== Сортировка таблиц (глобально, app.js) ===== */
+.table th.sortable,.vgrid th.sortable{cursor:pointer;user-select:none}
+.table th.sortable:hover{color:var(--primary)}
+.table th.sort-asc::after,.vgrid th.sort-asc::after{content:" ▲";font-size:.7em}
+.table th.sort-desc::after,.vgrid th.sort-desc::after{content:" ▼";font-size:.7em}
+
+/* ===== Кнопка «телефонный вид» в шапке ===== */
+.btn-mob{background:transparent;border:1px solid rgba(255,255,255,.45);color:#fff;border-radius:8px;
+  padding:4px 9px;font-size:.78rem;cursor:pointer;white-space:nowrap;font-family:inherit}
+.btn-mob:hover{background:rgba(255,255,255,.16)}
+
+/* ===== Карточный режим таблиц (телефон) =====
+   Вертикально (узкий портрет, авто) ИЛИ принудительно (body.mobile-mode) → таблица превращается в карточки.
+   body.force-desktop отменяет авто-режим (полные таблицы + горизонтальная прокрутка). .vgrid не трогаем. */
+@media(max-width:560px){
+  body:not(.force-desktop) .table{min-width:0!important;border:0}
+  body:not(.force-desktop) .table thead{display:none}
+  body:not(.force-desktop) .table tbody tr{display:block;border:1px solid var(--line);border-radius:12px;
+    margin:0 0 10px;padding:6px 12px;background:var(--surface)}
+  body:not(.force-desktop) .table tbody tr:hover{background:var(--surface)}
+  body:not(.force-desktop) .table td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+    border:0;padding:5px 0;text-align:right}
+  body:not(.force-desktop) .table td::before{content:attr(data-label);font-weight:600;color:var(--muted);
+    text-align:left;white-space:nowrap;flex:0 0 auto}
+  body:not(.force-desktop) .table td:empty{display:none}
+}
+body.mobile-mode .table{min-width:0!important;border:0}
+body.mobile-mode .table thead{display:none}
+body.mobile-mode .table tbody tr{display:block;border:1px solid var(--line);border-radius:12px;
+  margin:0 0 10px;padding:6px 12px;background:var(--surface)}
+body.mobile-mode .table tbody tr:hover{background:var(--surface)}
+body.mobile-mode .table td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+  border:0;padding:5px 0;text-align:right}
+body.mobile-mode .table td::before{content:attr(data-label);font-weight:600;color:var(--muted);
+  text-align:left;white-space:nowrap;flex:0 0 auto}
+body.mobile-mode .table td:empty{display:none}
+/* Принудительно полные таблицы: широкие прокручиваются внутри панели */
+body.force-desktop .panel{overflow-x:auto}

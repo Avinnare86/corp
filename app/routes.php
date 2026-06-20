@@ -211,6 +211,8 @@ $router->get('/memos',              [\App\Controllers\StimulusController::class,
 $router->get('/memos/new',          [\App\Controllers\StimulusController::class, 'create']);
 $router->get('/memos/mgmt/new',     [\App\Controllers\StimulusController::class, 'createMgmt']);
 $router->get('/memos/direct/new',   [\App\Controllers\StimulusController::class, 'createDirect']);
+$router->get('/memos/carry',        [\App\Controllers\StimulusController::class, 'carry']);
+$router->post('/memos/carry',       [\App\Controllers\StimulusController::class, 'carryRun']);
 $router->get('/memos/summary',      [\App\Controllers\StimulusController::class, 'summary']);
 $router->get('/memos/summary/export',[\App\Controllers\StimulusController::class, 'summaryExport']);
 $router->get('/memos/coverage',     [\App\Controllers\StimulusController::class, 'coverage']);

@@ -14,6 +14,7 @@ function memoRow($m, $st, $stClass) { ?>
 <div class="chat-head">
     <h1 style="margin:0;font-size:1.2rem">Служебки о стимуле</h1>
     <?php if ($canCreate): ?><a class="btn btn-primary" href="/memos/new">+ Новая служебка</a><?php endif; ?>
+    <?php if ($canCreate): ?><a class="btn" href="/memos/carry">↧ Перенос с прошлого месяца</a><?php endif; ?>
     <?php if (!empty($canCreateMgmt)): ?><a class="btn btn-gold" href="/memos/mgmt/new">+ Стимул замам / гл. бухгалтеру</a><?php endif; ?>
 </div>
 
