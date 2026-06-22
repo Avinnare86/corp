@@ -18,12 +18,93 @@
     var b = document.getElementById('tblViewBtn'); if (b) b.textContent = viewLabel(v);
   };
 
-  // ---------- гамбургер (полноэкранное меню на телефоне) ----------
-  window.navBurger = function () {
-    var tb = document.querySelector('.topbar'); if (!tb) return;
-    var open = tb.classList.toggle('nav-open');
-    document.body.classList.toggle('menu-open', open);   // блокировка прокрутки фона
+  // ---------- навигация: drawer (узкое/мобайл) + аккордеоны + overflow «Ещё» (десктоп) ----------
+  var NAV_BREAK = '(max-width:1099.98px)';
+  function isDrawer() { return window.matchMedia(NAV_BREAK).matches; }
+  function closeAllGroups() {
+    [].forEach.call(document.querySelectorAll('.nav-group.open'), function (g) {
+      g.classList.remove('open');
+      var b = g.querySelector('.nav-gbtn'); if (b) b.setAttribute('aria-expanded', 'false');
+    });
+  }
+  window.navToggle = function (btn) {
+    var g = btn.closest('.nav-group'), was = g.classList.contains('open');
+    var nested = !!(g.parentElement && g.parentElement.closest('.nav-drop-more'));
+    if (isDrawer() || nested) {                       // аккордеон: переключаем только себя
+      g.classList.toggle('open', !was);
+      btn.setAttribute('aria-expanded', !was ? 'true' : 'false');
+      return;
+    }
+    closeAllGroups();                                 // десктоп: один раскрыт за раз
+    if (!was) {
+      g.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
+      g.classList.remove('drop-left');                // флип, чтобы дропдаун не уехал за правый край
+      var d = g.querySelector('.nav-drop');
+      if (d) { var r = d.getBoundingClientRect(); if (r.right > window.innerWidth - 8) g.classList.add('drop-left'); }
+    }
   };
+  window.navBurger = function () {
+    var open = document.body.classList.toggle('menu-open');
+    var b = document.querySelector('.nav-burger'); if (b) b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    var scrim = document.querySelector('.nav-scrim'); if (scrim) scrim.hidden = !open;
+    if (open) { var c = document.querySelector('#mainNav .nav-close'); if (c) c.focus(); }
+    else closeAllGroups();
+  };
+  function navOverflow() {
+    var nav = document.getElementById('mainNav'); if (!nav) return;
+    var more = nav.querySelector('.nav-more'), bucket = nav.querySelector('.nav-drop-more');
+    if (!more || !bucket) return;
+    while (bucket.firstChild) { nav.insertBefore(bucket.firstChild, more); }   // вернуть всё на место
+    more.hidden = true;
+    if (isDrawer()) return;                            // в drawer всё вертикально — overflow не нужен
+    var guard = 0;
+    while (nav.scrollWidth > nav.clientWidth + 1 && guard++ < 40) {
+      var groups = nav.querySelectorAll(':scope > .nav-group[data-group]');
+      var movable = null;                              // активный раздел оставляем видимым (двигаем последний НЕ активный)
+      for (var i = groups.length - 1; i >= 0; i--) { if (!groups[i].classList.contains('is-active')) { movable = groups[i]; break; } }
+      if (!movable) break;
+      bucket.insertBefore(movable, bucket.firstChild); // prepend — сохраняем исходный порядок
+      more.hidden = false;
+    }
+    var sum = 0;
+    [].forEach.call(bucket.querySelectorAll('.nav-gbtn .badge'), function (b) { sum += parseInt(b.textContent, 10) || 0; });
+    var mBtn = more.querySelector('.nav-gbtn'), old = mBtn.querySelector('.badge');
+    if (old) old.remove();
+    if (sum > 0) { var s = document.createElement('span'); s.className = 'badge'; s.textContent = sum; mBtn.insertBefore(s, mBtn.querySelector('.caret')); }
+    more.classList.toggle('is-active', !!bucket.querySelector('.nav-group.is-active'));  // подсветить «Ещё», если активный раздел внутри
+    if (!bucket.children.length) more.hidden = true;
+  }
+  var _navT;
+  function navOverflowDebounced() { clearTimeout(_navT); _navT = setTimeout(navOverflow, 120); }
+  window.addEventListener('resize', navOverflowDebounced);
+  function closeUserPop() {
+    var p = document.querySelector('.user-pop.open');
+    if (p) { p.classList.remove('open'); var b = p.querySelector('.user-btn'); if (b) b.setAttribute('aria-expanded', 'false'); }
+  }
+  window.userMenu = function (btn) {
+    var p = btn.closest('.user-pop'), open = p.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.nav-group')) closeAllGroups();
+    if (!e.target.closest('.user-pop')) closeUserPop();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { closeAllGroups(); closeUserPop(); if (document.body.classList.contains('menu-open')) navBurger(); }
+  });
+  document.addEventListener('DOMContentLoaded', function () {
+    navOverflow();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(navOverflow);  // Unbounded меняет ширины
+    if (isDrawer()) {   // в drawer сразу раскрыть раздел с активным пунктом
+      [].forEach.call(document.querySelectorAll('.nav-group.is-active'), function (g) {
+        g.classList.add('open'); var b = g.querySelector('.nav-gbtn'); if (b) b.setAttribute('aria-expanded', 'true');
+      });
+    }
+    var nav = document.getElementById('mainNav');
+    if (nav) nav.addEventListener('click', function (e) {   // выбор пункта в drawer закрывает меню
+      if (e.target.closest('a[href]') && isDrawer() && document.body.classList.contains('menu-open')) navBurger();
+    });
+  });
 
   // ---------- классификация таблиц ----------
   function isWide(t) {

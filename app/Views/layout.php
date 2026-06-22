@@ -151,8 +151,8 @@ if ($uid) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/style.css?v=4">
-    <script defer src="/assets/app.js?v=3"></script>
+    <link rel="stylesheet" href="/assets/style.css?v=5">
+    <script defer src="/assets/app.js?v=4"></script>
 </head>
 <?php $mobView = $_COOKIE['mobview'] ?? ''; ?>
 <body class="<?= $mobView === 'full' ? 'force-desktop' : '' ?>">
@@ -163,57 +163,86 @@ if ($uid) {
         </span>
         <span class="brand-text"><?= e($appName) ?></span>
     </a>
-    <?php if (Auth::check()): ?>
-    <nav class="nav">
+    <?php if (Auth::check()):
+        $cur = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+        $badge = fn($n) => $n ? ' <span class="badge">' . (int) $n . '</span>' : '';
+    ?>
+    <button type="button" class="nav-burger" onclick="navBurger()" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">☰</button>
+    <div class="nav-scrim" onclick="navBurger()" hidden></div>
+    <nav class="nav" id="mainNav" aria-label="Основная навигация">
         <div class="nav-head"><span>Меню</span><button type="button" class="nav-close" onclick="navBurger()" aria-label="Закрыть">✕</button></div>
         <?php
-        $badge = fn($n) => $n ? ' <span class="badge">' . (int) $n . '</span>' : '';
         // одиночные пункты (группа '')
         foreach ($menu[''] ?? [] as [$href, $label, $cnt]) {
-            echo '<a href="' . e($href) . '">' . e($label) . $badge($cnt) . '</a>';
+            $act = $href === $cur ? ' is-active' : '';
+            echo '<a class="nav-item' . $act . '" href="' . e($href) . '">' . e($label) . $badge($cnt) . '</a>';
         }
-        // группы-проекты
+        // группы-разделы
         foreach ($menu as $group => $items) {
             if ($group === '' || !$items) { continue; }
             $sum = array_sum(array_column($items, 2));
-            echo '<div class="nav-group"><button type="button" class="nav-gbtn" onclick="navToggle(this)">'
-                . e($group) . $badge($sum) . ' <span class="caret">▾</span></button><div class="nav-drop">';
+            $hasAct = false;
+            foreach ($items as $it) { if ($it[0] === $cur) { $hasAct = true; break; } }
+            echo '<div class="nav-group' . ($hasAct ? ' is-active' : '') . '" data-group>'
+                . '<button type="button" class="nav-gbtn" onclick="navToggle(this)" aria-haspopup="true" aria-expanded="false">'
+                . e($group) . $badge($sum) . ' <span class="caret" aria-hidden="true">▾</span></button><div class="nav-drop" role="menu">';
             foreach ($items as [$href, $label, $cnt]) {
-                echo '<a href="' . e($href) . '">' . e($label) . $badge($cnt) . '</a>';
+                echo '<a role="menuitem" href="' . e($href) . '">' . e($label) . $badge($cnt) . '</a>';
             }
             echo '</div></div>';
         }
         ?>
+        <div class="nav-group nav-more" data-more hidden><button type="button" class="nav-gbtn" onclick="navToggle(this)" aria-haspopup="true" aria-expanded="false">Ещё <span class="caret" aria-hidden="true">▾</span></button><div class="nav-drop nav-drop-more" role="menu"></div></div>
         <div class="nav-tablemode"><button type="button" id="tblViewBtn" onclick="toggleTableView()">📋 Показать полные таблицы</button></div>
+        <div class="nav-profile">
+            <?php if (!empty($actingCtx['options'])): ?>
+            <form method="post" action="/acting/switch" class="np-acting">
+                <input type="hidden" name="_csrf" value="<?= e(Auth::csrf()) ?>">
+                <select name="to" onchange="this.form.submit()" title="Режим работы (сам / И.о.)">
+                    <option value="">— работаю как сам —</option>
+                    <?php foreach ($actingCtx['options'] as $o): ?>
+                        <option value="<?= (int)$o['absent_id'] ?>" <?= (int)($actingCtx['current'] ?? 0)===(int)$o['absent_id']?'selected':'' ?>><?= $o['kind']==='vrio'?'ВРИО':'И.о.' ?>: <?= e($o['absent_name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+            <?php endif; ?>
+            <div class="np-name"><?= e($authUser['full_name'] ?? '') ?></div>
+            <a href="/certs">Моя ЭП</a>
+            <a href="/acting">Замещение</a>
+            <a href="/password/change">Пароль</a>
+            <a class="btn-logout" href="/logout">Выход</a>
+        </div>
     </nav>
-    <button type="button" class="nav-burger" onclick="navBurger()" aria-label="Меню">☰</button>
-    <script>
-    function navToggle(btn){
-        var g = btn.parentElement, was = g.classList.contains('open');
-        document.querySelectorAll('.nav-group.open').forEach(function(x){ x.classList.remove('open'); });
-        if (!was) g.classList.add('open');
-    }
-    document.addEventListener('click', function(e){
-        if (!e.target.closest('.nav-group')) document.querySelectorAll('.nav-group.open').forEach(function(x){ x.classList.remove('open'); });
-    });
-    </script>
+    <?php
+        $fn = trim((string) ($authUser['full_name'] ?? ''));
+        $parts = preg_split('/\s+/', $fn) ?: [];
+        $ini = mb_strtoupper(mb_substr($parts[0] ?? '', 0, 1) . mb_substr($parts[1] ?? '', 0, 1));
+    ?>
     <div class="user">
-        <?php if (!empty($actingCtx['options'])): ?>
-        <form method="post" action="/acting/switch" style="display:inline;margin:0">
-            <input type="hidden" name="_csrf" value="<?= e(Auth::csrf()) ?>">
-            <select name="to" onchange="this.form.submit()" title="Режим работы (сам / И.о.)" style="max-width:180px">
-                <option value="">— работаю как сам —</option>
-                <?php foreach ($actingCtx['options'] as $o): ?>
-                    <option value="<?= (int)$o['absent_id'] ?>" <?= (int)($actingCtx['current'] ?? 0)===(int)$o['absent_id']?'selected':'' ?>><?= $o['kind']==='vrio'?'ВРИО':'И.о.' ?>: <?= e($o['absent_name']) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </form>
-        <?php endif; ?>
-        <span><?= e($authUser['full_name'] ?? '') ?></span>
-        <a href="/certs" title="Моя электронная подпись">Моя ЭП</a>
-        <a href="/acting" title="Замещение и И.о./ВРИО">Замещение</a>
-        <a href="/password/change" title="Сменить пароль">Пароль</a>
-        <a class="btn-logout" href="/logout">Выход</a>
+        <div class="user-pop">
+            <button type="button" class="user-btn" onclick="userMenu(this)" aria-haspopup="true" aria-expanded="false">
+                <span class="ub-ava"><?= e($ini ?: '·') ?></span>
+                <span class="ub-name"><?= e($fn) ?></span>
+                <span class="caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="user-drop">
+                <?php if (!empty($actingCtx['options'])): ?>
+                <form method="post" action="/acting/switch" class="ud-acting">
+                    <input type="hidden" name="_csrf" value="<?= e(Auth::csrf()) ?>">
+                    <select name="to" onchange="this.form.submit()" title="Режим работы (сам / И.о.)">
+                        <option value="">— работаю как сам —</option>
+                        <?php foreach ($actingCtx['options'] as $o): ?>
+                            <option value="<?= (int)$o['absent_id'] ?>" <?= (int)($actingCtx['current'] ?? 0)===(int)$o['absent_id']?'selected':'' ?>><?= $o['kind']==='vrio'?'ВРИО':'И.о.' ?>: <?= e($o['absent_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </form>
+                <?php endif; ?>
+                <a href="/certs">Моя ЭП</a>
+                <a href="/acting">Замещение</a>
+                <a href="/password/change">Пароль</a>
+                <a class="btn-logout" href="/logout">Выход</a>
+            </div>
+        </div>
     </div>
     <?php endif; ?>
 </header>

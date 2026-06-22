@@ -28,29 +28,58 @@ h2{font-size:1.15rem;font-weight:600;margin:0 0 14px}
 h3.sub{font-family:var(--display);font-size:.82rem;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;margin:20px 0 10px}
 
 /* ---------- HEADER ---------- */
-.topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:1.2rem;
-  background:rgba(255,255,255,.85);backdrop-filter:blur(14px);
-  border-bottom:1px solid var(--line);padding:0 24px;height:70px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:.65rem;font-family:var(--display);font-weight:700;font-size:1rem;color:var(--primary)}
+.topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:1rem;
+  background:rgba(255,255,255,.85);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line);padding:0 20px;height:64px}
+.brand{flex:none;display:flex;align-items:center;gap:.65rem;font-family:var(--display);font-weight:700;font-size:1rem;color:var(--primary)}
 .brand:hover{text-decoration:none}
 .brand .mark{width:38px;height:38px;border-radius:11px;background:var(--primary);display:grid;place-items:center;flex:none}
 .brand-text{max-width:230px}
-.nav{display:flex;gap:.25rem;margin-inline-start:auto;flex-wrap:wrap;align-items:center}
-.nav a{font-weight:500;color:var(--ink);padding:.45rem .8rem;border-radius:10px;font-size:.92rem;transition:.2s}
+.nav{flex:1 1 auto;min-width:0;display:flex;gap:.1rem;margin-inline-start:auto;flex-wrap:nowrap;overflow:hidden;align-items:center}
+.nav a{font-weight:500;color:var(--ink);padding:.45rem .62rem;border-radius:10px;font-size:.92rem;transition:.2s}
 .nav a:hover{background:var(--sky);color:var(--primary);text-decoration:none}
-/* группы меню (проекты) */
-.nav-group{position:relative}
+.nav-item,.nav-gbtn{flex:none;white-space:nowrap}
+/* группы меню (разделы) */
+.nav-group{position:relative;flex:none}
 .nav-gbtn{font-family:var(--body);font-weight:600;font-size:.92rem;color:var(--ink);background:none;border:none;
-  padding:.45rem .8rem;border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:4px}
+  padding:.45rem .62rem;border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:4px}
 .nav-gbtn:hover,.nav-group.open .nav-gbtn{background:var(--sky);color:var(--primary)}
-.nav-gbtn .caret{font-size:.7rem;opacity:.6}
-.nav-drop{display:none;position:absolute;top:100%;left:0;min-width:210px;background:#fff;border:1px solid var(--line);
+.nav-gbtn .caret{font-size:.7rem;opacity:.6;transition:transform .15s}
+.nav-group.open .caret{transform:rotate(180deg)}
+.nav-drop{display:none;position:absolute;top:100%;right:0;min-width:210px;background:#fff;border:1px solid var(--line);
   border-radius:12px;box-shadow:var(--shadow);padding:6px;z-index:120}
+.nav-group.drop-left .nav-drop{left:0;right:auto}
 .nav-group.open .nav-drop{display:block}
 .nav-drop a{display:flex;align-items:center;gap:6px;padding:.55rem .8rem;border-radius:8px}
 .nav-drop a .badge{margin-left:auto}
+.nav-item.is-active,.nav-group.is-active>.nav-gbtn{background:var(--sky);color:var(--primary);box-shadow:inset 3px 0 0 var(--primary)}
+.nav-more[hidden]{display:none}
+.nav-gbtn:focus-visible,.nav-item:focus-visible,.nav-drop a:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.nav-profile{display:none}
+/* группы, ушедшие в overflow «Ещё», раскрываются аккордеоном внутри дропдауна */
+.nav-drop-more .nav-group{position:static;flex:none}
+.nav-drop-more .nav-gbtn{width:100%;justify-content:space-between;font-weight:600}
+.nav-drop-more .nav-drop{position:static;display:none;border:0;box-shadow:none;border-radius:0;min-width:0;padding:0 0 4px 12px}
+.nav-drop-more .nav-group.open .nav-drop{display:block}
 .badge{background:var(--accent);color:#fff;border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:600;margin-inline-start:2px}
-.user{display:flex;align-items:center;gap:.8rem;font-size:.9rem;color:var(--muted)}
+.user{flex:none;display:flex;align-items:center;gap:.8rem;font-size:.9rem;color:var(--muted)}
+.user-pop{position:relative}
+.user-btn{display:flex;align-items:center;gap:8px;background:none;border:1px solid var(--line);border-radius:999px;
+  padding:4px 12px 4px 4px;cursor:pointer;color:var(--ink);font-family:var(--body)}
+.user-btn:hover{background:var(--sky)}
+.ub-ava{width:30px;height:30px;border-radius:50%;background:var(--primary);color:#fff;display:grid;place-items:center;
+  font-size:.74rem;font-weight:700;flex:none}
+.ub-name{font-size:.86rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.user-btn .caret{font-size:.7rem;opacity:.6;transition:transform .15s}
+.user-pop.open .user-btn .caret{transform:rotate(180deg)}
+.user-drop{display:none;position:absolute;top:100%;right:0;margin-top:6px;min-width:200px;background:#fff;
+  border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:6px;z-index:130}
+.user-pop.open .user-drop{display:block}
+.user-drop a{display:block;padding:.55rem .7rem;border-radius:8px;color:var(--ink);font-size:.9rem}
+.user-drop a:hover{background:var(--sky);text-decoration:none}
+.user-drop .btn-logout{margin-top:6px;justify-content:center}
+.ud-acting{padding:2px 4px 8px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.ud-acting select{width:100%;padding:7px;border-radius:8px;border:1px solid var(--line)}
 .btn-logout{display:inline-flex;align-items:center;background:rgba(233,91,43,.1);color:var(--accent-dark);
   font-weight:600;padding:.5rem 1rem;border-radius:999px;font-size:.88rem}
 .btn-logout:hover{background:rgba(233,91,43,.18);text-decoration:none}
@@ -449,14 +478,6 @@ button.btn{font-family:var(--body)}
 
 /* Планшеты и узкие окна */
 @media(max-width:900px){
-  .topbar{height:auto;padding:10px 14px;row-gap:8px}
-  .brand-text{max-width:none;font-size:.95rem}
-  /* меню — переносится строками; группы раскрываются вниз на всю ширину */
-  .nav{order:3;width:100%;margin:0;flex-wrap:wrap}
-  .nav a{white-space:nowrap;font-size:.88rem;padding:.4rem .65rem}
-  .nav-group{position:static}
-  .nav-drop{position:static;width:100%;box-shadow:none;border-radius:10px;margin:2px 0 6px}
-  .user{margin-left:auto;font-size:.85rem}
   h1{font-size:1.45rem}
 }
 
@@ -551,50 +572,59 @@ button.btn{font-family:var(--body)}
 .table th.sort-asc::after,.vgrid th.sort-asc::after{content:" ▲";font-size:.7em}
 .table th.sort-desc::after,.vgrid th.sort-desc::after{content:" ▼";font-size:.7em}
 
-/* ===== Гамбургер-меню (телефон): полноэкранный оверлей по разделам ===== */
+/* ===== Узкое/мобильное меню (≤1100px): левый выезжающий drawer ===== */
 .nav-burger{display:none;background:transparent;border:1px solid var(--line);color:var(--primary);
-  border-radius:9px;padding:4px 11px;font-size:1.25rem;line-height:1.1;cursor:pointer;font-family:inherit}
+  border-radius:9px;padding:4px 11px;font-size:1.35rem;line-height:1.1;cursor:pointer;font-family:inherit}
 .nav-tablemode{display:none}
 .nav-head{display:none}
-@media(max-width:900px){
-  .nav-burger{display:inline-flex;align-items:center;order:2;margin-left:auto}
-  .user{order:3}
-  .topbar .nav{display:none}
-  body.menu-open{overflow:hidden}                       /* фон не прокручивается */
-
-  /* открытое меню — оверлей на весь экран, перекрывает страницу.
-     ВАЖНО: убираем backdrop-filter у .topbar, иначе он создаёт containing block и
-     position:fixed у .nav привязывается к маленькой шапке, а не к окну (меню «схлопывается»). */
-  .topbar.nav-open{z-index:200;backdrop-filter:none;-webkit-backdrop-filter:none;background:#fff}
-  .topbar.nav-open .nav{
-    display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:0;
-    position:fixed;inset:0;width:100%;margin:0;padding:0 0 28px;
-    background:#fff;overflow-y:auto;-webkit-overflow-scrolling:touch;z-index:200}
-
+.nav-scrim{display:none}
+@media(max-width:1099.98px){
+  /* backdrop-filter у .topbar создаёт containing block и «ловит» position:fixed у .nav/.nav-scrim
+     (drawer схлопывается до высоты шапки). На узких ширинах блюр не нужен — убираем ловушку. */
+  .topbar{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(255,255,255,.95)}
+  .nav-burger{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;font-size:1.4rem}
+  .topbar>.brand{margin-inline-end:auto;min-width:0}
+  .brand-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* меню превращается в выезжающую слева панель */
+  .nav{position:fixed;inset:0 auto 0 0;width:min(86vw,360px);transform:translateX(-100%);
+    transition:transform .25s ease;flex-direction:column;flex-wrap:nowrap;align-items:stretch;
+    overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--surface);box-shadow:var(--shadow);
+    z-index:200;gap:0;padding:0 0 24px;margin:0;min-width:0}
+  body.menu-open{overflow:hidden}
+  body.menu-open .nav{transform:translateX(0)}
+  .nav-scrim{display:block;position:fixed;inset:0;background:rgba(22,25,61,.45);
+    opacity:0;visibility:hidden;transition:.25s;z-index:190;border:0}
+  body.menu-open .nav-scrim{opacity:1;visibility:visible}
   .nav-head{display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:1;
     background:var(--primary);color:#fff;padding:15px 18px;font-family:var(--display);font-weight:700;font-size:1.12rem}
   .nav-close{background:transparent;border:0;color:#fff;font-size:1.5rem;line-height:1;cursor:pointer;padding:2px 10px;font-family:inherit}
-
-  /* одиночные пункты верхнего уровня */
-  .topbar.nav-open .nav > a{display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid var(--line);
-    font-size:1rem;border-radius:0;white-space:normal;color:var(--ink)}
-  .topbar.nav-open .nav > a .badge{margin-left:auto}
-
-  /* разделы (Квота/Кадры/Визы/…): заголовок-аккордеон + вложенные пункты */
-  .topbar.nav-open .nav-group{position:static;border-bottom:1px solid var(--line)}
-  .topbar.nav-open .nav-gbtn{width:100%;justify-content:space-between;padding:15px 18px;font-size:1.02rem;font-weight:700;
-    background:#eef1fb;color:var(--primary);border-radius:0}
-  .topbar.nav-open .nav-group.open .nav-gbtn{background:#e1e7fb}
-  .topbar.nav-open .nav-group.open .caret{transform:rotate(180deg)}
-  .nav-gbtn .caret{display:inline-block;transition:transform .15s}
-  .topbar.nav-open .nav-drop{position:static;width:100%;border:0;box-shadow:none;margin:0;padding:2px 0 8px;background:#fbfcff;border-radius:0}
-  .topbar.nav-open .nav-drop a{padding:13px 18px 13px 36px;font-size:.96rem;border-radius:0}
-
-  /* переключатель «полные таблицы / карточки» — внизу меню */
-  .nav-tablemode{display:block;width:auto;margin:16px 18px 0;padding-top:14px;border-top:1px solid var(--line)}
+  .nav .nav-item,.nav .nav-gbtn{width:100%;min-height:48px;padding:13px 18px;border-radius:0;
+    justify-content:flex-start;white-space:normal;border-bottom:1px solid var(--line);box-shadow:none}
+  .nav .nav-item .badge,.nav .nav-gbtn .badge{margin-left:auto}
+  .nav-item.is-active,.nav-group.is-active>.nav-gbtn{box-shadow:inset 4px 0 0 var(--primary)}
+  .nav-group{position:static;flex:auto;border-bottom:1px solid var(--line)}
+  .nav-gbtn{justify-content:space-between;font-weight:700}
+  .nav-group.open>.nav-gbtn{background:#e1e7fb}
+  .nav-drop{position:static;display:none;box-shadow:none;border:0;border-radius:0;min-width:0;padding:0;background:#fbfcff}
+  .nav-group.open .nav-drop{display:block}
+  .nav-drop a{padding:13px 18px 13px 36px;min-height:44px;border-radius:0;font-size:.96rem}
+  .nav-gbtn .caret{margin-left:8px;opacity:.7}
+  .nav-more{display:none!important}
+  .nav-tablemode{display:block;margin:16px 18px 0;padding-top:14px;border-top:1px solid var(--line)}
   .nav-tablemode button{width:100%;background:var(--sky);border:1px solid var(--line);color:var(--primary);
     border-radius:10px;padding:13px;font-size:.95rem;font-weight:600;cursor:pointer;font-family:inherit}
+  /* профиль внизу drawer (на десктопе скрыт) */
+  .nav-profile{display:block;margin:14px 0 0;border-top:1px solid var(--line);padding:14px 18px 0}
+  .nav-profile .np-name{font-weight:700;color:var(--ink);margin-bottom:6px}
+  .nav-profile>a{display:block;padding:11px 0;color:var(--ink);border-bottom:1px solid var(--line)}
+  .nav-profile>a.btn-logout{margin-top:12px;border:0;text-align:center}
+  .nav-profile .np-acting{margin-bottom:10px}
+  .nav-profile .np-acting select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line)}
+  /* профиль уезжает в drawer (.nav-profile); в баре пользователь скрыт */
+  .user{display:none}
 }
+@media(max-width:560px){ .nav{width:92vw} }
+@media print{ .nav,.nav-scrim,.nav-burger{display:none!important} }
 
 /* ===== Адаптация таблиц на телефоне =====
    .tbl-cards (данные) → карточки; .tbl-wide (формы/грид) → горизонтальная прокрутка (.table-scroll).
