@@ -75,8 +75,9 @@ if ($uid) {
     if ($isHrMgr || $isTimekeeper || $canSeeStaff || $can('dept_head')) {
         $g = [];
         if ($isTimekeeper || $isHrMgr || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacations', 'Отпуска', $vacInbox]; }
-        if ($isTimekeeper) { $g[] = ['/timesheet2', 'Эл. табель', 0]; }
-        if (\App\Controllers\ShiftController::canSee((int) $uid)) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; $g[] = ['/timesheet2?kind=shift', 'Табель 0504421 (2/2)', 0]; }
+        $canShift = \App\Controllers\ShiftController::canSee((int) $uid);
+        if ($isTimekeeper || $canShift) { $g[] = ['/timesheet2', 'Электронный табель', 0]; }
+        if ($canShift) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; }
         if ($isHrAcc) { $g[] = ['/timesheet2/coverage', 'Покрытие табелями', 0]; }
         if ($canSeeStaff) { $g[] = ['/admin/employees', 'Сотрудники', 0]; }
         // управление оргструктурой/должностями/табелем — только менеджер проекта кадры или кадровик
@@ -150,7 +151,7 @@ if ($uid) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/style.css?v=3">
+    <link rel="stylesheet" href="/assets/style.css?v=4">
     <script defer src="/assets/app.js?v=3"></script>
 </head>
 <?php $mobView = $_COOKIE['mobview'] ?? ''; ?>

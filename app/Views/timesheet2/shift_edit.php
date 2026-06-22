@@ -1,6 +1,6 @@
 <h1>Сменный табель 0504421 (2/2) — <?= e($t['dept_name'] ?: '—') ?>
     <?= (int)$t['revision'] > 0 ? '<span class="tag">корректировочный №' . (int)$t['revision'] . '</span>' : '' ?></h1>
-<p><a href="/timesheet2?kind=shift&month=<?= e(substr($t['period'],0,7)) ?>&half=<?= e(substr($t['period'],8)) ?>">← к списку</a>
+<p><a href="/timesheet2?month=<?= e(substr($t['period'],0,7)) ?>&half=<?= e(substr($t['period'],8)) ?>">← к списку</a>
    · период с <?= (int)substr($dates[0],8,2) ?> по <?= (int)substr(end($dates),8,2) ?> · <?= e(substr($t['period'],0,7)) ?></p>
 
 <section class="panel">
