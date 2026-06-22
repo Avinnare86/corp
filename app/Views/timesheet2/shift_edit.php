@@ -4,9 +4,15 @@
    · период с <?= (int)substr($dates[0],8,2) ?> по <?= (int)substr(end($dates),8,2) ?> · <?= e(substr($t['period'],0,7)) ?></p>
 
 <section class="panel">
-    <p class="muted" style="margin-top:0">Табель сформирован из <a href="/shifts?month=<?= e(substr($t['period'],0,7)) ?>">сменного графика 2/2</a>;
-        день/ночь посчитаны автоматически по ночному окну. Правьте смены в графике и жмите «Пересформировать».
-        Коды: <b>Я</b> явка днём · <b>Н</b> ночная · <b>Я/Н</b> день и ночь (часы «дн/ночь») · <b>О</b> отпуск · пусто — выходной.</p>
+    <p class="muted" style="margin-top:0">Табель сформирован из <a href="/shifts?month=<?= e(substr($t['period'],0,7)) ?>">сменного графика 2/2</a> по правилам формы <b>ОКУД 0504421</b> (сплошная регистрация явок/неявок: код + часы);
+        день/ночь посчитаны автоматически по ночному окну, два кода в один день — дробью «Я/Н» и часы «4/8». Правьте смены в графике и жмите «Пересформировать».</p>
+    <details style="margin:0 0 8px"><summary class="muted" style="cursor:pointer">Условные обозначения (полный перечень ОКУД 0504421)</summary>
+        <div style="font-size:.8rem;columns:2;column-gap:24px;margin-top:6px">
+            <?php foreach (\App\Controllers\TabelController::OKUD_CODES as $code => $info): ?>
+                <div><b><?= e($code) ?></b> — <?= e($info[0]) ?></div>
+            <?php endforeach; ?>
+        </div>
+    </details>
     <div class="table-scroll">
     <table class="table" style="min-width:760px;font-size:.85rem">
         <thead><tr><th>Сотрудник</th><th></th>
