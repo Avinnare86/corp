@@ -1,3 +1,4 @@
+<style>main.container{max-width:none;width:auto;margin:0 18px}</style>
 <h1>Распределение проверки</h1>
 
 <section class="panel">

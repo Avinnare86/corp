@@ -26,14 +26,10 @@
         <p class="muted" style="margin-top:0">Стимул <strong>заместителям директора и главному бухгалтеру</strong> (Приложение № 2 к Положению).
             Документ оформляет и утверждает <strong>директор</strong> единолично (одна подпись ЭП), после чего его видит бухгалтерия.
             <br>% = сумма / (оклад × ставка) × 100. По каждому работнику в одном периоде основания не должны повторяться.</p>
-    <?php elseif (!empty($branchMode)): ?>
-        <p class="muted" style="margin-top:0">Служебка <strong>по всей вашей ветке подчинённости</strong>: можно добавлять сотрудников разных отделов.
-            При сохранении создаётся отдельная служебка на каждый отдел — каждая уходит <strong>курирующему заму своего отдела → директору</strong>.
-            <br>По сотрудникам вашей ветки видно «уже назначено» (стимул и единовременные за период); по чужим подразделениям — назначение вслепую (только сумма).
-            <br>% = сумма / (оклад × ставка) × 100. По каждому работнику в периоде основания не должны повторяться между служебками.</p>
     <?php else: ?>
-        <p class="muted" style="margin-top:0">Отдел: <strong><?= e($dept['name'] ?? '—') ?></strong>.
-            Маршрут: начальник отдела → курирующий зам → директор. Бухгалтерия видит после подписи зама.
+        <p class="muted" style="margin-top:0">Отдел: <strong><?= e($dept['name'] ?? '—') ?></strong> — <strong>одна служебка оформляется на один отдел</strong>,
+            в списке только его сотрудники. Чтобы оформить по другому отделу — выберите его выше (создастся отдельная служебка).
+            <br>Маршрут: начальник отдела → курирующий зам → директор (если вы курируете отдел — подпись зама ставите сразу). Бухгалтерия видит после подписи зама.
             <br>% = сумма / (оклад × ставка) × 100 — от номинального оклада на нагрузку, без учёта отработки.
             По каждому работнику в одном периоде основания не должны повторяться между служебками.</p>
     <?php endif; ?>
@@ -48,15 +44,15 @@
         <div class="flash" style="background:#eef;color:#223;margin-bottom:10px">Прямое назначение
             (<?= $direct === 'director' ? 'директор — утверждается сразу' : 'зам — далее только подпись директора' ?>),
             без участия начальника отдела.</div>
-        <?php if (!empty($deptOpts) && empty($memo['id'])): ?>
-        <label style="max-width:420px;margin-bottom:10px">Подразделение
-            <select onchange="location.href='/memos/direct/new?dept='+this.value">
+        <?php endif; ?>
+        <?php if (!$isMgmt && empty($memo['id']) && !empty($deptOpts)): $durl = !empty($direct) ? '/memos/direct/new?dept=' : '/memos/new?dept='; ?>
+        <label style="max-width:480px;margin-bottom:10px;display:block">Подразделение <span class="muted">(одна служебка — один отдел)</span>
+            <select onchange="location.href='<?= $durl ?>'+this.value" style="width:100%">
                 <?php foreach ($deptOpts as $d): ?>
                     <option value="<?= (int)$d['id'] ?>" <?= (int)($deptId ?? 0)===(int)$d['id']?'selected':'' ?>><?= e($d['name']) ?></option>
                 <?php endforeach; ?>
             </select>
         </label>
-        <?php endif; ?>
         <?php endif; ?>
         <div class="form-inline" style="align-items:flex-end">
             <label>Период<input type="month" name="period" value="<?= e($memo['period'] ?? date('Y-m')) ?>" required></label>
@@ -104,6 +100,7 @@
             <thead><tr><th>Работник</th><?php if ($showPiece): ?><th class="num">Квота</th><th class="num">Визы</th><?php endif; ?><th>Оклад×ставка</th><th>Уже назначено за период</th><th class="num">Сумма стимула, ₽</th><th class="num">%</th><th>Вид</th><th>Цель</th><th>Основание</th><th></th></tr></thead>
             <tbody></tbody>
         </table>
+        <datalist id="reasonList"><?php foreach (($reasons ?? []) as $rr): ?><option value="<?= e($rr['text']) ?>"></option><?php endforeach; ?></datalist>
         <button type="button" class="btn btn-mini" onclick="addLine()">+ Добавить <?= $isMgmt ? 'руководителя' : 'работника' ?></button>
         <p style="margin:10px 0 0;text-align:right;font-size:1.05rem">Итого по служебке: <strong id="memoTotal">0 ₽</strong></p>
         <div class="form-inline" style="margin-top:14px">
@@ -116,11 +113,9 @@
 <script>
 var SHOW_PIECE = <?= $showPiece ? 'true' : 'false' ?>;
 var MEMBERS = <?= json_encode(array_map(fn($m)=>['id'=>(int)$m['id'],'name'=>$m['full_name'].' — '.$m['position'],'dept'=>$m['dept_name']??'','load'=>(float)$m['oklad_load'],'kvota'=>(float)$m['kvota'],'visy'=>(float)$m['visy'],'total'=>(float)$m['piece'],'can_see'=>!empty($m['can_see']),'ex_m_appr'=>(float)($m['ex_m_appr']??0),'ex_m_proj'=>(float)($m['ex_m_proj']??0),'ex_o_appr'=>(float)($m['ex_o_appr']??0),'ex_o_proj'=>(float)($m['ex_o_proj']??0)], $members), JSON_UNESCAPED_UNICODE) ?>;
-var EXIST = <?= json_encode(array_map(fn($l)=>['user_id'=>(int)$l['user_id'],'amount'=>(float)$l['amount'],'kind'=>$l['pay_kind'],'purpose'=>$l['purpose']??'other','reason_id'=>$l['reason_id']!==null?(int)$l['reason_id']:null], $lines), JSON_UNESCAPED_UNICODE) ?>;
-var REASONS = <?= json_encode(array_map(fn($r)=>['id'=>(int)$r['id'],'text'=>$r['text']], $reasons ?? []), JSON_UNESCAPED_UNICODE) ?>;
+var EXIST = <?= json_encode(array_map(fn($l)=>['user_id'=>(int)$l['user_id'],'amount'=>(float)$l['amount'],'kind'=>$l['pay_kind'],'purpose'=>$l['purpose']??'other','reason'=>(string)($l['reason_text']??'')], $lines), JSON_UNESCAPED_UNICODE) ?>;
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
 function opt(sel){ return MEMBERS.map(function(m){ var lbl=m.name+(m.dept?(' ('+m.dept+')'):''); return '<option value="'+m.id+'"'+(m.id==sel?' selected':'')+'>'+esc(lbl)+'</option>'; }).join(''); }
-function reasonOpts(sel){ return '<option value="">—</option>'+REASONS.map(function(r){ return '<option value="'+r.id+'"'+(r.id==sel?' selected':'')+'>'+esc(r.text)+'</option>'; }).join(''); }
 function purposeOpts(sel){ sel=sel||'other'; var o=[['other','за другое'],['anketas','за анкеты'],['visas','за визы']];
   return o.map(function(p){ return '<option value="'+p[0]+'"'+(p[0]===sel?' selected':'')+'>'+p[1]+'</option>'; }).join(''); }
 function memOf(id){ return MEMBERS.find(function(x){return x.id==id;}); }
@@ -149,7 +144,7 @@ function updTotal(){
   var s=0; document.querySelectorAll('#memoLines .m-amount').forEach(function(i){ s+=parseFloat((i.value||'0').replace(',','.'))||0; });
   var el=document.getElementById('memoTotal'); if(el) el.textContent=fmt(s)+' ₽';
 }
-function addLine(uid, amount, kind, purpose, reasonId){
+function addLine(uid, amount, kind, purpose, reasonText){
   var tb=document.querySelector('#memoLines tbody');
   var i=tb.children.length;
   var def=document.getElementById('defKind').value;
@@ -162,8 +157,8 @@ function addLine(uid, amount, kind, purpose, reasonId){
     +'<td><input class="m-amount" type="text" name="row['+i+'][amount]" value="'+(amount||'')+'" style="width:120px;text-align:right"></td>'
     +'<td class="m-pct num">—</td>'
     +'<td><select class="m-kind" name="row['+i+'][pay_kind]"><option value="monthly"'+((kind||def)==='monthly'?' selected':'')+'>ежемес.</option><option value="onetime"'+((kind||def)==='onetime'?' selected':'')+'>единоврем.</option></select></td>'
-    +'<td><select name="row['+i+'][purpose]" title="За анкеты/визы — сделка сверх оклада закрывает стимул; за другое — гарантированная доплата">'+purposeOpts(purpose)+'</select></td>'
-    +'<td><select name="row['+i+'][reason_id]">'+reasonOpts(reasonId)+'</select></td>'
+    +'<td><select class="m-purpose" name="row['+i+'][purpose]" title="За анкеты/визы — сделка сверх оклада закрывает стимул; за другое — гарантированная доплата">'+purposeOpts(purpose)+'</select></td>'
+    +'<td><input class="m-reason" type="text" name="row['+i+'][reason]" list="reasonList" value="'+esc(reasonText||'')+'" placeholder="за что — выбор или ввод"></td>'
     +'<td><button type="button" class="btn btn-mini btn-danger" onclick="this.closest(\'tr\').remove();updTotal()">×</button></td>';
   tb.appendChild(tr);
   tr.querySelector('.m-user').addEventListener('change',function(){recalc(tr);});
@@ -187,6 +182,6 @@ function pullPiece(kind){
   });
   if(!added){ alert('За выбранный период (до 25 числа) нет начисленной сделки по '+(kind==='kvota'?'квоте':kind==='visy'?'визам':'квоте и визам')+'.'); }
 }
-if (EXIST.length) { EXIST.forEach(function(l){ addLine(l.user_id, l.amount, l.kind, l.purpose, l.reason_id); }); } else { addLine(); }
+if (EXIST.length) { EXIST.forEach(function(l){ addLine(l.user_id, l.amount, l.kind, l.purpose, l.reason); }); } else { addLine(); }
 updTotal();
 </script>

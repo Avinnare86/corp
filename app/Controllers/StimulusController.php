@@ -200,25 +200,18 @@ class StimulusController extends Controller
                 [$deptId]) : [];
             $forecast = $deptId ? \App\Services\StimulusBudgetService::forecast($deptId, $period) : null;
         } else {
-            // Создание — по всей ветке подчинённости: список всех активных сотрудников,
-            // отдел берётся из сотрудника каждой строки при сохранении (веер по отделам).
+            // Создание — одна служебка на ОДИН отдел: выбор отдела из своей ветки подчинённости,
+            // список работников — только выбранного отдела. Маршрут — курирующему заму этого отдела.
             $cats = self::CATS_STAFF;
-            $globalMembers = true;
-            $canSeeAll = false;   // цифры «уже назначено» — только по своей ветке
-            $deptId = 0;
-            $members = Database::all(
-                'SELECT u.id, u.full_name, u.position, u.oklad, u.rate_volume, u.position_id, u.department_id, d.name AS dept_name
-                   FROM users u LEFT JOIN departments d ON d.id = u.department_id
-                  WHERE u.is_active = 1 ORDER BY d.name, u.full_name');
-            // Сделку (квота/визы) считаем только по головным отделам автора — ограничение по производительности.
-            $own = [];
-            foreach (Org::headedDeptIds($authorId) as $hid) {
-                foreach (Org::withDescendants($hid) as $d) { $own[$d] = true; }
-            }
-            $pieceDeptIds = array_keys($own);
-            // Forecast (остаток ФОТ) — только если у автора ровно один свой отдел.
-            $headed = Org::headedDeptIds($authorId);
-            $forecast = count($headed) === 1 ? \App\Services\StimulusBudgetService::forecast((int) $headed[0], $period) : null;
+            $branchIds = Org::branchDeptIds($authorId);
+            $deptOpts = self::deptsByIds($branchIds);
+            $deptId = (int) ($this->input('dept') ?: 0);
+            if ((!$deptId || !in_array($deptId, $branchIds, true)) && $deptOpts) { $deptId = (int) $deptOpts[0]['id']; }
+            $members = $deptId ? Database::all(
+                'SELECT id, full_name, position, oklad, rate_volume, position_id FROM users WHERE department_id = ? AND is_active = 1 ORDER BY full_name',
+                [$deptId]) : [];
+            $pieceDeptIds = $deptId ? [$deptId] : [];
+            $forecast = $deptId ? \App\Services\StimulusBudgetService::forecast((int) $deptId, $period) : null;
         }
 
         $assigned = $this->assignedByUser($period, $memo['id'] ?? null);
@@ -250,7 +243,9 @@ class StimulusController extends Controller
         unset($m);
 
         $ph = implode(',', array_fill(0, count($cats), '?'));
-        $lines = $memo ? Database::all('SELECT * FROM stimulus_memo_lines WHERE memo_id = ? ORDER BY id', [$memo['id']]) : [];
+        $lines = $memo ? Database::all(
+            'SELECT l.*, r.text AS reason_text FROM stimulus_memo_lines l
+               LEFT JOIN stimulus_reasons r ON r.id = l.reason_id WHERE l.memo_id = ? ORDER BY l.id', [$memo['id']]) : [];
         $this->view('stimulus/form', [
             'title' => $memo ? 'Служебка №' . ($memo['number'] ?: $memo['id'])
                 : ($isMgmt ? 'Стимул заместителям / гл. бухгалтеру' : 'Новая служебка о стимуле'),
@@ -323,8 +318,8 @@ class StimulusController extends Controller
             $pct = $load > 0 ? round($amount / $load * 100, 1) : 0;
             $lkind = ($r['pay_kind'] ?? $payKind) === 'onetime' ? 'onetime' : 'monthly';
             $purpose = in_array($r['purpose'] ?? '', ['anketas', 'visas', 'other'], true) ? $r['purpose'] : 'other';
-            $reasonId = !empty($r['reason_id']) ? (int) $r['reason_id'] : null;
-            $lines[] = ['user_id' => $eid, 'amount' => round($amount, 2), 'pay_kind' => $lkind, 'oklad_load' => $load, 'percent' => $pct, 'purpose' => $purpose, 'reason_id' => $reasonId];
+            $reasonText = trim((string) ($r['reason'] ?? ''));   // основание: выбор из справочника или свободный ввод
+            $lines[] = ['user_id' => $eid, 'amount' => round($amount, 2), 'pay_kind' => $lkind, 'oklad_load' => $load, 'percent' => $pct, 'purpose' => $purpose, 'reason_text' => $reasonText];
         }
         if (!$lines) { flash('Добавьте хотя бы одного работника с суммой.', 'error'); $this->backToForm($id, $kind); }
 
@@ -412,7 +407,7 @@ class StimulusController extends Controller
                 foreach ($dlines as $ln) {
                     Database::insert(
                         'INSERT INTO stimulus_memo_lines (memo_id, user_id, amount, pay_kind, period_from, period_to, oklad_load, percent, purpose, reason_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
-                        [$memoId, $ln['user_id'], $ln['amount'], $ln['pay_kind'], $pfrom, $pto, $ln['oklad_load'], $ln['percent'], $ln['purpose'], $ln['reason_id']]);
+                        [$memoId, $ln['user_id'], $ln['amount'], $ln['pay_kind'], $pfrom, $pto, $ln['oklad_load'], $ln['percent'], $ln['purpose'], $this->resolveReason((int) $d, $ln['reason_text'] ?? '')]);
                 }
                 $created[] = $memoId;
             }
@@ -443,7 +438,7 @@ class StimulusController extends Controller
         $pto = date('Y-m-t', strtotime($pfrom));
         foreach ($lines as $ln) {
             Database::insert('INSERT INTO stimulus_memo_lines (memo_id, user_id, amount, pay_kind, period_from, period_to, oklad_load, percent, purpose, reason_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
-                [$id, $ln['user_id'], $ln['amount'], $ln['pay_kind'], $pfrom, $pto, $ln['oklad_load'], $ln['percent'], $ln['purpose'], $ln['reason_id']]);
+                [$id, $ln['user_id'], $ln['amount'], $ln['pay_kind'], $pfrom, $pto, $ln['oklad_load'], $ln['percent'], $ln['purpose'], $this->resolveReason($deptId, $ln['reason_text'] ?? '')]);
         }
         $pdo->commit();
         flash($kind === 'mgmt'
@@ -456,6 +451,21 @@ class StimulusController extends Controller
     {
         if ($id) { $this->redirect('/memos/' . $id . '/edit'); }
         $this->redirect($kind === 'mgmt' ? '/memos/mgmt/new' : '/memos/new');
+    }
+
+    /**
+     * Основание строки: «выбор или ввод». Текст ищем в справочнике (по отделу либо общий);
+     * если такого ещё нет — добавляем в справочник отдела и возвращаем id. Пусто → NULL.
+     */
+    private function resolveReason(?int $deptId, string $text): ?int
+    {
+        $text = trim($text);
+        if ($text === '') { return null; }
+        $id = Database::scalar(
+            'SELECT id FROM stimulus_reasons WHERE is_active = 1 AND text = ? AND (department_id = ? OR department_id IS NULL)
+              ORDER BY (department_id IS NULL) LIMIT 1', [$text, $deptId]);
+        if ($id) { return (int) $id; }
+        return (int) Database::insert('INSERT INTO stimulus_reasons (department_id, text, is_active) VALUES (?,?,1)', [$deptId ?: null, $text]);
     }
 
     /** Список отделов по id (для селектора прямого назначения). */

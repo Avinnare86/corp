@@ -1,3 +1,4 @@
+<style>main.container{max-width:none;width:auto;margin:0 18px}</style>
 <div class="chat-head" style="display:flex;gap:10px;align-items:center">
     <h1 style="margin:0;font-size:1.2rem">МИД: строки на доработке</h1>
     <a class="btn btn-mini" href="/visas/opis/list">Описи / Указания →</a>
