@@ -926,6 +926,20 @@ foreach (['plan_start', 'plan_end', 'fact_start', 'fact_end'] as $col) {
         echo "OK  колонка shift_days.$col добавлена\n";
     }
 }
+// Вид смены ячейки графика: '' выходной | 'day' дневная | 'night' ночная | 'ind' индивидуальное время.
+foreach (['plan_kind', 'fact_kind'] as $col) {
+    if (!columnExists('shift_days', $col)) {
+        $pdo->exec("ALTER TABLE shift_days ADD COLUMN $col VARCHAR(8) NULL");
+        echo "OK  колонка shift_days.$col добавлена\n";
+    }
+}
+// Индивидуальные времена смен сотрудника (если заданы — перекрывают стандартные времена графика).
+foreach (['shift_day_start', 'shift_day_end', 'shift_night_start', 'shift_night_end'] as $col) {
+    if (!columnExists('users', $col)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN $col VARCHAR(5) NULL");   // 'HH:MM'
+        echo "OK  колонка users.$col добавлена\n";
+    }
+}
 // Табель: вид — 'std' (прежний 8ч, один символ/день) | 'shift' (2/2 0504421, генерируется из графика).
 if (!columnExists('tabels', 'kind')) {
     $pdo->exec("ALTER TABLE tabels ADD COLUMN kind VARCHAR(8) NOT NULL DEFAULT 'std'");

@@ -124,26 +124,145 @@ class ShiftController extends Controller
         return in_array($r, ['h1', 'h2', 'full'], true) ? $r : 'full';
     }
 
+    /** Времена смен сотрудника: индивидуальные (если заданы) иначе стандартные из настроек. ['day'=>[s,e],'night'=>[s,e]]. */
+    private function empTimes(array $emp): array
+    {
+        $S = \App\Services\Settings::class;
+        $g = fn($k, $def) => (!empty($emp[$k]) && preg_match('/^\d{1,2}:\d{2}$/', (string) $emp[$k])) ? (string) $emp[$k] : $def;
+        return [
+            'day'   => [$g('shift_day_start', $S::shiftDayStart()), $g('shift_day_end', $S::shiftDayEnd())],
+            'night' => [$g('shift_night_start', $S::shiftNightStart()), $g('shift_night_end', $S::shiftNightEnd())],
+        ];
+    }
+
+    /** Вид смены ячейки по сохранённым данным (kind либо вывод из часов): '' | day | night | ind. */
+    private static function cellKind(?array $sd, string $mode): string
+    {
+        if (!$sd) { return ''; }
+        $k = (string) ($sd[$mode . '_kind'] ?? '');
+        if (in_array($k, ['day', 'night', 'ind'], true)) { return $k; }
+        $h = (float) ($sd[$mode . '_hours'] ?? 0); $n = (float) ($sd[$mode . '_night'] ?? 0);
+        return $h <= 0 ? '' : ($n > 0 ? 'night' : 'day');
+    }
+
     public function index(): void
     {
         Auth::requireLogin();
         $me = Auth::user();
         if (!$this->canView($me)) { flash('Раздел сменного графика (колл-центр).', 'error'); $this->redirect('/'); }
         $month = (string) ($this->input('month') ?: date('Y-m'));
-        $emps = $this->employees($me);
-        foreach ($emps as &$e) {
-            $e['plan'] = (float) Database::scalar("SELECT COALESCE(SUM(plan_hours),0) FROM shift_days WHERE employee_id=? AND substr(work_date,1,7)=?", [$e['id'], $month]);
-            $e['fact'] = (float) Database::scalar("SELECT COALESCE(SUM(fact_hours),0) FROM shift_days WHERE employee_id=? AND substr(work_date,1,7)=?", [$e['id'], $month]);
+        $mode  = $this->input('mode') === 'fact' ? 'fact' : 'plan';
+        $depts = $this->grafikDepts($me);
+        $deptId = $this->pickDept($depts, (int) $this->input('dept'));   // только в пределах доступа (защита от чтения чужих отделов)
+        $lastDay = (int) date('t', strtotime("$month-01"));
+        $canEdit = $this->canEdit($me);
+
+        // Сотрудники 2/2 выбранного отдела (в области видимости) + ячейки графика по дням.
+        $emps = [];
+        if ($deptId) {
+            $emps = Database::all("SELECT u.*, d.name AS dept_name FROM users u LEFT JOIN departments d ON d.id=u.department_id
+                WHERE u.department_id=? AND u.schedule_type='2_2' AND u.is_active=1 ORDER BY u.full_name", [$deptId]);
         }
-        unset($e);
+        $rows = [];
+        foreach ($emps as $e) {
+            $eid = (int) $e['id'];
+            $byDate = [];
+            foreach (Database::all("SELECT * FROM shift_days WHERE employee_id=? AND substr(work_date,1,7)=?", [$eid, $month]) as $sd) { $byDate[$sd['work_date']] = $sd; }
+            $vac = [];
+            foreach (Database::all("SELECT start_date, end_date FROM vacation_requests WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?", [$eid, "$month-$lastDay", "$month-01"]) as $v) {
+                for ($ts = strtotime($v['start_date']); $ts <= strtotime($v['end_date']); $ts += 86400) { $vac[date('Y-m-d', $ts)] = true; }
+            }
+            $cells = []; $sumH = 0.0; $sumN = 0.0; $days = 0;
+            for ($d = 1; $d <= $lastDay; $d++) {
+                $dte = sprintf('%s-%02d', $month, $d);
+                $sd = $byDate[$dte] ?? null;
+                if (isset($vac[$dte]) && self::cellKind($sd, $mode) === '') {
+                    $cells[$dte] = ['kind' => 'O', 'ro' => true, 'ind' => ''];
+                    continue;
+                }
+                $kind = self::cellKind($sd, $mode);
+                $ind = $kind === 'ind' && $sd ? (((string) $sd[$mode . '_start']) . '–' . ((string) $sd[$mode . '_end'])) : '';
+                $cells[$dte] = ['kind' => $kind, 'ro' => false, 'ind' => $ind];
+                if ($sd) { $h = (float) $sd[$mode . '_hours']; if ($h > 0) { $sumH += $h; $sumN += (float) $sd[$mode . '_night']; $days++; } }
+            }
+            $rows[] = ['emp' => $e, 'cells' => $cells, 'days' => $days, 'hours' => round($sumH, 2), 'night' => round($sumN, 2)];
+        }
+
         $this->view('shifts/index', [
             'title'   => 'Сменный график (2/2)',
-            'month'   => $month,
-            'range'   => $this->reqRange(),
-            'emps'    => $emps,
-            'canEdit' => $this->canEdit($me),
-            'grafikDepts' => $this->grafikDepts($me),
+            'month'   => $month, 'mode' => $mode, 'deptId' => $deptId, 'depts' => $depts,
+            'lastDay' => $lastDay, 'rows' => $rows,
+            'canEdit' => $canEdit,
+            'std'     => [
+                'day'   => [\App\Services\Settings::shiftDayStart(), \App\Services\Settings::shiftDayEnd()],
+                'night' => [\App\Services\Settings::shiftNightStart(), \App\Services\Settings::shiftNightEnd()],
+            ],
+            'nightStart' => \App\Services\Settings::nightStart(),
+            'nightEnd'   => \App\Services\Settings::nightEnd(),
+            'grafikDepts' => $depts,
+            'csrf'    => Auth::csrf(),
         ]);
+    }
+
+    /** Сохранить стандартные времена смен (сверху на странице графика). */
+    public function saveStandard(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        if (!$this->canEdit($me)) { flash('Нет прав.', 'error'); $this->redirect('/shifts'); }
+        $tm = fn($v, $def) => preg_match('/^\d{1,2}:\d{2}$/', trim((string) $v)) ? substr('0' . trim((string) $v), -5) : $def;
+        \App\Services\Settings::set('shift_day_start',   $tm($this->input('day_start'), '08:00'));
+        \App\Services\Settings::set('shift_day_end',     $tm($this->input('day_end'), '20:00'));
+        \App\Services\Settings::set('shift_night_start', $tm($this->input('night_start'), '20:00'));
+        \App\Services\Settings::set('shift_night_end',   $tm($this->input('night_end'), '08:00'));
+        flash('Стандартные времена смен сохранены.');
+        $this->redirect('/shifts?month=' . urlencode((string) $this->input('month', date('Y-m'))) . '&dept=' . (int) $this->input('dept'));
+    }
+
+    /** Массовое сохранение графика по таблице Д/Н: g[empId][YYYY-MM-DD] = ''|day|night|ind. */
+    public function saveGrid(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        if (!$this->canEdit($me)) { flash('Нет прав.', 'error'); $this->redirect('/shifts'); }
+        $month = (string) ($this->input('month') ?: date('Y-m'));
+        $mode  = $this->input('mode') === 'fact' ? 'fact' : 'plan';
+        $nstart = \App\Services\Settings::nightStart();
+        $nend   = \App\Services\Settings::nightEnd();
+        $now = date('Y-m-d H:i:s');
+        $g = $_POST['g'] ?? [];
+        $saved = 0;
+        foreach ($g as $empId => $days) {
+            $emp = Database::one("SELECT * FROM users u WHERE id=? AND schedule_type='2_2'", [(int) $empId]);
+            if (!$emp || !$this->inScope($me, $emp)) { continue; }
+            $times = $this->empTimes($emp);
+            foreach ((array) $days as $date => $kind) {
+                if (substr((string) $date, 0, 7) !== $month) { continue; }
+                if ($kind === 'ind') { continue; }   // индивидуальное время дня — задаётся на странице сотрудника, не трогаем
+                $ex = Database::scalar('SELECT id FROM shift_days WHERE employee_id=? AND work_date=?', [(int) $empId, $date]);
+                if ($kind === 'day' || $kind === 'night') {
+                    [$s, $e] = $times[$kind];
+                    $sp = \App\Services\ShiftClock::split($s, $e, $nstart, $nend);
+                    if ($mode === 'plan') {
+                        if ($ex) { Database::run('UPDATE shift_days SET plan_kind=?, plan_start=?, plan_end=?, plan_hours=?, plan_night=?, updated_at=? WHERE id=?', [$kind, $s, $e, $sp['hours'], $sp['night'], $now, $ex]); }
+                        else     { Database::insert('INSERT INTO shift_days (employee_id, work_date, plan_kind, plan_start, plan_end, plan_hours, plan_night) VALUES (?,?,?,?,?,?,?)', [(int) $empId, $date, $kind, $s, $e, $sp['hours'], $sp['night']]); }
+                    } else {
+                        // стандартная смена из таблицы не несёт праздничных/сверхурочных — сбрасываем возможные остатки
+                        if ($ex) { Database::run('UPDATE shift_days SET fact_kind=?, fact_start=?, fact_end=?, fact_hours=?, fact_night=?, holiday_hours=0, overtime_hours=0, updated_at=? WHERE id=?', [$kind, $s, $e, $sp['hours'], $sp['night'], $now, $ex]); }
+                        else     { Database::insert('INSERT INTO shift_days (employee_id, work_date, fact_kind, fact_start, fact_end, fact_hours, fact_night) VALUES (?,?,?,?,?,?,?)', [(int) $empId, $date, $kind, $s, $e, $sp['hours'], $sp['night']]); }
+                    }
+                    $saved++;
+                } elseif ($kind === '' && $ex) {   // выходной — очистить смену в этом режиме
+                    if ($mode === 'plan') { Database::run("UPDATE shift_days SET plan_kind='', plan_start='', plan_end='', plan_hours=0, plan_night=0, updated_at=? WHERE id=?", [$now, $ex]); }
+                    else                  { Database::run("UPDATE shift_days SET fact_kind='', fact_start='', fact_end='', fact_hours=0, fact_night=0, holiday_hours=0, overtime_hours=0, updated_at=? WHERE id=?", [$now, $ex]); }
+                    $saved++;
+                }
+            }
+        }
+        flash(($mode === 'plan' ? 'План' : 'Факт') . " графика сохранён (ячеек: {$saved}).");
+        $this->redirect('/shifts?month=' . urlencode($month) . '&dept=' . (int) $this->input('dept') . '&mode=' . $mode);
     }
 
     /** Часы без хвостовых нулей: 12, 6.5, 4/8. */
@@ -165,6 +284,14 @@ class ShiftController extends Controller
         if (!$ids) { return []; }
         $ph = implode(',', array_fill(0, count($ids), '?'));
         return Database::all("SELECT id, name FROM departments WHERE id IN ($ph) ORDER BY name", $ids);
+    }
+
+    /** Запрошенный отдел в пределах доступа пользователю: иначе первый доступный (или 0). Защита от чтения чужих отделов. */
+    private function pickDept(array $depts, int $req): int
+    {
+        $allowed = array_map(fn($d) => (int) $d['id'], $depts);
+        if ($req && in_array($req, $allowed, true)) { return $req; }
+        return $allowed[0] ?? 0;
     }
 
     /**
@@ -206,9 +333,8 @@ class ShiftController extends Controller
         $me = Auth::user();
         if (!$this->canView($me)) { $this->redirect('/'); }
         $month = (string) ($this->input('month') ?: date('Y-m'));
-        $deptId = (int) $this->input('dept');
         $depts = $this->grafikDepts($me);
-        if (!$deptId && $depts) { $deptId = (int) $depts[0]['id']; }
+        $deptId = $this->pickDept($depts, (int) $this->input('dept'));   // только доступный отдел
         if (!$deptId) { flash('Нет отдела с сотрудниками на графике 2/2.', 'error'); $this->redirect('/shifts'); }
         $dept = Database::one('SELECT * FROM departments WHERE id=?', [$deptId]);
         $this->view('shifts/grafik', [
@@ -228,9 +354,8 @@ class ShiftController extends Controller
         $me = Auth::user();
         if (!$this->canView($me)) { $this->redirect('/'); }
         $month = (string) ($this->input('month') ?: date('Y-m'));
-        $deptId = (int) $this->input('dept');
         $depts = $this->grafikDepts($me);
-        if (!$deptId && $depts) { $deptId = (int) $depts[0]['id']; }
+        $deptId = $this->pickDept($depts, (int) $this->input('dept'));   // только доступный отдел
         if (!$deptId) { $this->redirect('/shifts'); }
         $lastDay = (int) date('t', strtotime("$month-01"));
         $days = []; for ($d = 1; $d <= $lastDay; $d++) { $days[] = (string) $d; }
@@ -248,49 +373,67 @@ class ShiftController extends Controller
         ]]);
     }
 
-    public function edit(): void
+    /** Загрузка сотрудника 2/2 в области редактирования (или null + редирект). */
+    private function loadEmp(array $me, int $eid): ?array
+    {
+        $emp = Database::one("SELECT u.*, d.name AS dept_name FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=? AND u.schedule_type='2_2'", [$eid]);
+        if (!$emp) { flash('Сотрудник не найден или не на графике 2/2.', 'error'); $this->redirect('/shifts'); }
+        if (!$this->inScope($me, $emp)) { flash('Нет прав на этого сотрудника.', 'error'); $this->redirect('/shifts'); }
+        return $emp;
+    }
+
+    /** Индивидуальная настройка сотрудника: свои времена смен + переопределение отдельных дней / факт. */
+    public function employee(): void
     {
         Auth::requireLogin();
         $me = Auth::user();
         if (!$this->canEdit($me)) { flash('Нет прав на правку графика.', 'error'); $this->redirect('/shifts'); }
-        $eid = (int) $this->input('employee');
-        $emp = Database::one("SELECT u.*, d.name AS dept_name FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=? AND u.schedule_type='2_2'", [$eid]);
-        if (!$emp) { flash('Сотрудник не найден или не на графике 2/2.', 'error'); $this->redirect('/shifts'); }
-        if (!$this->inScope($me, $emp)) { flash('Нет прав на этого сотрудника.', 'error'); $this->redirect('/shifts'); }
+        $emp = $this->loadEmp($me, (int) $this->input('id'));
         $month = (string) ($this->input('month') ?: date('Y-m'));
-        $r = $this->reqRange();
-        $mode = $this->input('mode') === 'fact' ? 'fact' : 'plan';
-        [$start, $end] = $this->range($month, $r);
+        $mode  = $this->input('mode') === 'fact' ? 'fact' : 'plan';
+        [$start, $end] = $this->range($month, 'full');
         $dates = [];
         for ($ts = strtotime($start); $ts <= strtotime($end); $ts += 86400) { $dates[] = date('Y-m-d', $ts); }
         $existing = [];
-        foreach (Database::all("SELECT * FROM shift_days WHERE employee_id=? AND substr(work_date,1,7)=?", [$eid, $month]) as $row) {
-            $existing[$row['work_date']] = $row;
-        }
-        $this->view('shifts/edit', [
-            'title'    => 'График: ' . $emp['full_name'],
-            'emp'      => $emp,
-            'month'    => $month, 'range' => $r, 'mode' => $mode,
+        foreach (Database::all("SELECT * FROM shift_days WHERE employee_id=? AND substr(work_date,1,7)=?", [(int) $emp['id'], $month]) as $row) { $existing[$row['work_date']] = $row; }
+        $this->view('shifts/employee', [
+            'title'    => 'Индивидуальный график: ' . $emp['full_name'],
+            'emp'      => $emp, 'month' => $month, 'mode' => $mode,
             'dates'    => $dates, 'existing' => $existing,
-            'rate'     => (float) $emp['oklad'],
+            'std'      => $this->empTimes($emp),
             'nightStart' => \App\Services\Settings::nightStart(),
             'nightEnd'   => \App\Services\Settings::nightEnd(),
             'csrf'     => Auth::csrf(),
         ]);
     }
 
-    public function save(): void
+    /** Сохранить индивидуальные времена смен сотрудника (пусто = использовать стандартные). */
+    public function saveEmployee(): void
     {
         Auth::requireLogin();
         Auth::verifyCsrf();
         $me = Auth::user();
         if (!$this->canEdit($me)) { flash('Нет прав.', 'error'); $this->redirect('/shifts'); }
-        $eid = (int) $this->input('employee');
-        $emp = Database::one("SELECT u.*, d.name AS dept_name FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=? AND u.schedule_type='2_2'", [$eid]);
-        if (!$emp || !$this->inScope($me, $emp)) { flash('Сотрудник вне доступа или не на 2/2.', 'error'); $this->redirect('/shifts'); }
+        $emp = $this->loadEmp($me, (int) $this->input('id'));
+        $tm = fn($v) => preg_match('/^\d{1,2}:\d{2}$/', trim((string) $v)) ? substr('0' . trim((string) $v), -5) : null;
+        Database::run('UPDATE users SET shift_day_start=?, shift_day_end=?, shift_night_start=?, shift_night_end=? WHERE id=?', [
+            $tm($this->input('day_start')), $tm($this->input('day_end')), $tm($this->input('night_start')), $tm($this->input('night_end')), (int) $emp['id'],
+        ]);
+        flash('Индивидуальные времена смен сохранены.');
+        $this->redirect('/shifts/employee?id=' . (int) $emp['id'] . '&month=' . urlencode((string) $this->input('month', date('Y-m'))));
+    }
+
+    /** Переопределение отдельных дней индивидуальным временем (план = ind) / факт (часы + праздн./сверхуроч.). */
+    public function saveDays(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        if (!$this->canEdit($me)) { flash('Нет прав.', 'error'); $this->redirect('/shifts'); }
+        $emp = $this->loadEmp($me, (int) $this->input('id'));
+        $eid = (int) $emp['id'];
         $month = (string) ($this->input('month') ?: date('Y-m'));
-        $r = $this->reqRange();
-        $mode = $this->input('mode') === 'fact' ? 'fact' : 'plan';
+        $mode  = $this->input('mode') === 'fact' ? 'fact' : 'plan';
         $now = date('Y-m-d H:i:s');
         $num = fn($v) => max(0.0, round((float) str_replace(',', '.', (string) $v), 2));
         $nstart = \App\Services\Settings::nightStart();
@@ -299,27 +442,34 @@ class ShiftController extends Controller
         $d = $_POST['d'] ?? []; // d[YYYY-MM-DD][start|end|holiday|overtime]
         $saved = 0;
         foreach ($d as $date => $vals) {
-            if (substr((string) $date, 0, 7) !== $month) { continue; }   // только текущий месяц
-            $start = $tm($vals['start'] ?? '');
-            $end   = $tm($vals['end'] ?? '');
-            // Часы и ночные считаются автоматически по ночному окну (ТК). Без времени — день без смены.
+            if (substr((string) $date, 0, 7) !== $month) { continue; }
+            $start = $tm($vals['start'] ?? ''); $end = $tm($vals['end'] ?? '');
             $sp = \App\Services\ShiftClock::split($start, $end, $nstart, $nend);
-            $hours = $sp['hours']; $night = $sp['night'];
             $ex = Database::scalar('SELECT id FROM shift_days WHERE employee_id=? AND work_date=?', [$eid, $date]);
-            if ($start === '' && $end === '' && !$ex) { continue; }       // пусто и не было записи — пропускаем
+            $has = ($start !== '' && $end !== '');
+            if (!$has && !$ex) { continue; }
             if ($mode === 'plan') {
-                if ($ex) { Database::run('UPDATE shift_days SET plan_start=?, plan_end=?, plan_hours=?, plan_night=?, updated_at=? WHERE id=?', [$start, $end, $hours, $night, $now, $ex]); }
-                else     { Database::insert('INSERT INTO shift_days (employee_id, work_date, plan_start, plan_end, plan_hours, plan_night) VALUES (?,?,?,?,?,?)', [$eid, $date, $start, $end, $hours, $night]); }
+                // индивидуальное время дня → kind='ind' (в общей таблице сохраняется, не перетирается Д/Н); пусто → очистка плана
+                if ($has) {
+                    if ($ex) { Database::run("UPDATE shift_days SET plan_kind='ind', plan_start=?, plan_end=?, plan_hours=?, plan_night=?, updated_at=? WHERE id=?", [$start, $end, $sp['hours'], $sp['night'], $now, $ex]); }
+                    else     { Database::insert("INSERT INTO shift_days (employee_id, work_date, plan_kind, plan_start, plan_end, plan_hours, plan_night) VALUES (?,?,'ind',?,?,?,?)", [$eid, $date, $start, $end, $sp['hours'], $sp['night']]); }
+                } elseif ($ex && self::cellKind(Database::one('SELECT * FROM shift_days WHERE id=?', [$ex]), 'plan') === 'ind') {
+                    Database::run("UPDATE shift_days SET plan_kind='', plan_start='', plan_end='', plan_hours=0, plan_night=0, updated_at=? WHERE id=?", [$now, $ex]);
+                }
             } else {
-                $hol = min($hours, $num($vals['holiday'] ?? 0));
-                $ovt = min($hours, $num($vals['overtime'] ?? 0));
-                if ($ex) { Database::run('UPDATE shift_days SET fact_start=?, fact_end=?, fact_hours=?, fact_night=?, holiday_hours=?, overtime_hours=?, updated_at=? WHERE id=?', [$start, $end, $hours, $night, $hol, $ovt, $now, $ex]); }
-                else     { Database::insert('INSERT INTO shift_days (employee_id, work_date, fact_start, fact_end, fact_hours, fact_night, holiday_hours, overtime_hours) VALUES (?,?,?,?,?,?,?,?)', [$eid, $date, $start, $end, $hours, $night, $hol, $ovt]); }
+                $hol = min($sp['hours'], $num($vals['holiday'] ?? 0));
+                $ovt = min($sp['hours'], $num($vals['overtime'] ?? 0));
+                if ($has) {
+                    if ($ex) { Database::run("UPDATE shift_days SET fact_kind='ind', fact_start=?, fact_end=?, fact_hours=?, fact_night=?, holiday_hours=?, overtime_hours=?, updated_at=? WHERE id=?", [$start, $end, $sp['hours'], $sp['night'], $hol, $ovt, $now, $ex]); }
+                    else     { Database::insert("INSERT INTO shift_days (employee_id, work_date, fact_kind, fact_start, fact_end, fact_hours, fact_night, holiday_hours, overtime_hours) VALUES (?,?,'ind',?,?,?,?,?,?)", [$eid, $date, $start, $end, $sp['hours'], $sp['night'], $hol, $ovt]); }
+                } elseif ($ex) {
+                    Database::run("UPDATE shift_days SET fact_kind='', fact_start='', fact_end='', fact_hours=0, fact_night=0, holiday_hours=0, overtime_hours=0, updated_at=? WHERE id=?", [$now, $ex]);
+                }
             }
             $saved++;
         }
-        flash(($mode === 'plan' ? 'План' : 'Факт') . " графика сохранён (дней: {$saved}).");
-        $this->redirect('/shifts/edit?employee=' . $eid . '&month=' . urlencode($month) . '&range=' . $r . '&mode=' . $mode);
+        flash(($mode === 'plan' ? 'Индивидуальный план' : 'Факт') . " сохранён (дней: {$saved}).");
+        $this->redirect('/shifts/employee?id=' . $eid . '&month=' . urlencode($month) . '&mode=' . $mode);
     }
 
     public function export(): void

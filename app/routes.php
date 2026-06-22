@@ -281,9 +281,12 @@ $router->get('/timesheet2/{id}/view',    [TabelController::class, 'viewSigned'])
 $router->get('/timesheet2/{id}/export',  [TabelController::class, 'export']);
 $router->post('/timesheet2/{id}/delete', [TabelController::class, 'destroy']);
 // Сменный график колл-центра (2/2): план/факт часов
-$router->get('/shifts',         [\App\Controllers\ShiftController::class, 'index']);
-$router->get('/shifts/edit',    [\App\Controllers\ShiftController::class, 'edit']);
-$router->post('/shifts/save',   [\App\Controllers\ShiftController::class, 'save']);
+$router->get('/shifts',                  [\App\Controllers\ShiftController::class, 'index']);
+$router->post('/shifts/standard',         [\App\Controllers\ShiftController::class, 'saveStandard']);
+$router->post('/shifts/grid',             [\App\Controllers\ShiftController::class, 'saveGrid']);
+$router->get('/shifts/employee',          [\App\Controllers\ShiftController::class, 'employee']);
+$router->post('/shifts/employee/save',    [\App\Controllers\ShiftController::class, 'saveEmployee']);
+$router->post('/shifts/employee/days',    [\App\Controllers\ShiftController::class, 'saveDays']);
 $router->get('/shifts/export',  [\App\Controllers\ShiftController::class, 'export']);
 $router->get('/shifts/grafik',  [\App\Controllers\ShiftController::class, 'grafik']);
 $router->get('/shifts/grafik/export', [\App\Controllers\ShiftController::class, 'grafikExport']);

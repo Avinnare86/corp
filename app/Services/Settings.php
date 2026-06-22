@@ -85,4 +85,15 @@ class Settings
         $v = (string) self::get('night_end', '06:00');
         return preg_match('/^\d{1,2}:\d{2}$/', $v) ? $v : '06:00';
     }
+
+    /** Стандартное время смен графика 2/2 'HH:MM' (задаётся на странице графика). */
+    private static function hhmm(string $key, string $def): string
+    {
+        $v = (string) self::get($key, $def);
+        return preg_match('/^\d{1,2}:\d{2}$/', $v) ? $v : $def;
+    }
+    public static function shiftDayStart(): string   { return self::hhmm('shift_day_start', '08:00'); }
+    public static function shiftDayEnd(): string     { return self::hhmm('shift_day_end', '20:00'); }
+    public static function shiftNightStart(): string { return self::hhmm('shift_night_start', '20:00'); }
+    public static function shiftNightEnd(): string   { return self::hhmm('shift_night_end', '08:00'); }
 }
