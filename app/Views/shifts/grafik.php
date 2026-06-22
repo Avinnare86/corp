@@ -19,10 +19,11 @@ $wd = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   .sub{font-size:9pt;color:#222;margin:0 0 2px}
   h1{text-align:center;font-size:12pt;margin:12px 0 2px}
   .meta{font-size:9pt;margin:0 0 10px}
-  table.g{border-collapse:collapse;width:100%;font-size:8pt;table-layout:fixed}
-  table.g th,table.g td{border:1px solid #000;padding:1px 2px;text-align:center;word-wrap:break-word}
-  table.g td.name{text-align:left;font-size:8pt;width:150px}
-  table.g th.d,table.g td.d{width:20px}
+  .gwrap{overflow-x:auto;margin:0 0 2px}
+  table.g{border-collapse:collapse;width:100%;min-width:900px;font-size:8pt;table-layout:fixed}
+  table.g th,table.g td{border:1px solid #000;padding:1px 2px;text-align:center;overflow:hidden;vertical-align:middle}
+  table.g td.d,table.g th.d{word-wrap:break-word}
+  table.g td.name,table.g th.name{text-align:left;font-size:8pt;white-space:normal;word-break:normal;overflow-wrap:normal;line-height:1.2}
   table.g .sun{color:#444}
   .code{font-weight:bold}
   .hh{font-size:7pt;color:#333}
@@ -31,7 +32,7 @@ $wd = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   .signs{margin-top:22px;font-size:10pt;width:100%}
   .signs td{padding:12px 8px;vertical-align:bottom}
   .sig{border-bottom:1px solid #000;min-width:170px;display:inline-block}
-  @media print{ @page{size:A4 landscape} body{background:#fff;padding:0} .toolbar{display:none} .sheet{box-shadow:none;max-width:none;padding:6mm} }
+  @media print{ @page{size:A4 landscape} body{background:#fff;padding:0} .toolbar{display:none} .sheet{box-shadow:none;max-width:none;padding:6mm} .gwrap{overflow:visible} table.g{min-width:0;font-size:6.5pt} table.g th.d,table.g td.d{padding:0} table.g th .wd,table.g th span{font-size:6pt} }
 </style></head>
 <body>
 <div class="toolbar">
@@ -46,10 +47,17 @@ $wd = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
     <h1>График сменности</h1>
     <p class="meta">Период графика: с 01.<?= sprintf('%02d', $mm) ?>.<?= $yy ?> по <?= $lastDay ?>.<?= sprintf('%02d', $mm) ?>.<?= $yy ?> г. · Дата составления: <?= date('d.m.Y') ?> · Учётный период: 1 (один) год</p>
 
+    <div class="gwrap">
     <table class="g">
+        <colgroup>
+            <col style="width:26px">
+            <col style="width:160px">
+            <?php for ($d = 1; $d <= $lastDay; $d++): ?><col style="width:22px"><?php endfor; ?>
+            <col style="width:58px">
+        </colgroup>
         <thead>
         <tr>
-            <th style="width:24px">№</th><th class="name">Должность / Ф.И.О.</th>
+            <th>№</th><th class="name">Должность / Ф.И.О.</th>
             <?php for ($d = 1; $d <= $lastDay; $d++): $dow = (int) date('w', strtotime(sprintf('%s-%02d', $month, $d))); ?>
                 <th class="d"><?= $d ?><br><span style="font-weight:400;font-size:7pt"><?= $wd[$dow] ?></span></th>
             <?php endfor; ?>
@@ -70,6 +78,7 @@ $wd = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
         <?php if (!$rows): ?><tr><td colspan="<?= $lastDay + 3 ?>" style="text-align:left;color:#777">В отделе нет сотрудников на графике 2/2.</td></tr><?php endif; ?>
         </tbody>
     </table>
+    </div>
 
     <p class="legend"><strong>Условные обозначения:</strong> <b>Р</b> — рабочий день; <b>Р/Н</b> — рабочий день с ночными часами (часы «дневные/ночные», напр. 4/8); <b>О</b> — отпуск; пусто — выходной по графику.</p>
     <div class="foot">
