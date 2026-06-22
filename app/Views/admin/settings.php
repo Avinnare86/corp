@@ -68,6 +68,27 @@
 </section>
 
 <section class="panel">
+    <h2>Директор — подписант служебок о стимуле</h2>
+    <form method="post" action="/admin/settings" class="grid-form">
+        <?= csrf_field() ?>
+        <input type="hidden" name="inspection_percent" value="<?= e($inspectionPercent) ?>">
+        <input type="hidden" name="daily_norm" value="<?= e($dailyNorm) ?>">
+        <input type="hidden" name="penalty_step" value="<?= e($penaltyStep) ?>">
+        <input type="hidden" name="penalty_max_multiplier" value="<?= e($penaltyMaxMultiplier) ?>">
+        <label>ФИО директора
+            <input type="text" name="stimul_director_name" value="<?= e($stimulDirectorName) ?>" placeholder="Д.Н. Семёнов">
+        </label>
+        <label>Должность
+            <input type="text" name="stimul_director_position" value="<?= e($stimulDirectorPosition) ?>" placeholder="Генеральный директор">
+        </label>
+        <button class="btn btn-primary">Сохранить директора</button>
+    </form>
+    <p class="muted">Эти ФИО и должность показываются в шапке служебки («Генеральному директору …») и в штампе ЭП,
+        когда служебку <strong>от имени директора подписывает администратор</strong>. Дату подписи администратор указывает при подписании.
+        Если поле пустое — берётся пользователь с ролью «Директор», иначе «Д.Н. Семёнов».</p>
+</section>
+
+<section class="panel">
     <h2>Email-уведомления (SMTP)</h2>
     <form method="post" action="/admin/settings" class="grid-form">
         <?= csrf_field() ?>

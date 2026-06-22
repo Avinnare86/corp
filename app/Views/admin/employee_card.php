@@ -9,6 +9,12 @@ $rate = rtrim(rtrim(number_format((float)$u['rate_volume'], 2, '.', ''), '0'), '
     <span class="muted mono"><?= e($u['login']) ?></span>
     <?php if (!(int)$u['is_active']): ?><span class="tag off">не активен</span><?php endif; ?>
     <?php if ($u['role']==='admin'): ?><span class="tag">админ</span><?php endif; ?>
+    <?php if (\App\Core\Auth::isAdmin() && !\App\Core\Auth::impostorAdminId() && (int)$u['id'] !== (int)\App\Core\Auth::id() && (int)$u['is_active']): ?>
+        <form method="post" action="/admin/login-as/<?= (int)$u['id'] ?>" style="margin:0" onsubmit="return confirm('Войти в систему как этот сотрудник? Вы сможете вернуться к админу кнопкой вверху.')">
+            <input type="hidden" name="_csrf" value="<?= e(\App\Core\Auth::csrf()) ?>">
+            <button class="btn btn-mini">👤 Войти как</button>
+        </form>
+    <?php endif; ?>
     <?php if ($payroll): ?><span style="margin-left:auto">Прогноз ЗП: <strong><?= money($payroll['total']) ?></strong></span><?php endif; ?>
 </div>
 

@@ -43,12 +43,10 @@ class DocumentController extends Controller
     }
 
     // ---------- замещение ----------
-    /** id пользователей, которых $uid замещает сегодня. */
+    /** id пользователей, которых $uid замещает сегодня (единый источник — И.о./ВРИО). */
     public static function actsFor(int $uid): array
     {
-        $today = date('Y-m-d');
-        return array_map(fn($r) => (int) $r['id'], Database::all(
-            'SELECT id FROM users WHERE deputy_id = ? AND deputy_from <= ? AND deputy_to >= ?', [$uid, $today, $today]));
+        return \App\Services\Acting::actingFor($uid);
     }
 
     // ---------- права/видимость ----------
@@ -604,8 +602,15 @@ class DocumentController extends Controller
     }
 
     // ---------- шаблоны маршрутов ----------
-    /** Замещение в СЭД: кто кого замещает и на какой срок (раздел Документы). */
+    /** Замещение в СЭД объединено с общим механизмом И.о./ВРИО — перенаправляем на /acting. */
     public function deputies(): void
+    {
+        Auth::requireLogin();
+        $this->redirect('/acting');
+    }
+
+    /** Старый раздел замещения СЭД (оставлен ради совместимости маршрута; не используется). */
+    public function deputiesLegacy(): void
     {
         Auth::requireRole('admin', 'docs_manager');
         $rows = Database::all(

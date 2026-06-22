@@ -10,6 +10,11 @@ class Audit
     private static array $labels = [
         '#^/logout$#'                       => 'Выход',
         '#^/password/change$#'              => 'Смена пароля',
+        '#^/admin/login-as/\d+$#'           => 'Вход как сотрудник',
+        '#^/admin/return$#'                 => 'Возврат к админу',
+        '#^/acting/save$#'                  => 'И.о./ВРИО: назначение',
+        '#^/acting/switch$#'                => 'И.о.: переключение режима',
+        '#^/acting/\d+/cancel$#'            => 'И.о./ВРИО: отмена',
         '#^/manager/upload$#'               => 'Загрузка списка',
         '#^/manager/move$#'                 => 'Перераспределение досье',
         '#^/manager/distribute$#'           => 'Распределение досье',

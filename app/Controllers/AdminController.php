@@ -758,6 +758,8 @@ class AdminController extends Controller
             ],
             'visaSignerName'     => (string) Settings::get('visa_signer_name', ''),
             'visaSignerPosition' => (string) Settings::get('visa_signer_position', \App\Services\VisaDocs::DEFAULT_POSITION),
+            'stimulDirectorName'     => (string) Settings::get('stimul_director_name', ''),
+            'stimulDirectorPosition' => (string) Settings::get('stimul_director_position', ''),
         ]);
     }
 
@@ -782,6 +784,11 @@ class AdminController extends Controller
         }
         if ($this->input('visa_prompt') !== null && trim((string) $this->input('visa_prompt')) !== '') {
             Settings::set('visa_prompt', (string) $this->input('visa_prompt'));
+        }
+        // Директор-подписант служебок о стимуле — только если отправлена его форма
+        if (array_key_exists('stimul_director_name', $_POST)) {
+            Settings::set('stimul_director_name', trim((string) $this->input('stimul_director_name')));
+            Settings::set('stimul_director_position', trim((string) $this->input('stimul_director_position')));
         }
         // Подписант описей/ГП — только если отправлена его форма (есть поле visa_signer_position)
         if (array_key_exists('visa_signer_position', $_POST)) {

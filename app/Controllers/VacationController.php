@@ -198,7 +198,13 @@ class VacationController extends Controller
                     Database::run("UPDATE vacation_requests SET status='replaced' WHERE id=?", [$v['replaces_id']]);
                 }
                 NotificationService::create((int) $v['employee_id'], 'Отпуск утверждён', "Период {$v['start_date']} — {$v['end_date']} утверждён.");
-                flash('Отпуск утверждён.');
+                // Если у сотрудника есть право подписи, а на период отпуска не назначен И.о./ВРИО — мягко предупреждаем.
+                if (\App\Services\Acting::hasSigningAuthority((int) $v['employee_id'])
+                    && !\App\Services\Acting::coversRange((int) $v['employee_id'], (string) $v['start_date'], (string) $v['end_date'])) {
+                    flash("Отпуск утверждён. ВНИМАНИЕ: {$v['full_name']} вправе подписывать/утверждать документы, но на период отпуска не назначен И.о./ВРИО. Назначьте замещающего в разделе «Замещение» (меню справа).", 'error');
+                } else {
+                    flash('Отпуск утверждён.');
+                }
             } else {
                 Database::run("UPDATE vacation_requests SET status='rejected', comment=?, decided_at=? WHERE id=?", [$comment ?: 'Отклонено при утверждении', $now, $id]);
                 NotificationService::create((int) $v['employee_id'], 'Отпуск отклонён', $comment ?: 'Отклонено при утверждении.');

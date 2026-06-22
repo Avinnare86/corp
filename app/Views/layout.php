@@ -11,7 +11,7 @@ $docsInbox = $uid ? \App\Controllers\DocumentController::inboxCount((int) $uid) 
 $ordersInbox = $uid ? \App\Controllers\OrderController::inboxCount((int) $uid) : 0;
 $vacInbox = $uid ? \App\Controllers\VacationController::inboxCount((int) $uid) : 0;
 // ---- меню по НАБОРУ ролей; группы-проекты управляют видимостью разделов ----
-$can = fn(string ...$s) => Auth::has(...$s);
+$can = fn(string ...$s) => Auth::effectiveHas(...$s);  // меню учитывает режим И.о. (роли замещаемого)
 $isAdmin = $role === 'admin';
 $menu = [];
 if ($uid) {
@@ -123,7 +123,7 @@ if ($uid) {
         $gd[] = ['/docs?folder=control', 'Контроль документов', 0];
     }
     if ($isDocsMgr) { // менеджер проекта документы
-        $gd[] = ['/docs/deputies', 'Замещение (СЭД)', 0];
+        $gd[] = ['/acting', 'Замещение и И.о./ВРИО', 0];
         $gd[] = ['/nomenclature', 'Номенклатура дел', 0];
         $gd[] = ['/nomenclature/archive', 'Архив дел', 0];
     }
@@ -197,7 +197,19 @@ if ($uid) {
     });
     </script>
     <div class="user">
+        <?php if (!empty($actingCtx['options'])): ?>
+        <form method="post" action="/acting/switch" style="display:inline;margin:0">
+            <input type="hidden" name="_csrf" value="<?= e(Auth::csrf()) ?>">
+            <select name="to" onchange="this.form.submit()" title="Режим работы (сам / И.о.)" style="max-width:180px">
+                <option value="">— работаю как сам —</option>
+                <?php foreach ($actingCtx['options'] as $o): ?>
+                    <option value="<?= (int)$o['absent_id'] ?>" <?= (int)($actingCtx['current'] ?? 0)===(int)$o['absent_id']?'selected':'' ?>><?= $o['kind']==='vrio'?'ВРИО':'И.о.' ?>: <?= e($o['absent_name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </form>
+        <?php endif; ?>
         <span><?= e($authUser['full_name'] ?? '') ?></span>
+        <a href="/acting" title="Замещение и И.о./ВРИО">Замещение</a>
         <a href="/password/change" title="Сменить пароль">Пароль</a>
         <a class="btn-logout" href="/logout">Выход</a>
     </div>
@@ -205,6 +217,18 @@ if ($uid) {
 </header>
 
 <main class="container">
+    <?php if (!empty($impostor['active'])): ?>
+    <div class="flash" style="background:#7a1f1f;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <span>⚠ Вы работаете как <strong><?= e($impostor['asName']) ?></strong> (вход администратора). Все действия выполняются от его имени.</span>
+        <form method="post" action="/admin/return" style="margin:0"><input type="hidden" name="_csrf" value="<?= e(Auth::csrf()) ?>"><button class="btn btn-mini">↩ Вернуться к админу</button></form>
+    </div>
+    <?php endif; ?>
+    <?php if (!empty($actingCtx['current'])): ?>
+    <div class="flash" style="background:#1f4e7a;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <span>👤 Вы действуете как <strong>И.о. <?= e($actingCtx['currentName']) ?></strong> — подписи и действия идут с вашей ЭП с пометкой «И.о.».</span>
+        <form method="post" action="/acting/switch" style="margin:0"><input type="hidden" name="_csrf" value="<?= e(Auth::csrf()) ?>"><input type="hidden" name="to" value=""><button class="btn btn-mini">Выйти из режима И.о.</button></form>
+    </div>
+    <?php endif; ?>
     <?php if (!empty($flashMsg)): ?>
         <div class="flash flash-<?= e($flashMsg['type']) ?>"><?= nl2br(e($flashMsg['message'])) ?></div>
     <?php endif; ?>

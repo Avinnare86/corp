@@ -101,6 +101,97 @@ class Auth
         return self::role() === 'admin';
     }
 
+    // ===== Исполняющие обязанности (И.о./ВРИО) — контекст замещения =====
+
+    /** @var int|false|null проверенный контекст «работаю как И.о.» (false = ещё не проверяли) */
+    private static $actingChecked = false;
+
+    /** Кого текущий пользователь СЕЙЧАС замещает в активном контексте (И.о.), либо null. Ревалидируется каждый запрос. */
+    public static function actingAs(): ?int
+    {
+        if (self::$actingChecked !== false) { return self::$actingChecked; }
+        $target = (int) ($_SESSION['acting_as'] ?? 0);
+        $me = (int) (self::id() ?? 0);
+        $ok = $target && $me && \App\Services\Acting::activeFor($me, $target) !== null;
+        if (!$ok && !empty($_SESSION['acting_as'])) { unset($_SESSION['acting_as']); } // период истёк/отменён
+        return self::$actingChecked = ($ok ? $target : null);
+    }
+
+    /** Эффективный набор ролей: свои + (если активен контекст И.о.) роли замещаемого. */
+    public static function effectiveRoles(): array
+    {
+        $set = self::roles();
+        $act = self::actingAs();
+        if ($act) { $set += self::roles($act); }
+        return $set;
+    }
+
+    /** Есть ли среди ЭФФЕКТИВНЫХ ролей (свои + И.о.) одна из перечисленных. */
+    public static function effectiveHas(string ...$slugs): bool
+    {
+        $roles = self::effectiveRoles();
+        foreach ($slugs as $s) { if (!empty($roles[$s])) { return true; } }
+        return false;
+    }
+
+    /** Действует ли текущий пользователь за $target (сам или активный И.о. этого лица). */
+    public static function actsAsUser(int $target): bool
+    {
+        return (int) (self::id() ?? 0) === $target || self::actingAs() === $target;
+    }
+
+    /** Личности текущего пользователя: он сам + (если активен режим И.о.) замещаемый. */
+    public static function actorIds(): array
+    {
+        $me = (int) (self::id() ?? 0);
+        $set = $me ? [$me] : [];
+        $act = self::actingAs();
+        if ($act) { $set[] = $act; }
+        return $set;
+    }
+
+    // ===== Работа админа «как сотрудник» (impersonation) =====
+
+    /** Админ «входит как» сотрудник: подменяет личность, сохраняя данные для возврата. */
+    public static function impersonate(int $targetId): bool
+    {
+        $u = Database::one('SELECT * FROM users WHERE id = ? AND is_active = 1', [$targetId]);
+        if (!$u) { return false; }
+        $_SESSION['impostor_admin_id']   = (int) self::id();
+        $_SESSION['impostor_admin_role'] = self::role();
+        $_SESSION['impostor_admin_name'] = $_SESSION['name'] ?? '';
+        $_SESSION['impostor_admin_pw']   = (int) ($_SESSION['must_pw_change'] ?? 0);
+        unset($_SESSION['acting_as']);
+        session_regenerate_id(true);
+        $_SESSION['user_id'] = (int) $u['id'];
+        $_SESSION['role']    = $u['role'];
+        $_SESSION['name']    = $u['full_name'];
+        $_SESSION['must_pw_change'] = 0;   // не ловим админа на смене пароля сотрудника
+        self::$roleCache = []; self::$actingChecked = false;
+        return true;
+    }
+
+    public static function impostorAdminId(): ?int
+    {
+        return !empty($_SESSION['impostor_admin_id']) ? (int) $_SESSION['impostor_admin_id'] : null;
+    }
+
+    /** Возврат к админу из режима «войти как». */
+    public static function stopImpersonating(): bool
+    {
+        if (empty($_SESSION['impostor_admin_id'])) { return false; }
+        $adminId = (int) $_SESSION['impostor_admin_id'];
+        session_regenerate_id(true);
+        $_SESSION['user_id'] = $adminId;
+        $_SESSION['role']    = $_SESSION['impostor_admin_role'] ?? 'admin';
+        $_SESSION['name']    = $_SESSION['impostor_admin_name'] ?? '';
+        $_SESSION['must_pw_change'] = (int) ($_SESSION['impostor_admin_pw'] ?? 0);
+        unset($_SESSION['impostor_admin_id'], $_SESSION['impostor_admin_role'],
+              $_SESSION['impostor_admin_name'], $_SESSION['impostor_admin_pw'], $_SESSION['acting_as']);
+        self::$roleCache = []; self::$actingChecked = false;
+        return true;
+    }
+
     public static function requireLogin(): void
     {
         if (!self::check()) {
@@ -112,7 +203,8 @@ class Auth
     public static function requireRole(string ...$roles): void
     {
         self::requireLogin();
-        if (!self::has(...$roles)) {
+        // Эффективные роли: свои + (в режиме И.о.) роли замещаемого — чтобы И.о. имел доступ к разделам замещаемого.
+        if (!self::effectiveHas(...$roles)) {
             http_response_code(403);
             echo View::render('errors/403', ['title' => 'Доступ запрещён']);
             exit;

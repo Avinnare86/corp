@@ -99,6 +99,14 @@ class Org
         return array_keys($out);
     }
 
+    /** Директор по структуре: глава корневого подразделения (дирекция). null — если не задан. */
+    public static function directorUserId(): ?int
+    {
+        $id = Database::scalar("SELECT head_id FROM departments WHERE parent_id IS NULL AND kind = 'дирекция' AND head_id IS NOT NULL ORDER BY id LIMIT 1");
+        if (!$id) { $id = Database::scalar('SELECT head_id FROM departments WHERE parent_id IS NULL AND head_id IS NOT NULL ORDER BY id LIMIT 1'); }
+        return $id ? (int) $id : null;
+    }
+
     /** Подразделение + все его подотделы (обход вниз по parent_id, с защитой от циклов). */
     public static function withDescendants(int $rootId): array
     {

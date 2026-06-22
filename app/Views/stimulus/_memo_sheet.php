@@ -96,7 +96,7 @@ $isMgmt = ($kind ?? 'staff') === 'mgmt';
     <?= $stamp('Курирующий заместитель директора (утвердил)', $signers['deputy'], $memo['deputy_signed_at'], $memo['deputy_sign_type'], $memo['deputy_sign_hash']) ?>
     <?= $stamp('Директор (утвердил)', $signers['director'], $memo['director_signed_at'], $memo['director_sign_type'], $memo['director_sign_hash']) ?>
 
-    <?php if (!$memo['head_signed_at']): ?>
+    <?php if (empty($memo['head_signed_at']) && empty($memo['deputy_signed_at']) && empty($memo['director_signed_at'])): ?>
         <div class="status">⚠ Черновик — ещё не подписан. ЭП появится после подписания.</div>
     <?php endif; ?>
 </div>

@@ -29,6 +29,14 @@ $router->post('/login', [AuthController::class, 'login']);
 $router->get('/logout', [AuthController::class, 'logout']);
 $router->get('/password/change',  [\App\Controllers\PasswordController::class, 'form']);
 $router->post('/password/change', [\App\Controllers\PasswordController::class, 'change']);
+// Работа админа «как сотрудник» (impersonation) + возврат
+$router->post('/admin/return',        [AuthController::class, 'returnToAdmin']);
+$router->post('/admin/login-as/{id}', [AuthController::class, 'loginAs']);
+// Исполняющие обязанности (И.о./ВРИО): назначение + переключение контекста
+$router->get('/acting',               [\App\Controllers\ActingController::class, 'index']);
+$router->post('/acting/save',         [\App\Controllers\ActingController::class, 'store']);
+$router->post('/acting/switch',       [\App\Controllers\ActingController::class, 'switchCtx']);
+$router->post('/acting/{id}/cancel',  [\App\Controllers\ActingController::class, 'cancel']);
 $router->get('/',       [DashboardController::class, 'index']);
 
 // --- Личный кабинет специалиста ---

@@ -33,4 +33,23 @@ $config = require __DIR__ . '/../config/config.php';
 \App\Core\View::share('authUser', \App\Core\Auth::user());
 \App\Core\View::share('flashMsg', flash());
 
+// Контекст замещения (И.о.) и режима «войти как» — для шапки/баннера.
+if (\App\Core\Auth::check()) {
+    $uid = (int) \App\Core\Auth::id();
+    $actCan = \App\Services\Acting::myActingOptions($uid);               // кого текущий может замещать сейчас
+    $actNow = \App\Core\Auth::actingAs();
+    \App\Core\View::share('actingCtx', [
+        'options' => $actCan,                                           // [{absent_id, absent_name, kind}]
+        'current' => $actNow,
+        'currentName' => $actNow ? (string) \App\Core\Database::scalar('SELECT full_name FROM users WHERE id=?', [$actNow]) : '',
+    ]);
+    \App\Core\View::share('impostor', [
+        'active' => \App\Core\Auth::impostorAdminId() !== null,
+        'asName' => $_SESSION['name'] ?? '',
+    ]);
+} else {
+    \App\Core\View::share('actingCtx', ['options' => [], 'current' => null, 'currentName' => '']);
+    \App\Core\View::share('impostor', ['active' => false, 'asName' => '']);
+}
+
 return $config;

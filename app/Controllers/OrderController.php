@@ -27,16 +27,21 @@ class OrderController extends Controller
         'info'    => 'К сведению',
     ];
 
-    /** Руководитель ли (может давать поручения): глава подразделения, manager, admin, controller? нет. */
+    /** Руководитель ли (может давать поручения): глава подразделения, manager, admin — сам или как И.о. */
     private function isBoss(array $me): bool
     {
-        if (in_array($me['role'], ['admin', 'manager'], true)) { return true; }
-        return (bool) Database::scalar('SELECT 1 FROM departments WHERE head_id = ?', [$me['id']]);
+        if (in_array($me['role'], ['admin', 'manager'], true) || Auth::effectiveHas('manager', 'admin')) { return true; }
+        foreach (Auth::actorIds() as $id) {
+            if (Database::scalar('SELECT 1 FROM departments WHERE head_id = ?', [$id])) { return true; }
+        }
+        return false;
     }
 
     public static function inboxCount(int $uid): int
     {
-        return (int) Database::scalar("SELECT COUNT(*) FROM orders WHERE assignee_id = ? AND status IN ('new','work')", [$uid]);
+        $ids = ($uid === (int) Auth::id()) ? Auth::actorIds() : [$uid];
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        return (int) Database::scalar("SELECT COUNT(*) FROM orders WHERE assignee_id IN ($ph) AND status IN ('new','work')", $ids);
     }
 
     public function index(): void
@@ -242,15 +247,17 @@ class OrderController extends Controller
         if (!$o) { $this->redirect('/orders'); }
         $act = (string) $this->input('act');
         $now = date('Y-m-d H:i:s');
-        $isPriv = in_array(Auth::role(), ['admin', 'manager'], true);
-        $isAuthor = (int) $o['author_id'] === $uid;
+        $isPriv = in_array(Auth::role(), ['admin', 'manager'], true) || Auth::effectiveHas('manager');
+        $isAuthor = Auth::actsAsUser((int) $o['author_id']);          // сам или как И.о. автора
+        $isAssignee = Auth::actsAsUser((int) $o['assignee_id']);      // сам или как И.о. исполнителя
+        $coIds = Auth::actorIds();
+        $coPh = implode(',', array_fill(0, count($coIds), '?'));
+        $isCo = (bool) Database::scalar("SELECT 1 FROM order_coexecutors WHERE order_id=? AND user_id IN ($coPh)", array_merge([$id], $coIds));
 
-        $isCo = (bool) Database::scalar('SELECT 1 FROM order_coexecutors WHERE order_id=? AND user_id=?', [$id, $uid]);
-
-        if ($act === 'accept' && (int) $o['assignee_id'] === $uid && $o['status'] === 'new') {
+        if ($act === 'accept' && $isAssignee && $o['status'] === 'new') {
             Database::run("UPDATE orders SET status='work' WHERE id=?", [$id]);
             OrderService::event($id, 'accepted');
-        } elseif ($act === 'interim' && ((int) $o['assignee_id'] === $uid || $isCo) && in_array($o['status'], ['new', 'work', 'review'], true)) {
+        } elseif ($act === 'interim' && ($isAssignee || $isCo) && in_array($o['status'], ['new', 'work', 'review'], true)) {
             $text = trim((string) $this->input('report'));
             if ($text !== '') {
                 Database::insert("INSERT INTO order_reports (order_id, user_id, kind, text) VALUES (?,?,'interim',?)", [$id, $uid, $text]);
@@ -268,7 +275,7 @@ class OrderController extends Controller
                 "«{$o['title']}»: " . ($_SESSION['name'] ?? '') . ($text !== '' ? " — {$text}" : ''));
             flash('Ваша часть отмечена исполненной.');
             $this->redirect('/orders/' . $id);
-        } elseif ($act === 'ext_request' && ((int) $o['assignee_id'] === $uid || $isCo) && !in_array($o['status'], ['done', 'canceled'], true)) {
+        } elseif ($act === 'ext_request' && ($isAssignee || $isCo) && !in_array($o['status'], ['done', 'canceled'], true)) {
             // исполнитель/соисполнитель просит продлить срок
             $date = (string) $this->input('new_date');
             $reason = trim((string) $this->input('reason'));
@@ -294,7 +301,7 @@ class OrderController extends Controller
             NotificationService::create((int) $o['ext_req_by'], 'Продление отклонено', "«{$o['title']}»: продление отклонено" . ($reason !== '' ? " — {$reason}" : '') . '.');
             flash('Запрос на продление отклонён.');
             $this->redirect('/orders/' . $id);
-        } elseif ($act === 'reassign' && ($isAuthor || $isPriv || Org::canOverseeUser($uid, (int) $o['assignee_id'])) && !in_array($o['status'], ['done', 'canceled'], true)) {
+        } elseif ($act === 'reassign' && ($isAuthor || $isPriv || \App\Services\Acting::oversees($uid, (int) $o['assignee_id'])) && !in_array($o['status'], ['done', 'canceled'], true)) {
             $to = (int) $this->input('assignee_id');
             $reason = trim((string) $this->input('reason'));
             if ($to && $to !== (int) $o['assignee_id'] && Database::scalar('SELECT 1 FROM users WHERE id=? AND is_active=1', [$to])) {
@@ -319,7 +326,7 @@ class OrderController extends Controller
                 flash('Срок перенесён.');
             } else { flash('Укажите новую дату и причину переноса.', 'error'); }
             $this->redirect('/orders/' . $id);
-        } elseif ($act === 'report' && (int) $o['assignee_id'] === $uid && in_array($o['status'], ['new', 'work'], true)) {
+        } elseif ($act === 'report' && $isAssignee && in_array($o['status'], ['new', 'work'], true)) {
             $text = trim((string) $this->input('report'));
             Database::run("UPDATE orders SET status='review', report=? WHERE id=?", [$text, $id]);
             if ($text !== '') { Database::insert("INSERT INTO order_reports (order_id, user_id, kind, text) VALUES (?,?,'final',?)", [$id, $uid, $text]); }

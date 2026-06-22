@@ -9,7 +9,7 @@ $stamp = function($who, $s, $at, $type, $hash) {
         . 'Вид подписи: ' . htmlspecialchars(['PEP'=>'ПЭП (простая ЭП)','UNEP'=>'УНЭП','UKEP'=>'УКЭП'][$type] ?? ($type ?: 'ПЭП'), ENT_QUOTES) . '<br>'
         . 'Владелец: ' . htmlspecialchars(($s['full_name'] ?? ''), ENT_QUOTES) . '<br>'
         . 'Подписано: ' . htmlspecialchars(substr((string)$at,0,16), ENT_QUOTES) . '<br>'
-        . 'Отпечаток: ' . htmlspecialchars(substr((string)$hash,0,32), ENT_QUOTES) . '…</div>';
+        . 'Отпечаток: <span class="fp">' . htmlspecialchars((string)$hash, ENT_QUOTES) . '</span></div>';
 };
 ?>
 <!DOCTYPE html>
@@ -32,6 +32,7 @@ $stamp = function($who, $s, $at, $type, $hash) {
   table.t td.r{text-align:right;white-space:nowrap}
   .stamp{border:2px solid #1a56b8;border-radius:10px;padding:10px 14px;color:#1a56b8;font-family:Arial;font-size:9pt;line-height:1.5;margin:14px 0;max-width:430px}
   .stamp b{font-size:10pt;letter-spacing:.03em}
+  .stamp .fp{word-break:break-all}
   .status{font-family:Arial;font-size:10pt;color:#666;text-align:center;margin-top:10px}
   @media print{ body{background:#fff;padding:0} .toolbar{display:none} .sheet{box-shadow:none;max-width:none;padding:18mm;margin:0} }
 </style></head>

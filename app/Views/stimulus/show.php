@@ -90,6 +90,12 @@ if ($isMgmt) {
         <form method="post" action="/memos/<?= (int)$memo['id'] ?>/sign">
             <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
             <label>Ваш пароль<input type="password" name="password" required></label>
+            <?php if (!empty($dirOnBehalf)): ?>
+            <label style="display:block;margin-top:8px">Дата и время подписи (от имени директора)
+                <input type="datetime-local" name="sign_at" value="<?= date('Y-m-d\TH:i') ?>">
+            </label>
+            <p class="muted" style="margin:6px 0 0">Будет проставлена ЭП <strong>от имени директора</strong><?= !empty($dirDisplay) ? ' — ' . e($dirDisplay) : '' ?>; вы подписываете как администратор.</p>
+            <?php endif; ?>
             <div class="form-inline" style="margin-top:8px">
                 <button class="btn btn-primary">
                     <?= !empty($canDirectSign) ? e($directLabel)

@@ -901,6 +901,15 @@ if (!columnExists('stimulus_memos', 'batch_id')) {
     $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN batch_id INT NULL");
     echo "OK  колонка stimulus_memos.batch_id добавлена\n";
 }
+// Подпись «от имени директора» (админом): зафиксированные ФИО/должность директора для штампа.
+if (!columnExists('stimulus_memos', 'director_sign_name')) {
+    $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN director_sign_name VARCHAR(120) NULL");
+    echo "OK  колонка stimulus_memos.director_sign_name добавлена\n";
+}
+if (!columnExists('stimulus_memos', 'director_sign_position')) {
+    $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN director_sign_position VARCHAR(160) NULL");
+    echo "OK  колонка stimulus_memos.director_sign_position добавлена\n";
+}
 // Линия прибытия анкеты (квота): ЛП + ДЛП (FK на справочники).
 foreach (['arrival_line_id', 'arrival_detail_id'] as $col) {
     if (!columnExists('assignment_items', $col)) {
@@ -1091,9 +1100,46 @@ $extra['stimulus_reasons'] = "CREATE TABLE IF NOT EXISTS stimulus_reasons (
     created_at    TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
+// Исполняющие обязанности (И.о./ВРИО) на период — единый механизм замещения для подписи
+// стимула, документов СЭД и поручений. date_to включительно.
+$extra['acting_assignments'] = "CREATE TABLE IF NOT EXISTS acting_assignments (
+    id          $ID,
+    absent_id   INT NOT NULL,                       -- замещаемый
+    acting_id   INT NOT NULL,                       -- исполняющий обязанности
+    kind        VARCHAR(8) NOT NULL DEFAULT 'io',   -- io (И.о.) | vrio (ВРИО)
+    date_from   DATE NOT NULL,
+    date_to     DATE NOT NULL,
+    reason      VARCHAR(255) NULL,
+    vacation_id INT NULL,                            -- если назначено из-за отпуска
+    created_by  INT NOT NULL,
+    status      VARCHAR(10) NOT NULL DEFAULT 'active', -- active | canceled
+    created_at  TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
 foreach ($extra as $name => $sql) {
     $pdo->exec($ddlFix($sql));
     echo "OK  таблица {$name}\n";
+}
+
+// Разовый перенос старых СЭД-замещений (users.deputy_*) в acting_assignments (единый источник).
+if (\App\Core\Database::scalar("SELECT sval FROM settings WHERE skey='acting_migrated_deputies'") === false) {
+    if (columnExists('users', 'deputy_id')) {
+        $cnt = 0;
+        foreach (\App\Core\Database::all('SELECT id, deputy_id, deputy_from, deputy_to FROM users WHERE deputy_id IS NOT NULL') as $u) {
+            $from = $u['deputy_from'] ?: date('Y-m-d');
+            $to   = $u['deputy_to'] ?: date('Y-m-d', strtotime('+1 year'));
+            $dup = \App\Core\Database::scalar(
+                'SELECT 1 FROM acting_assignments WHERE absent_id=? AND acting_id=? AND date_from=? AND date_to=?',
+                [(int) $u['id'], (int) $u['deputy_id'], $from, $to]);
+            if ($dup) { continue; }
+            \App\Core\Database::insert(
+                'INSERT INTO acting_assignments (absent_id, acting_id, kind, date_from, date_to, reason, created_by, status) VALUES (?,?,?,?,?,?,?,?)',
+                [(int) $u['id'], (int) $u['deputy_id'], 'io', $from, $to, 'Перенос из СЭД-замещения', (int) $u['id'], 'active']);
+            $cnt++;
+        }
+        echo "OK  перенесено СЭД-замещений в acting_assignments: {$cnt}\n";
+    }
+    \App\Core\Database::run("INSERT INTO settings (skey, sval) VALUES ('acting_migrated_deputies','1')");
 }
 
 // Куратор-зам подразделения (маршрут служебки: начальник → курирующий зам → директор).
