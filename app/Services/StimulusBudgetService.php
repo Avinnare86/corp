@@ -80,4 +80,75 @@ class StimulusBudgetService
             'has_budget'    => $budget > 0,
         ];
     }
+
+    /**
+     * Фактический годовой расход стимула отдела по источникам: [source_id => Σ эффективных сумм].
+     * Учитываются все НЕотклонённые служебки (утв. + в работе + черновики) за год; эффективная
+     * сумма строки = последняя корректировка (override) либо исходная amount.
+     */
+    public static function committedBySource(int $deptId, int $year, ?int $excludeMemoId = null): array
+    {
+        $where = "m.department_id = ? AND substr(m.period,1,4) = ? AND m.status <> 'rejected'";
+        $params = [$deptId, (string) $year];
+        if ($excludeMemoId) { $where .= ' AND m.id <> ?'; $params[] = $excludeMemoId; }
+        $rows = Database::all(
+            "SELECT m.source_id,
+                    (SELECT o.new_amount FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1) AS ov,
+                    l.amount
+               FROM stimulus_memo_lines l JOIN stimulus_memos m ON m.id=l.memo_id
+              WHERE $where", $params);
+        $out = [];
+        foreach ($rows as $r) {
+            $sid = (int) ($r['source_id'] ?? 0);
+            $eff = $r['ov'] !== null ? (float) $r['ov'] : (float) $r['amount'];
+            $out[$sid] = ($out[$sid] ?? 0.0) + $eff;
+        }
+        return $out;
+    }
+
+    /**
+     * Бюджет отдела в разрезе источников на год периода:
+     * по каждому источнику — бюджет, «база для стимула» (бюджет − доля оклада/отпуска),
+     * занято (committed) и доступно. Оклад+отпуск распределяются пропорционально доле бюджета источника.
+     */
+    public static function sourceBreakdown(int $deptId, string $period, ?int $excludeMemoId = null): array
+    {
+        $f = self::forecast($deptId, $period);
+        $year = (int) $f['year'];
+        $overhead = (float) $f['oklad_year'] + (float) $f['vacation'];   // распределяем по доле бюджета
+        $committed = self::committedBySource($deptId, $year, $excludeMemoId);
+
+        $budgets = [];
+        foreach (Database::all('SELECT source_id, amount FROM dept_budgets WHERE department_id=? AND year=?', [$deptId, $year]) as $b) {
+            $budgets[(int) $b['source_id']] = (float) $b['amount'];
+        }
+        $budgetTotal = array_sum($budgets);
+
+        $rows = [];
+        foreach (Database::all('SELECT id, name, detail FROM pay_sources ORDER BY id') as $s) {
+            $sid = (int) $s['id'];
+            $bud = $budgets[$sid] ?? 0.0;
+            $share = $budgetTotal > 0 ? $bud / $budgetTotal : 0.0;
+            $base = round($bud - $overhead * $share, 2);
+            $com = round($committed[$sid] ?? 0.0, 2);
+            $rows[] = [
+                'id' => $sid, 'name' => $s['name'], 'detail' => $s['detail'],
+                'budget' => round($bud, 2), 'base' => $base, 'committed' => $com,
+                'available' => round($base - $com, 2),
+            ];
+        }
+        return ['rows' => $rows, 'has_budget' => $budgetTotal > 0, 'year' => $year, 'budget_total' => round($budgetTotal, 2)];
+    }
+
+    /** Доступно по конкретному источнику: [base, committed, available, has_budget]. */
+    public static function availableForSource(int $deptId, int $sourceId, string $period, ?int $excludeMemoId = null): array
+    {
+        $bd = self::sourceBreakdown($deptId, $period, $excludeMemoId);
+        foreach ($bd['rows'] as $r) {
+            if ((int) $r['id'] === $sourceId) {
+                return ['base' => $r['base'], 'committed' => $r['committed'], 'available' => $r['available'], 'has_budget' => $bd['has_budget']];
+            }
+        }
+        return ['base' => 0.0, 'committed' => 0.0, 'available' => 0.0, 'has_budget' => $bd['has_budget']];
+    }
 }

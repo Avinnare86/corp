@@ -26,7 +26,6 @@ if ($uid) {
     $isDocsMgr = $can('docs_manager');       // менеджер проекта документы
 
     $menu[''][] = ['/', 'Главная', 0];
-    if ($isAdmin)             { $menu[''][] = ['/admin', 'Админ-панель', 0]; }
 
     // Группы модулей открываются ПО РОЛЯМ (проекты упразднены).
     if ($can('anketa_worker', 'anketa_manager', 'controller')) {
@@ -77,7 +76,7 @@ if ($uid) {
         $g = [];
         if ($isTimekeeper || $isHrMgr || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacations', 'Отпуска', $vacInbox]; }
         if ($isTimekeeper) { $g[] = ['/timesheet2', 'Эл. табель', 0]; }
-        if ($isTimekeeper || $isHrMgr || $isHrAcc) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; }
+        if (\App\Controllers\ShiftController::canSee((int) $uid)) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; }
         if ($isHrAcc) { $g[] = ['/timesheet2/coverage', 'Покрытие табелями', 0]; }
         if ($canSeeStaff) { $g[] = ['/admin/employees', 'Сотрудники', 0]; }
         // управление оргструктурой/должностями/табелем — только менеджер проекта кадры или кадровик
@@ -131,13 +130,13 @@ if ($uid) {
     // Админ — только системный администратор (журнал действий — тоже только админ)
     if ($isAdmin) {
         $menu['Админ'] = [
+            ['/admin', 'Админ-панель', 0],
             ['/admin/settings', 'Настройки', 0],
             ['/admin/data', 'Управление данными', 0],
             ['/audit', 'Журнал', 0],
         ];
     }
-    // всегда
-    $menu[''][] = ['/certs', 'Моя ЭП', 0];
+    // всегда (Моя ЭП — в профиле, рядом с ФИО)
     $menu[''][] = ['/chat', 'Чат', $chatUnread];
     $menu[''][] = ['/notifications', 'Уведомления', $unread];
 }
@@ -151,8 +150,8 @@ if ($uid) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/style.css">
-    <script defer src="/assets/app.js?v=2"></script>
+    <link rel="stylesheet" href="/assets/style.css?v=3">
+    <script defer src="/assets/app.js?v=3"></script>
 </head>
 <?php $mobView = $_COOKIE['mobview'] ?? ''; ?>
 <body class="<?= $mobView === 'full' ? 'force-desktop' : '' ?>">
@@ -165,6 +164,7 @@ if ($uid) {
     </a>
     <?php if (Auth::check()): ?>
     <nav class="nav">
+        <div class="nav-head"><span>Меню</span><button type="button" class="nav-close" onclick="navBurger()" aria-label="Закрыть">✕</button></div>
         <?php
         $badge = fn($n) => $n ? ' <span class="badge">' . (int) $n . '</span>' : '';
         // одиночные пункты (группа '')
@@ -209,6 +209,7 @@ if ($uid) {
         </form>
         <?php endif; ?>
         <span><?= e($authUser['full_name'] ?? '') ?></span>
+        <a href="/certs" title="Моя электронная подпись">Моя ЭП</a>
         <a href="/acting" title="Замещение и И.о./ВРИО">Замещение</a>
         <a href="/password/change" title="Сменить пароль">Пароль</a>
         <a class="btn-logout" href="/logout">Выход</a>

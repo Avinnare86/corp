@@ -17,9 +17,12 @@
             <?php foreach ($rows as $r): ?>
                 <tr>
                     <td><strong><?= e($r['dept']['name']) ?></strong> <span class="muted">(<?= (int)$r['people'] ?> чел.)</span></td>
-                    <?php foreach ($sources as $s): ?>
+                    <?php foreach ($sources as $s): $si = $r['srcInfo'][$s['id']] ?? null; ?>
                         <td class="num"><input type="number" step="0.01" name="amount[<?= (int)$r['dept']['id'] ?>][<?= (int)$s['id'] ?>]"
-                            value="<?= e($r['bySource'][$s['id']] ?? 0) ?>" style="max-width:120px;text-align:right"></td>
+                            value="<?= e($r['bySource'][$s['id']] ?? 0) ?>" style="max-width:120px;text-align:right">
+                            <?php if ($si && ($si['budget'] > 0 || $si['committed'] > 0)): ?>
+                            <div class="muted" style="font-size:.72rem;white-space:nowrap;margin-top:3px">занято <?= money($si['committed']) ?> · ост. <span style="color:<?= $si['available'] < 0 ? 'var(--bad)' : 'var(--ok)' ?>"><?= money($si['available']) ?></span></div>
+                            <?php endif; ?></td>
                     <?php endforeach; ?>
                     <td class="num"><strong><?= money($r['budget']) ?></strong></td>
                     <td class="num minus">−<?= money($r['plan']) ?></td>

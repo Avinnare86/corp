@@ -18,9 +18,11 @@
     var b = document.getElementById('tblViewBtn'); if (b) b.textContent = viewLabel(v);
   };
 
-  // ---------- гамбургер ----------
+  // ---------- гамбургер (полноэкранное меню на телефоне) ----------
   window.navBurger = function () {
-    var tb = document.querySelector('.topbar'); if (tb) tb.classList.toggle('nav-open');
+    var tb = document.querySelector('.topbar'); if (!tb) return;
+    var open = tb.classList.toggle('nav-open');
+    document.body.classList.toggle('menu-open', open);   // блокировка прокрутки фона
   };
 
   // ---------- классификация таблиц ----------

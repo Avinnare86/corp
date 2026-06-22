@@ -1,4 +1,5 @@
 <?php $isMgmt = ($kind ?? 'staff') === 'mgmt'; ?>
+<style>main.container{max-width:none;width:auto;margin:0 18px}</style>
 <h1><?= e($memo ? 'Служебка №' . ($memo['number'] ?: $memo['id']) : ($isMgmt ? 'Стимул заместителям / гл. бухгалтеру' : 'Новая служебка о стимуле')) ?></h1>
 
 <?php if (!empty($forecast)): $f = $forecast; ?>
@@ -18,6 +19,30 @@
     </table>
     <p class="muted" style="margin:8px 0 0">До конца года осталось месяцев: <strong><?= (int)$f['months_left'] ?></strong>, сотрудников в отделе: <strong><?= (int)$f['people'] ?></strong>.
         Остаток — это свободная часть годового бюджета после обязательных расходов; распределяйте новый стимул в его пределах.</p>
+</section>
+<?php endif; ?>
+
+<?php if (!empty($sourceBudget) && !empty($sourceBudget['rows'])): $sb = $sourceBudget; ?>
+<section class="panel">
+    <h2 style="margin-top:0">Бюджет ФОТ в разрезе источников (<?= (int)$sb['year'] ?> г.)</h2>
+    <?php if (!$sb['has_budget']): ?>
+        <p class="flash" style="background:#fff7e6;color:#7a5200;margin:0 0 10px">Бюджет отдела на <?= (int)$sb['year'] ?> г. не задан — контроль лимитов по источникам не действует. Внесите бюджет: <a href="/budget">Финансы → Бюджет ФОТ</a>.</p>
+    <?php endif; ?>
+    <table class="table" style="max-width:820px">
+        <thead><tr><th>Источник выплат</th><th class="num">Бюджет</th><th class="num">Доступно для стимула</th><th class="num">Занято</th><th class="num">Остаток</th></tr></thead>
+        <tbody>
+        <?php foreach ($sb['rows'] as $r): ?>
+            <tr>
+                <td><?= e($r['name']) ?><?= $r['detail'] ? ' <span class="muted" style="font-size:.78rem">(' . e($r['detail']) . ')</span>' : '' ?></td>
+                <td class="num" style="white-space:nowrap"><?= money($r['budget']) ?></td>
+                <td class="num" style="white-space:nowrap"><?= money($r['base']) ?></td>
+                <td class="num" style="white-space:nowrap"><?= money($r['committed']) ?></td>
+                <td class="num" style="white-space:nowrap;font-weight:600;color:<?= $r['available'] < 0 ? '#c0392b' : '#1e7e34' ?>"><?= money($r['available']) ?></td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <p class="muted" style="margin:8px 0 0;font-size:.82rem">«Доступно для стимула» = бюджет источника − доля оклада и резерва на отпуск (пропорц. бюджету). «Занято» — назначенный из источника стимул за год (утверждённый + в работе + черновики). <strong>Назначить стимул сверх остатка по источнику нельзя.</strong></p>
 </section>
 <?php endif; ?>
 

@@ -9,7 +9,7 @@ class AttendanceController extends Controller
 {
     public function open(): void
     {
-        Auth::requireRole('employee', 'admin');
+        Auth::requireLogin();   // явку может вести любой вошедший
         Auth::verifyCsrf();
         $uid = Auth::id();
         $today = date('Y-m-d');
@@ -34,7 +34,7 @@ class AttendanceController extends Controller
 
     public function close(): void
     {
-        Auth::requireRole('employee', 'admin');
+        Auth::requireLogin();
         Auth::verifyCsrf();
         $uid = Auth::id();
         $today = date('Y-m-d');

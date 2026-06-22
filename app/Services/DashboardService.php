@@ -26,14 +26,14 @@ class DashboardService
     public static function forUser(int $uid): array
     {
         $role = Auth::role();
-        // Явку ведут рядовые специалисты-сдельщики. «Учёт виз и передача в МИД» (visa_mid) сделкой не занят —
-        // открывать рабочий день ему не нужно (исключаем, если у него нет сдельной роли).
-        $tracksAttendance = $role === 'employee'
-            && !(Auth::has('visa_mid') && !Auth::has('anketa_worker', 'visa_worker', 'piecework_worker'));
+        // Кнопку «Приступить к работе» показываем ВСЕМ вошедшим (по требованию). Открытие дня засчитывает явку в табель.
+        $tracksAttendance = Auth::check();
+        // Расчётный листок — только сдельщикам и админу (остальным он неинформативен).
+        $worksPiece = $role === 'employee' && Auth::has('anketa_worker', 'visa_worker', 'piecework_worker');
 
         return [
             'tracksAttendance' => $tracksAttendance,
-            'showPayslip'      => $tracksAttendance || Auth::isAdmin(),
+            'showPayslip'      => $worksPiece || Auth::isAdmin(),
             'workday'          => AttendanceController::today($uid),
             'cards'            => self::cards($uid),
             'tasks'            => self::tasks($uid),

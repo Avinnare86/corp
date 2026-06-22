@@ -62,9 +62,15 @@ class BudgetController extends Controller
             $fact = round($fact, 2);
             $base = round($budget - $plan - $fact, 2);
 
+            // Раздельный учёт по источникам: доступно/занято стимулом (тот же расчёт, что и в форме служебки).
+            $srcInfo = [];
+            $bd = \App\Services\StimulusBudgetService::sourceBreakdown($deptId, $year . '-01');
+            foreach ($bd['rows'] as $br) { $srcInfo[(int) $br['id']] = $br; }
+
             $rows[] = [
                 'dept' => $d, 'bySource' => $bySource, 'budget' => $budget,
                 'plan' => $plan, 'fact' => $fact, 'base' => $base, 'people' => count($emps),
+                'srcInfo' => $srcInfo,
             ];
             $totals['budget'] += $budget; $totals['plan'] += $plan; $totals['fact'] += $fact; $totals['base'] += $base;
         }

@@ -297,6 +297,7 @@ class StimulusController extends Controller
             'fPayKind' => (string) ($old['pay_kind'] ?? $memo['pay_kind'] ?? 'monthly'),
             'fSource'  => isset($old['source_id']) ? (int) $old['source_id'] : (int) ($memo['source_id'] ?? 0),
             'forecast' => $forecast,
+            'sourceBudget' => (!$isMgmt && $deptId) ? \App\Services\StimulusBudgetService::sourceBreakdown((int) $deptId, $period, $memo['id'] ?? null) : null,
             'csrf' => Auth::csrf(),
         ]);
     }
@@ -406,6 +407,25 @@ class StimulusController extends Controller
             if ($over) {
                 flash("Превышен потолок {$cap}% по: " . implode('; ', $over) . '. Разнесите сумму на несколько служебок с разными основаниями.', 'error');
                 $this->backToForm($id, $kind);
+            }
+        }
+
+        // === Контроль бюджета по источнику выплат (раздельный учёт) ===
+        // Сумма по отделу (для веера — по отделу каждого сотрудника; иначе — общий $deptId) не должна
+        // выводить выбранный источник за лимит. mgmt/без отдела/без бюджета — без проверки.
+        if ($kind !== 'mgmt') {
+            $sumByDept = [];
+            if (!$id && !$direct) {
+                foreach ($lines as $ln) {
+                    $d = (int) Database::scalar('SELECT department_id FROM users WHERE id=?', [$ln['user_id']]);
+                    if ($d) { $sumByDept[$d] = ($sumByDept[$d] ?? 0) + $ln['amount']; }
+                }
+            } elseif ($deptId) {
+                $sumByDept[(int) $deptId] = array_sum(array_map(fn($l) => $l['amount'], $lines));
+            }
+            foreach ($sumByDept as $d => $sum) {
+                $err = $this->budgetGuard((int) $d, $sourceId, (float) $sum, $period, $id ?: null);
+                if ($err) { flash($err, 'error'); $this->backToForm($id, $kind); }
             }
         }
 
@@ -546,6 +566,24 @@ class StimulusController extends Controller
         if ($raw === '') { return $default; }
         $ts = strtotime($raw);
         return $ts ? date('Y-m-d H:i:s', $ts) : $default;
+    }
+
+    /**
+     * Контроль бюджета источника: вернуть текст ошибки, если $addAmount не помещается в доступный
+     * лимит источника по отделу, иначе null. mgmt/без отдела/без источника/без заданного бюджета — null.
+     */
+    private function budgetGuard(int $deptId, ?int $sourceId, float $addAmount, string $period, ?int $excludeMemoId): ?string
+    {
+        if (!$deptId || !$sourceId) { return null; }
+        $a = \App\Services\StimulusBudgetService::availableForSource($deptId, $sourceId, $period, $excludeMemoId);
+        if (!$a['has_budget']) { return null; }   // бюджет отдела на год не задан — не блокируем
+        if ($addAmount > $a['available'] + 0.01) {
+            $sname = (string) Database::scalar('SELECT name FROM pay_sources WHERE id=?', [$sourceId]);
+            $f = fn($v) => number_format(max(0, (float) $v), 2, ',', ' ');
+            return 'Недостаточно средств по источнику «' . $sname . '»: доступно ' . $f($a['available'])
+                . ' ₽, требуется ' . $f($addAmount) . ' ₽. Уменьшите сумму, выберите другой источник или увеличьте бюджет (Финансы → Бюджет ФОТ).';
+        }
+        return null;
     }
 
     /** Список отделов по id (для селектора прямого назначения). */
@@ -901,6 +939,20 @@ class StimulusController extends Controller
         $dirSig   = self::makeSig((int) $id, $uid, $dirAt);
         [$dirName, $dirPos] = $onBehalf ? self::directorSigner() : ['', ''];
 
+        // Повторный контроль бюджета источника при УТВЕРЖДЕНИИ (деньги могли «съесть» параллельно).
+        $apprErr = null;
+        if (($memo['kind'] ?? 'staff') !== 'mgmt' && !empty($memo['department_id']) && !empty($memo['source_id'])) {
+            $memoSum = (float) Database::scalar(
+                "SELECT COALESCE(SUM(COALESCE((SELECT o.new_amount FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1), l.amount)),0)
+                   FROM stimulus_memo_lines l WHERE l.memo_id=?", [$id]);
+            $av = \App\Services\StimulusBudgetService::availableForSource((int) $memo['department_id'], (int) $memo['source_id'], (string) $memo['period'], (int) $id);
+            if ($av['has_budget'] && $memoSum > $av['available'] + 0.01) {
+                $sn = (string) Database::scalar('SELECT name FROM pay_sources WHERE id=?', [(int) $memo['source_id']]);
+                $ff = fn($v) => number_format(max(0, (float) $v), 2, ',', ' ');
+                $apprErr = 'Нельзя утвердить: источник «' . $sn . '» выходит за бюджет (доступно ' . $ff($av['available']) . ' ₽, нужно ' . $ff($memoSum) . ' ₽). Снизьте суммы (корректировкой) или увеличьте бюджет ФОТ.';
+            }
+        }
+
         // Служебка директора (замам/гл. бухгалтеру) — одна подпись директора → сразу утверждена.
         if (($memo['kind'] ?? 'staff') === 'mgmt') {
             if (in_array($memo['status'], ['draft','revision'], true) && (!empty($roles['director']) || Auth::isAdmin())) {
@@ -921,6 +973,7 @@ class StimulusController extends Controller
         $direct = $memo['direct_tier'] ?? null;
         if ($direct === 'director') {
             if (in_array($memo['status'], ['draft', 'revision'], true) && (!empty($roles['director']) || Auth::isAdmin())) {
+                if ($apprErr) { flash($apprErr, 'error'); $this->redirect('/memos/' . (int)$id); }
                 $num = $memo['number'] ?: self::nextNumber();
                 Database::run('UPDATE stimulus_memos SET status=?, number=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=?, director_sign_name=?, director_sign_position=? WHERE id=?',
                     ['approved', $num, $uid, 'PEP', $dirAt, $dirSig, $dirName, $dirPos, $id]);
@@ -941,6 +994,7 @@ class StimulusController extends Controller
                 }
                 flash("Подписано заместителем напрямую (№{$num}). Ожидает утверждения директором.");
             } elseif ($memo['status'] === 'deputy_signed' && (!empty($roles['director']) || Auth::isAdmin())) {
+                if ($apprErr) { flash($apprErr, 'error'); $this->redirect('/memos/' . (int)$id); }
                 Database::run('UPDATE stimulus_memos SET status=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=?, director_sign_name=?, director_sign_position=? WHERE id=?',
                     ['approved', $uid, 'PEP', $dirAt, $dirSig, $dirName, $dirPos, $id]);
                 NotificationService::create((int)$memo['author_id'], 'Служебка утверждена', "Ваша прямая служебка о стимуле №{$memo['number']} утверждена директором.");
@@ -968,8 +1022,9 @@ class StimulusController extends Controller
             }
             flash('Утверждено замом. Служебка направлена директору; бухгалтерия уже видит её.');
         } elseif ($memo['status'] === 'deputy_signed' && (!empty($roles['director']) || Auth::isAdmin())) {
-            Database::run('UPDATE stimulus_memos SET status=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=? WHERE id=?',
-                ['approved', $uid, 'PEP', $now, $sig, $id]);
+            if ($apprErr) { flash($apprErr, 'error'); $this->redirect('/memos/' . (int)$id); }
+            Database::run('UPDATE stimulus_memos SET status=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=?, director_sign_name=?, director_sign_position=? WHERE id=?',
+                ['approved', $uid, 'PEP', $dirAt, $dirSig, $dirName, $dirPos, $id]);
             NotificationService::create((int)$memo['author_id'], 'Служебка утверждена', "Ваша служебка о стимуле №{$memo['number']} утверждена директором.");
             flash('Служебка утверждена директором.');
         } else {

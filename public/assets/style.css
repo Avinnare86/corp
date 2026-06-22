@@ -551,18 +551,47 @@ button.btn{font-family:var(--body)}
 .table th.sort-asc::after,.vgrid th.sort-asc::after{content:" ▲";font-size:.7em}
 .table th.sort-desc::after,.vgrid th.sort-desc::after{content:" ▼";font-size:.7em}
 
-/* ===== Гамбургер-меню (телефон) + переключатель вида таблиц ===== */
+/* ===== Гамбургер-меню (телефон): полноэкранный оверлей по разделам ===== */
 .nav-burger{display:none;background:transparent;border:1px solid var(--line);color:var(--primary);
   border-radius:9px;padding:4px 11px;font-size:1.25rem;line-height:1.1;cursor:pointer;font-family:inherit}
 .nav-tablemode{display:none}
+.nav-head{display:none}
 @media(max-width:900px){
   .nav-burger{display:inline-flex;align-items:center;order:2;margin-left:auto}
   .user{order:3}
   .topbar .nav{display:none}
-  .topbar.nav-open .nav{display:flex}
-  .nav-tablemode{display:block;width:100%;margin-top:8px;padding-top:10px;border-top:1px solid var(--line)}
+  body.menu-open{overflow:hidden}                       /* фон не прокручивается */
+
+  /* открытое меню — оверлей на весь экран, перекрывает страницу */
+  .topbar.nav-open{z-index:200}
+  .topbar.nav-open .nav{
+    display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:0;
+    position:fixed;inset:0;width:100%;margin:0;padding:0 0 28px;
+    background:#fff;overflow-y:auto;-webkit-overflow-scrolling:touch;z-index:200}
+
+  .nav-head{display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:1;
+    background:var(--primary);color:#fff;padding:15px 18px;font-family:var(--display);font-weight:700;font-size:1.12rem}
+  .nav-close{background:transparent;border:0;color:#fff;font-size:1.5rem;line-height:1;cursor:pointer;padding:2px 10px;font-family:inherit}
+
+  /* одиночные пункты верхнего уровня */
+  .topbar.nav-open .nav > a{display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid var(--line);
+    font-size:1rem;border-radius:0;white-space:normal;color:var(--ink)}
+  .topbar.nav-open .nav > a .badge{margin-left:auto}
+
+  /* разделы (Квота/Кадры/Визы/…): заголовок-аккордеон + вложенные пункты */
+  .topbar.nav-open .nav-group{position:static;border-bottom:1px solid var(--line)}
+  .topbar.nav-open .nav-gbtn{width:100%;justify-content:space-between;padding:15px 18px;font-size:1.02rem;font-weight:700;
+    background:#eef1fb;color:var(--primary);border-radius:0}
+  .topbar.nav-open .nav-group.open .nav-gbtn{background:#e1e7fb}
+  .topbar.nav-open .nav-group.open .caret{transform:rotate(180deg)}
+  .nav-gbtn .caret{display:inline-block;transition:transform .15s}
+  .topbar.nav-open .nav-drop{position:static;width:100%;border:0;box-shadow:none;margin:0;padding:2px 0 8px;background:#fbfcff;border-radius:0}
+  .topbar.nav-open .nav-drop a{padding:13px 18px 13px 36px;font-size:.96rem;border-radius:0}
+
+  /* переключатель «полные таблицы / карточки» — внизу меню */
+  .nav-tablemode{display:block;width:auto;margin:16px 18px 0;padding-top:14px;border-top:1px solid var(--line)}
   .nav-tablemode button{width:100%;background:var(--sky);border:1px solid var(--line);color:var(--primary);
-    border-radius:10px;padding:11px;font-size:.92rem;font-weight:600;cursor:pointer;font-family:inherit}
+    border-radius:10px;padding:13px;font-size:.95rem;font-weight:600;cursor:pointer;font-family:inherit}
 }
 
 /* ===== Адаптация таблиц на телефоне =====

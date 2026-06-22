@@ -12,17 +12,53 @@ use App\Services\Xlsx;
  */
 class ShiftController extends Controller
 {
-    /** Видит весь список 2/2 (админ/кадры/бухгалтерия/орг-табельщик). */
-    private function seesAll(array $me): bool
+    /** Отделы, где есть активные сотрудники на графике 2/2. */
+    private static function shiftDeptIds(): array
     {
-        return in_array($me['role'], ['admin', 'manager'], true)
-            || (int) ($me['is_timekeeper_org'] ?? 0) === 1
-            || (int) ($me['is_hr'] ?? 0) === 1
-            || (int) ($me['is_accountant'] ?? 0) === 1
-            || Auth::has('hr_manager', 'accountant', 'director', 'deputy_director');
+        return array_map(fn($r) => (int) $r['department_id'], Database::all(
+            "SELECT DISTINCT department_id FROM users WHERE schedule_type='2_2' AND is_active=1 AND department_id IS NOT NULL"));
     }
 
-    /** Отделы, по которым пользователь ведёт график (если не видит всё). */
+    /**
+     * Доступ к разделу (просмотр). Глобально — кадры, бухгалтерия, директор, орг-табельщик, админ.
+     * Структурно — начальник, табельщик, курирующий зам или любой вышестоящий по структуре отдела,
+     * где есть сотрудники 2/2 (Org::isSuperiorOfDept покрывает начальника отдела, куратора и всех выше).
+     */
+    public static function canSee(int $uid): bool
+    {
+        $me = Database::one('SELECT role, is_timekeeper_org, is_hr, is_accountant, timekeeper_dept_id FROM users WHERE id=?', [$uid]);
+        if (!$me) { return false; }
+        $r = Auth::roles($uid);
+        if (in_array($me['role'], ['admin', 'manager'], true)
+            || (int) ($me['is_timekeeper_org'] ?? 0) === 1 || (int) ($me['is_hr'] ?? 0) === 1 || (int) ($me['is_accountant'] ?? 0) === 1
+            || !empty($r['hr_manager']) || !empty($r['hr']) || !empty($r['accountant']) || !empty($r['director'])) {
+            return true;
+        }
+        $depts = self::shiftDeptIds();
+        if (!$depts) { return false; }
+        if (!empty($me['timekeeper_dept_id']) && in_array((int) $me['timekeeper_dept_id'], $depts, true)) { return true; }
+        foreach ($depts as $d) { if (\App\Services\Org::isSuperiorOfDept($uid, $d)) { return true; } }
+        return false;
+    }
+
+    /** Полный просмотр всего списка 2/2 (без ограничения по отделам). */
+    private function seesAll(array $me): bool
+    {
+        $r = Auth::roles((int) $me['id']);
+        return in_array($me['role'], ['admin', 'manager'], true)
+            || (int) ($me['is_timekeeper_org'] ?? 0) === 1 || (int) ($me['is_hr'] ?? 0) === 1 || (int) ($me['is_accountant'] ?? 0) === 1
+            || !empty($r['hr_manager']) || !empty($r['accountant']) || !empty($r['director']);
+    }
+
+    /** Полное РЕДАКТИРОВАНИЕ всех графиков (кадры/орг-табельщик/админ). */
+    private function seesAllEdit(array $me): bool
+    {
+        $r = Auth::roles((int) $me['id']);
+        return in_array($me['role'], ['admin', 'manager'], true)
+            || (int) ($me['is_timekeeper_org'] ?? 0) === 1 || (int) ($me['is_hr'] ?? 0) === 1 || !empty($r['hr_manager']);
+    }
+
+    /** Отделы, которыми пользователь РЕДАКТИРУЕТ график (начальник/табельщик своего отдела). */
     private function scopeDepts(array $me): array
     {
         $depts = [];
@@ -31,23 +67,30 @@ class ShiftController extends Controller
         return array_values(array_unique($depts));
     }
 
+    /** Отделы 2/2, доступные для ПРОСМОТРА (свои + курируемые/вышестоящие по структуре). */
+    private function viewDepts(array $me): array
+    {
+        $depts = self::shiftDeptIds();
+        if (!$depts) { return []; }
+        $out = [];
+        foreach ($this->scopeDepts($me) as $d) { if (in_array($d, $depts, true)) { $out[$d] = true; } }
+        foreach ($depts as $d) { if (\App\Services\Org::isSuperiorOfDept((int) $me['id'], $d)) { $out[$d] = true; } }
+        return array_keys($out);
+    }
+
     private function canEdit(array $me): bool
     {
-        return in_array($me['role'], ['admin', 'manager'], true)
-            || (int) ($me['is_timekeeper_org'] ?? 0) === 1
-            || (int) ($me['is_hr'] ?? 0) === 1
-            || Auth::has('hr_manager')
-            || $this->scopeDepts($me) !== [];
+        return $this->seesAllEdit($me) || $this->scopeDepts($me) !== [];
     }
 
     private function canView(array $me): bool
     {
-        return $this->canEdit($me) || (int) ($me['is_accountant'] ?? 0) === 1 || Auth::has('accountant', 'director', 'deputy_director');
+        return self::canSee((int) $me['id']);
     }
 
     private function inScope(array $me, array $emp): bool
     {
-        if ($this->seesAll($me)) { return true; }
+        if ($this->seesAllEdit($me)) { return true; }
         return !empty($emp['department_id']) && in_array((int) $emp['department_id'], $this->scopeDepts($me), true);
     }
 
@@ -59,7 +102,7 @@ class ShiftController extends Controller
                 FROM users u LEFT JOIN departments d ON d.id = u.department_id
                 WHERE u.schedule_type='2_2' AND u.is_active=1 ORDER BY d.name, u.full_name");
         }
-        $depts = $this->scopeDepts($me);
+        $depts = $this->viewDepts($me);
         if (!$depts) { return []; }
         $ph = implode(',', array_fill(0, count($depts), '?'));
         return Database::all("SELECT u.id, u.full_name, u.oklad, u.position, u.department_id, d.name AS dept_name
