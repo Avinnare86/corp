@@ -145,14 +145,31 @@ class StimulusController extends Controller
         $this->memoForm(null, (int) Auth::id(), 'mgmt');
     }
 
+    /**
+     * Должностной тир для МАРШРУТА подписи стимула — по ФАКТИЧЕСКИ назначенным ролям.
+     * В отличие от Org::tier(), НЕ повышает админа до директора: для служебок на стимул первая подпись
+     * всегда того, кто оформляет (а не согласующего), вне зависимости от админ-прав.
+     */
+    private static function signTier(int $uid): ?string
+    {
+        $base = (string) Database::scalar('SELECT role FROM users WHERE id=?', [$uid]);
+        $slugs = array_column(Database::all('SELECT role_slug FROM user_roles WHERE user_id=?', [$uid]), 'role_slug');
+        $has = fn(string $s) => $base === $s || in_array($s, $slugs, true);
+        if ($has('director')) { return 'director'; }
+        if ($has('deputy_director')) { return 'deputy'; }
+        if ($has('dept_head')) { return 'head'; }
+        return null;
+    }
+
     /** Прямое назначение стимула вышестоящим (без участия начальников ниже): директор/зам. */
     public function createDirect(): void
     {
         Auth::requireRole('director', 'deputy_director', 'admin');
-        $tier = Org::tier((int) Auth::id());
+        $tier = self::signTier((int) Auth::id());   // по реальной должности, не по админ-правам
         if (!in_array($tier, ['director', 'deputy'], true)) {
-            flash('Прямое назначение доступно директору или курирующему заместителю.', 'error');
-            $this->redirect('/memos');
+            // Админ без реальной должности директора/зама оформляет с подписью инициатора (далее утверждает директор).
+            if (Auth::isAdmin()) { $tier = 'deputy'; }
+            else { flash('Прямое назначение доступно директору или курирующему заместителю.', 'error'); $this->redirect('/memos'); }
         }
         $this->memoForm(null, (int) Auth::id(), 'staff', $tier);
     }
@@ -321,12 +338,14 @@ class StimulusController extends Controller
         $direct = in_array($this->input('direct_tier'), ['director', 'deputy'], true) && $kind === 'staff'
             ? (string) $this->input('direct_tier') : null;
         if ($direct) {
-            $tier = Org::tier($uid);
-            $isDir = $tier === 'director' || Auth::isAdmin();
-            if (!$isDir && $tier !== 'deputy') { flash('Прямое назначение доступно директору или курирующему заму.', 'error'); $this->redirect('/memos'); }
+            $tier = self::signTier($uid);
+            $isDirTier = $tier === 'director';   // маршрут — по ФАКТИЧЕСКОЙ должности, админ НЕ повышается до директора
+            $admin = Auth::isAdmin();            // у админа полные права (авторизация), но порядок подписи — как у роли
+            if (!$isDirTier && $tier !== 'deputy' && !$admin) { flash('Прямое назначение доступно директору или курирующему заму.', 'error'); $this->redirect('/memos'); }
             if (!$deptId) { flash('Выберите подразделение для прямого назначения.', 'error'); $this->redirect('/memos'); }
-            if (!$isDir && !Org::isSuperiorOfDept($uid, $deptId)) { flash('Назначать напрямую можно только в курируемые вами подразделения.', 'error'); $this->redirect('/memos'); }
-            $direct = $isDir ? 'director' : 'deputy';
+            if (!$isDirTier && !$admin && !Org::isSuperiorOfDept($uid, $deptId)) { flash('Назначать напрямую можно только в курируемые вами подразделения.', 'error'); $this->redirect('/memos'); }
+            // Первая подпись — того, кто оформляет: директор утверждает сразу; зам подписывает и направляет директору.
+            $direct = $isDirTier ? 'director' : 'deputy';
         }
 
         if (!$groundIds) { flash('Выберите хотя бы одно основание (раздел 4).', 'error'); $this->backToForm($id, $kind); }
@@ -349,7 +368,7 @@ class StimulusController extends Controller
             $okl = $u['p_oklad'] !== null ? (float)$u['p_oklad'] : (float)($u['oklad'] ?? 0);
             $load = round($okl * (float)($u['rate_volume'] ?? 1), 2);
             $pct = $load > 0 ? round($amount / $load * 100, 1) : 0;
-            $lkind = ($r['pay_kind'] ?? $payKind) === 'onetime' ? 'onetime' : 'monthly';
+            $lkind = $payKind;   // вид выплаты единый на всю служебку (выбирается один раз вверху формы)
             $purpose = in_array($r['purpose'] ?? '', ['anketas', 'visas', 'other'], true) ? $r['purpose'] : 'other';
             $reasonText = trim((string) ($r['reason'] ?? ''));   // основание: выбор из справочника или свободный ввод
             $lines[] = ['user_id' => $eid, 'amount' => round($amount, 2), 'pay_kind' => $lkind, 'oklad_load' => $load, 'percent' => $pct, 'purpose' => $purpose, 'reason_text' => $reasonText];
@@ -444,7 +463,9 @@ class StimulusController extends Controller
                 flash('У сотрудников не указан отдел — некуда направить служебку: ' . implode(', ', array_unique($noDept)) . '. Сначала назначьте им отдел.', 'error');
                 $this->backToForm($id, $kind);
             }
-            $isDir = Org::tier($uid) === 'director' || Auth::isAdmin();
+            // Маршрут — по фактической должности оформителя; админ НЕ повышается до директора
+            // (для стимула первая подпись всегда того, кто оформляет, а не согласующего).
+            $isDir = self::signTier($uid) === 'director';
             $pdo = Database::pdo();
             $pdo->beginTransaction();
             $batchId = null; $created = []; $noCurator = [];
@@ -559,6 +580,12 @@ class StimulusController extends Controller
         return hash_hmac('sha256', $id . '|' . $uid . '|' . $at, (string) Settings::get('sign_secret', 'uchet'));
     }
 
+    /** Отпечаток гибкого штампа (админ): id|подписант|время|порядок — уникален в пределах служебки. */
+    private static function makeStampSig(int $id, int $uid, string $at, int $seq): string
+    {
+        return hash_hmac('sha256', $id . '|' . $uid . '|' . $at . '|' . $seq, (string) Settings::get('sign_secret', 'uchet'));
+    }
+
     /** Дата/время подписи: админ при подписи «от имени директора» задаёт вручную (datetime-local); иначе $default. */
     private function signAtInput(string $default): string
     {
@@ -566,6 +593,73 @@ class StimulusController extends Controller
         if ($raw === '') { return $default; }
         $ts = strtotime($raw);
         return $ts ? date('Y-m-d H:i:s', $ts) : $default;
+    }
+
+    /**
+     * Гибкие штампы ЭП «задним числом» (только админ): произвольное число штампов в заданном порядке,
+     * у каждого своя дата/время. Аддитивно к обычному маршруту — пишет в stimulus_stamps, на финале
+     * делает служебку утверждённой (с номером), чтобы она попала в бухгалтерию как обычная.
+     */
+    public function stamps(string $id): void
+    {
+        Auth::requireRole('admin');
+        Auth::verifyCsrf();
+        if (!Auth::isAdmin()) { http_response_code(403); exit('Только администратор.'); }
+        $mid = (int) $id;
+        $memo = Database::one('SELECT * FROM stimulus_memos WHERE id=?', [$mid]);
+        if (!$memo) { flash('Служебка не найдена.', 'error'); $this->redirect('/memos'); }
+
+        // srow[idx][role_label|signer_user_id|signer_name|signer_position|sign_type|signed_at]
+        $rows = [];
+        foreach (($_POST['srow'] ?? []) as $r) {
+            $label = trim((string) ($r['role_label'] ?? ''));
+            $name  = trim((string) ($r['signer_name'] ?? ''));
+            $atRaw = trim((string) ($r['signed_at'] ?? ''));
+            if ($label === '' || $name === '' || $atRaw === '') { continue; }
+            $ts = strtotime($atRaw);
+            if (!$ts) { continue; }
+            $rows[] = [
+                'role_label'      => $label,
+                'signer_user_id'  => !empty($r['signer_user_id']) ? (int) $r['signer_user_id'] : null,
+                'signer_name'     => $name,
+                'signer_position' => trim((string) ($r['signer_position'] ?? '')),
+                'sign_type'       => in_array($r['sign_type'] ?? 'PEP', ['PEP', 'UNEP', 'UKEP'], true) ? $r['sign_type'] : 'PEP',
+                'signed_at'       => date('Y-m-d H:i:s', $ts),
+            ];
+        }
+        if (!$rows) { flash('Добавьте хотя бы один штамп: роль, подписант и дата/время.', 'error'); $this->redirect('/memos/' . $mid); }
+
+        $uid = (int) Auth::id();
+        $pdo = Database::pdo();
+        $pdo->beginTransaction();
+        Database::run('DELETE FROM stimulus_stamps WHERE memo_id=?', [$mid]);   // переустановка набора (идемпотентно)
+        foreach ($rows as $i => $r) {
+            $sig = self::makeStampSig($mid, (int) ($r['signer_user_id'] ?? 0), $r['signed_at'], $i);
+            Database::insert(
+                'INSERT INTO stimulus_stamps (memo_id, seq, role_label, signer_user_id, signer_name, signer_position, sign_type, signed_at, sign_hash, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [$mid, $i, $r['role_label'], $r['signer_user_id'], $r['signer_name'], $r['signer_position'], $r['sign_type'], $r['signed_at'], $sig, $uid]);
+        }
+        // Сделать видимой бухгалтерии как обычную утверждённую: статус + номер (если ещё нет).
+        $num = $memo['number'] ?: self::nextNumber();
+        Database::run('UPDATE stimulus_memos SET status=?, number=? WHERE id=?', ['approved', $num, $mid]);
+        $pdo->commit();
+
+        \App\Services\Audit::log('STAMP_ADMIN', 'Стимул: штампы ЭП проставлены админом (задним числом)',
+            ['memo_id' => $mid, 'number' => $num, 'count' => count($rows)]);
+        flash('Штампы проставлены, служебка утверждена (№' . $num . '). Бухгалтерия видит документ как обычный.');
+        $this->redirect('/memos/' . $mid);
+    }
+
+    /** Очистка гибких штампов (только админ): возврат к стандартному выводу подписей. Статус/номер не трогаем. */
+    public function stampClear(string $id): void
+    {
+        Auth::requireRole('admin');
+        Auth::verifyCsrf();
+        if (!Auth::isAdmin()) { http_response_code(403); exit('Только администратор.'); }
+        $mid = (int) $id;
+        Database::run('DELETE FROM stimulus_stamps WHERE memo_id=?', [$mid]);
+        flash('Гибкие штампы очищены. Печать показывает стандартные подписи маршрута.');
+        $this->redirect('/memos/' . $mid);
     }
 
     /**
@@ -651,6 +745,31 @@ class StimulusController extends Controller
         $dirOnBehalf = $isDirectorStep && Auth::isAdmin();
         [$dsName, $dsPos] = self::directorSigner();
         $dirDisplay = trim($dsName . ($dsPos ? ', ' . $dsPos : ''));
+        // Гибкие штампы (админ, задним числом): уже проставленные + данные для конструктора.
+        $isAdmin = Auth::isAdmin();
+        $flexStamps = Database::all('SELECT * FROM stimulus_stamps WHERE memo_id=? ORDER BY seq, id', [$id]) ?: null;
+        $employees = $isAdmin
+            ? Database::all('SELECT id, full_name, position FROM users WHERE is_active=1 ORDER BY full_name') : [];
+        // Префилл конструктора из стандартных штампов (если они есть и гибких ещё нет) — чтобы ничего не потерять.
+        $legacyStamps = [];
+        if ($isAdmin && !$flexStamps) {
+            $slots = [
+                ['Начальник отдела (составил)', $memo['head_id'] ?? 0, $memo['head_signed_at'] ?? null, $memo['head_sign_type'] ?? 'PEP'],
+                ['Курирующий заместитель директора (утвердил)', $memo['deputy_id'] ?? 0, $memo['deputy_signed_at'] ?? null, $memo['deputy_sign_type'] ?? 'PEP'],
+                ['Директор (утвердил)', $memo['director_id'] ?? 0, $memo['director_signed_at'] ?? null, $memo['director_sign_type'] ?? 'PEP'],
+            ];
+            foreach ($slots as [$label, $sid, $at, $stype]) {
+                if (!$at) { continue; }
+                if ($label === 'Директор (утвердил)' && !empty($memo['director_sign_name'])) {
+                    $nm = (string) $memo['director_sign_name']; $pos = (string) ($memo['director_sign_position'] ?? ''); $sidOut = null;
+                } else {
+                    $u = $sid ? Database::one('SELECT full_name, position FROM users WHERE id=?', [$sid]) : null;
+                    $nm = (string) ($u['full_name'] ?? ''); $pos = (string) ($u['position'] ?? ''); $sidOut = $sid ?: null;
+                }
+                $legacyStamps[] = ['role_label' => $label, 'signer_user_id' => $sidOut, 'signer_name' => $nm,
+                    'signer_position' => $pos, 'sign_type' => $stype ?: 'PEP', 'signed_at' => substr((string) $at, 0, 16)];
+            }
+        }
         $this->view('stimulus/show', [
             'title' => 'Служебка №' . ($memo['number'] ?: $memo['id']),
             'memo' => $memo, 'lines' => $lines, 'groundRows' => $groundRows,
@@ -671,6 +790,10 @@ class StimulusController extends Controller
             'dirOnBehalf' => $dirOnBehalf,
             'dirDisplay' => $dirDisplay,
             'canReject' => ($canDeputySign || $canDirectorSign || ($direct === 'deputy' && $memo['status'] === 'deputy_signed' && $isDirector)),
+            'isAdmin' => $isAdmin,
+            'flexStamps' => $flexStamps,
+            'employees' => $employees,
+            'legacyStamps' => $legacyStamps,
             'csrf' => Auth::csrf(),
         ]);
     }
@@ -796,6 +919,10 @@ class StimulusController extends Controller
         $groundRows = $gids
             ? Database::all('SELECT text, category, percent FROM stimulus_grounds WHERE id IN (' . implode(',', array_fill(0, count($gids), '?')) . ') ORDER BY percent DESC, category', $gids)
             : array_map(fn($t) => ['text' => $t, 'category' => '', 'percent' => 0], array_values(array_filter(array_map('trim', explode(';', (string) $memo['grounds'])))));
+        // Гибкие штампы (админ, задним числом): если есть — печать выводит их вместо 3 фиксированных слотов.
+        $flexStamps = Database::all(
+            'SELECT role_label, signer_name AS full_name, signer_position AS position, sign_type, signed_at, sign_hash
+               FROM stimulus_stamps WHERE memo_id=? ORDER BY seq, id', [$id]);
         return [
             'memo' => $memo, 'lines' => $lines, 'signers' => $signers,
             'kind' => $memo['kind'] ?? 'staff',
@@ -803,6 +930,7 @@ class StimulusController extends Controller
             'directorName' => $dirName ?: 'Д.Н. Семёнов',
             'grounds' => array_map(fn($g) => $g['text'], $groundRows),
             'groundRows' => $groundRows,
+            'flexStamps' => $flexStamps ?: null,
         ];
     }
 
@@ -812,6 +940,11 @@ class StimulusController extends Controller
         Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
         $d = $this->printData((int) $id);
         if (!$d) { http_response_code(404); exit('Служебка не найдена'); }
+        // Отметка скачивания: только когда PDF открывает бухгалтерия (для отчёта покрытия).
+        if (Auth::effectiveHas('accountant')) {
+            Database::run('UPDATE stimulus_memos SET pdf_downloaded_at=?, pdf_downloaded_by=? WHERE id=?',
+                [date('Y-m-d H:i:s'), (int) Auth::id(), (int) $id]);
+        }
         $this->view('stimulus/print', array_merge(['title' => 'Служебка №' . ($d['memo']['number'] ?: $d['memo']['id'])], $d), false);
     }
 
@@ -861,57 +994,67 @@ class StimulusController extends Controller
             (int) $m['author_id'] === $uid || (($m['department_id'] ?? 0) && isset($scope[(int) $m['department_id']]))));
     }
 
-    /** Отчёт для бухгалтерии: помесячное покрытие сотрудников стимулом (ежемес./единовр.). */
+    /** Отчёт для бухгалтерии: по отделам — все служебки периода значками PDF (скачано / не скачано). */
     public function coverage(): void
     {
         Auth::requireRole('accountant', 'director', 'finance_manager', 'admin');
         $period = (string) $this->input('period', date('Y-m'));
         $this->view('stimulus/coverage', [
             'title' => 'Покрытие стимулом (бухгалтерия)',
-            'rows' => $this->coverageRows($period),
+            'byDept' => $this->coverageMemos($period),
+            'statusLabels' => self::STATUS,
             'period' => $period,
             'periods' => array_column(Database::all('SELECT DISTINCT period FROM stimulus_memos ORDER BY period DESC'), 'period'),
         ]);
     }
 
-    /** Агрегаты покрытия: по месяцу+сотруднику, утв./проект × ежемес./единовр. (эффективная сумма с override). */
-    private function coverageRows(string $period): array
+    /**
+     * Служебки периода, видимые бухгалтерии (deputy_signed/approved), сгруппированные по отделу.
+     * По каждой — № / вид / эффективная сумма (с учётом последнего override) / статус / состояние скачивания.
+     */
+    private function coverageMemos(string $period): array
     {
-        $where = "m.status <> 'rejected'"; $params = [];
+        $where = "m.status IN ('deputy_signed','approved')"; $params = [];
         if ($period !== '') { $where .= ' AND m.period=?'; $params[] = $period; }
-        $raw = Database::all(
-            "SELECT m.period, m.status, m.department_id, d.name AS dept_name, l.user_id, l.pay_kind, l.amount, l.id AS line_id,
-                    ur.full_name AS recipient,
-                    (SELECT o.new_amount FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1) AS ov_amount
-               FROM stimulus_memo_lines l JOIN stimulus_memos m ON m.id=l.memo_id JOIN users ur ON ur.id=l.user_id
+        $rows = Database::all(
+            "SELECT m.id, m.number, m.status, m.period, m.pay_kind, m.department_id,
+                    d.name AS dept_name, m.pdf_downloaded_at, du.full_name AS pdf_by_name,
+                    (SELECT COALESCE(SUM(COALESCE(
+                        (SELECT o.new_amount FROM stimulus_overrides o WHERE o.memo_line_id=l.id ORDER BY o.id DESC LIMIT 1),
+                        l.amount)),0)
+                       FROM stimulus_memo_lines l WHERE l.memo_id=m.id) AS total,
+                    (SELECT COUNT(*) FROM stimulus_memo_lines l WHERE l.memo_id=m.id) AS people
+               FROM stimulus_memos m
                LEFT JOIN departments d ON d.id=m.department_id
-              WHERE $where ORDER BY m.period DESC, d.name, ur.full_name", $params);
-        $agg = [];
-        foreach ($raw as $r) {
-            $key = $r['period'] . '|' . (int) $r['user_id'];
-            if (!isset($agg[$key])) {
-                $agg[$key] = ['period' => $r['period'], 'dept_name' => $r['dept_name'] ?: '—', 'recipient' => $r['recipient'],
-                    'm_appr' => 0.0, 'o_appr' => 0.0, 'm_proj' => 0.0, 'o_proj' => 0.0];
-            }
-            $eff = $r['ov_amount'] !== null ? (float) $r['ov_amount'] : (float) $r['amount'];
-            $appr = $r['status'] === 'approved';
-            if ($r['pay_kind'] === 'onetime') { $agg[$key][$appr ? 'o_appr' : 'o_proj'] += $eff; }
-            else { $agg[$key][$appr ? 'm_appr' : 'm_proj'] += $eff; }
+               LEFT JOIN users du ON du.id=m.pdf_downloaded_by
+              WHERE $where ORDER BY (m.department_id IS NULL), d.name, m.id", $params);
+        $byDept = [];
+        foreach ($rows as $r) {
+            $key = $r['department_id'] ? $r['dept_name'] : 'Руководство / без отдела';
+            $byDept[$key][] = $r;
         }
-        foreach ($agg as &$a) { $a['total'] = round($a['m_appr'] + $a['o_appr'] + $a['m_proj'] + $a['o_proj'], 2); }
-        return array_values($agg);
+        return $byDept;
     }
 
-    /** Выгрузка отчёта покрытия в Excel. */
+    /** Выгрузка отчёта покрытия в Excel: отдел / № / вид / сумма / статус / скачано / кем. */
     public function coverageExport(): void
     {
         Auth::requireRole('accountant', 'director', 'finance_manager', 'admin');
-        $rows = $this->coverageRows((string) $this->input('period', date('Y-m')));
-        $headers = ['Месяц', 'Отдел', 'Сотрудник', 'Ежемес. (утв.)', 'Единовр. (утв.)', 'Ежемес. (проект)', 'Единовр. (проект)', 'Итого'];
-        $data = array_map(fn($a) => [
-            $a['period'], $a['dept_name'], $a['recipient'],
-            round($a['m_appr'], 2), round($a['o_appr'], 2), round($a['m_proj'], 2), round($a['o_proj'], 2), $a['total'],
-        ], $rows);
+        $byDept = $this->coverageMemos((string) $this->input('period', date('Y-m')));
+        $headers = ['Отдел', '№ служебки', 'Вид', 'Сумма', 'Статус', 'Скачано', 'Кем скачано'];
+        $data = [];
+        foreach ($byDept as $dept => $memos) {
+            foreach ($memos as $m) {
+                $data[] = [
+                    $dept, $m['number'] ?: ('#' . $m['id']),
+                    $m['pay_kind'] === 'onetime' ? 'единовр.' : 'ежемес.',
+                    round((float) $m['total'], 2),
+                    self::STATUS[$m['status']] ?? $m['status'],
+                    $m['pdf_downloaded_at'] ? substr((string) $m['pdf_downloaded_at'], 0, 16) : 'не скачано',
+                    (string) ($m['pdf_by_name'] ?? ''),
+                ];
+            }
+        }
         \App\Services\Xlsx::download('stimulus-coverage-' . date('Y-m-d') . '.xlsx',
             [['name' => 'Покрытие стимулом', 'headers' => $headers, 'rows' => $data]]);
     }

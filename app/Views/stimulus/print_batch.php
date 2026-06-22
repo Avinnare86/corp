@@ -48,6 +48,7 @@ $stamp = function($who, $s, $at, $type, $hash) {
 <?php foreach ($batch as $b):
     $memo = $b['memo']; $lines = $b['lines']; $kind = $b['kind']; $source = $b['source'];
     $directorName = $b['directorName']; $grounds = $b['grounds']; $groundRows = $b['groundRows']; $signers = $b['signers'];
+    $flexStamps = $b['flexStamps'] ?? null;
     include __DIR__ . '/_memo_sheet.php';
 endforeach; ?>
 </body></html>

@@ -92,11 +92,17 @@ $isMgmt = ($kind ?? 'staff') === 'mgmt';
         </tr>
     </table>
 
-    <?= $stamp('Начальник отдела (составил)', $signers['head'], $memo['head_signed_at'], $memo['head_sign_type'], $memo['head_sign_hash']) ?>
-    <?= $stamp('Курирующий заместитель директора (утвердил)', $signers['deputy'], $memo['deputy_signed_at'], $memo['deputy_sign_type'], $memo['deputy_sign_hash']) ?>
-    <?= $stamp('Директор (утвердил)', $signers['director'], $memo['director_signed_at'], $memo['director_sign_type'], $memo['director_sign_hash']) ?>
-
-    <?php if (empty($memo['head_signed_at']) && empty($memo['deputy_signed_at']) && empty($memo['director_signed_at'])): ?>
-        <div class="status">⚠ Черновик — ещё не подписан. ЭП появится после подписания.</div>
+    <?php $flexStamps = $flexStamps ?? null; ?>
+    <?php if (!empty($flexStamps)): // гибкие штампы (админ, задним числом) — выводим их вместо трёх фиксированных слотов ?>
+        <?php foreach ($flexStamps as $fs): ?>
+            <?= $stamp($fs['role_label'], ['full_name' => $fs['full_name']], $fs['signed_at'], $fs['sign_type'], $fs['sign_hash']) ?>
+        <?php endforeach; ?>
+    <?php else: ?>
+        <?= $stamp('Начальник отдела (составил)', $signers['head'], $memo['head_signed_at'], $memo['head_sign_type'], $memo['head_sign_hash']) ?>
+        <?= $stamp('Курирующий заместитель директора (утвердил)', $signers['deputy'], $memo['deputy_signed_at'], $memo['deputy_sign_type'], $memo['deputy_sign_hash']) ?>
+        <?= $stamp('Директор (утвердил)', $signers['director'], $memo['director_signed_at'], $memo['director_sign_type'], $memo['director_sign_hash']) ?>
+        <?php if (empty($memo['head_signed_at']) && empty($memo['deputy_signed_at']) && empty($memo['director_signed_at'])): ?>
+            <div class="status">⚠ Черновик — ещё не подписан. ЭП появится после подписания.</div>
+        <?php endif; ?>
     <?php endif; ?>
 </div>

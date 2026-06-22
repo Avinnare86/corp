@@ -910,6 +910,15 @@ if (!columnExists('stimulus_memos', 'director_sign_position')) {
     $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN director_sign_position VARCHAR(160) NULL");
     echo "OK  колонка stimulus_memos.director_sign_position добавлена\n";
 }
+// Учёт скачивания PDF бухгалтерией (отчёт покрытия: скачано/не скачано, кем и когда).
+if (!columnExists('stimulus_memos', 'pdf_downloaded_at')) {
+    $pdo->exec($ddlFix("ALTER TABLE stimulus_memos ADD COLUMN pdf_downloaded_at DATETIME NULL"));
+    echo "OK  колонка stimulus_memos.pdf_downloaded_at добавлена\n";
+}
+if (!columnExists('stimulus_memos', 'pdf_downloaded_by')) {
+    $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN pdf_downloaded_by INT NULL");
+    echo "OK  колонка stimulus_memos.pdf_downloaded_by добавлена\n";
+}
 // Линия прибытия анкеты (квота): ЛП + ДЛП (FK на справочники).
 foreach (['arrival_line_id', 'arrival_detail_id'] as $col) {
     if (!columnExists('assignment_items', $col)) {
@@ -1073,6 +1082,24 @@ $extra['stimulus_overrides'] = "CREATE TABLE IF NOT EXISTS stimulus_overrides (
     by_user_id   INT NOT NULL,           -- кто снизил/отменил (вышестоящий)
     reason       TEXT NULL,
     created_at   TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
+// Гибкие штампы ЭП (админ, «задним числом»): произвольное число штампов в произвольном порядке,
+// у каждого своя дата/время. Аддитивно — обычный маршрут подписи (head/deputy/director) не затрагивает.
+// Если у служебки есть строки здесь — печать выводит их вместо трёх фиксированных слотов.
+$extra['stimulus_stamps'] = "CREATE TABLE IF NOT EXISTS stimulus_stamps (
+    id              $ID,
+    memo_id         INT NOT NULL,
+    seq             INT NOT NULL DEFAULT 0,            -- порядок отображения (0..N)
+    role_label      VARCHAR(200) NOT NULL,            -- «Начальник отдела (составил)» и т.п.
+    signer_user_id  INT NULL,                         -- сотрудник (если выбран), иначе NULL
+    signer_name     VARCHAR(200) NOT NULL,
+    signer_position VARCHAR(200) DEFAULT '',
+    sign_type       VARCHAR(8) NOT NULL DEFAULT 'PEP',-- PEP|UNEP|UKEP
+    signed_at       DATETIME NOT NULL,                -- введённые админом дата+время
+    sign_hash       VARCHAR(80) NOT NULL,
+    created_by      INT NOT NULL,                     -- реальный админ (для аудита; НЕ на документе)
+    created_at      TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
 // Назначение надбавки на период (через стимул): порождает ежемесячные служебки-проекты.

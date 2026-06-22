@@ -234,6 +234,8 @@ $router->post('/memos/line/{id}/override', [\App\Controllers\StimulusController:
 $router->post('/memos',             [\App\Controllers\StimulusController::class, 'store']);
 $router->get('/memos/batch/{id}',   [\App\Controllers\StimulusController::class, 'showBatch']);
 $router->post('/memos/batch/{id}/sign', [\App\Controllers\StimulusController::class, 'signBatch']);
+$router->post('/memos/{id}/stamps',       [\App\Controllers\StimulusController::class, 'stamps']);
+$router->post('/memos/{id}/stamps/clear', [\App\Controllers\StimulusController::class, 'stampClear']);
 $router->get('/memos/{id}',         [\App\Controllers\StimulusController::class, 'show']);
 $router->get('/memos/{id}/edit',    [\App\Controllers\StimulusController::class, 'edit']);
 $router->get('/memos/{id}/print',   [\App\Controllers\StimulusController::class, 'printDoc']);

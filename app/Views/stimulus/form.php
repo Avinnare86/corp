@@ -81,7 +81,7 @@
         <?php endif; ?>
         <div class="form-inline" style="align-items:flex-end">
             <label>Период<input type="month" name="period" value="<?= e($fPeriod ?? ($memo['period'] ?? date('Y-m'))) ?>" required></label>
-            <label>Вид выплаты по умолчанию
+            <label>Вид выплаты <span class="muted">(единый на всю служебку)</span>
                 <select name="pay_kind" id="defKind">
                     <option value="monthly" <?= ($fPayKind ?? 'monthly')==='monthly'?'selected':'' ?>>ежемесячная (пропорц. отработке)</option>
                     <option value="onetime" <?= ($fPayKind ?? '')==='onetime'?'selected':'' ?>>единовременная (полной суммой)</option>
@@ -122,7 +122,7 @@
         </div>
         <?php endif; ?>
         <table class="table" id="memoLines">
-            <thead><tr><th>Работник</th><?php if ($showPiece): ?><th class="num">Квота</th><th class="num">Визы</th><?php endif; ?><th>Оклад×ставка</th><th>Уже назначено за период</th><th class="num">Сумма стимула, ₽</th><th class="num">%</th><th>Вид</th><th>Цель</th><th>Основание</th><th></th></tr></thead>
+            <thead><tr><th>Работник</th><?php if ($showPiece): ?><th class="num">Квота</th><th class="num">Визы</th><?php endif; ?><th>Оклад×ставка</th><th>Уже назначено за период</th><th class="num">Сумма стимула, ₽</th><th class="num">%</th><th>Цель</th><th>Основание</th><th></th></tr></thead>
             <tbody></tbody>
         </table>
         <datalist id="reasonList"><?php foreach (($reasons ?? []) as $rr): ?><option value="<?= e($rr['text']) ?>"></option><?php endforeach; ?></datalist>
@@ -148,7 +148,7 @@ function fmt(n){ return (Math.round(n*100)/100).toLocaleString('ru-RU'); }
 function recalc(tr){
   var id=tr.querySelector('.m-user').value, amt=parseFloat((tr.querySelector('.m-amount').value||'0').replace(',','.'))||0;
   var m=memOf(id), load=m?m.load:0;
-  var kindEl=tr.querySelector('.m-kind'); var kind=kindEl?kindEl.value:'monthly';
+  var dk=document.getElementById('defKind'); var kind=dk?dk.value:'monthly';   // вид выплаты — единый на всю служебку
   tr.querySelector('.m-load').textContent=fmt(load);
   if (SHOW_PIECE){ tr.querySelector('.m-kvota').textContent=m?fmt(m.kvota):'—'; tr.querySelector('.m-visy').textContent=m?fmt(m.visy):'—'; }
   var ex=tr.querySelector('.m-exist'); if(ex) ex.innerHTML=existInfo(m, amt, kind);
@@ -169,10 +169,9 @@ function updTotal(){
   var s=0; document.querySelectorAll('#memoLines .m-amount').forEach(function(i){ s+=parseFloat((i.value||'0').replace(',','.'))||0; });
   var el=document.getElementById('memoTotal'); if(el) el.textContent=fmt(s)+' ₽';
 }
-function addLine(uid, amount, kind, purpose, reasonText){
+function addLine(uid, amount, kind, purpose, reasonText){   // kind не используется: вид выплаты единый (см. #defKind)
   var tb=document.querySelector('#memoLines tbody');
   var i=tb.children.length;
-  var def=document.getElementById('defKind').value;
   var piece = SHOW_PIECE ? '<td class="m-kvota num muted">—</td><td class="m-visy num muted">—</td>' : '';
   var tr=document.createElement('tr');
   tr.innerHTML='<td><select class="m-user" name="row['+i+'][user_id]"><option value="">—</option>'+opt(uid)+'</select></td>'
@@ -181,14 +180,12 @@ function addLine(uid, amount, kind, purpose, reasonText){
     +'<td class="m-exist" style="font-size:.8rem;white-space:nowrap"><span class="muted">—</span></td>'
     +'<td><input class="m-amount" type="text" name="row['+i+'][amount]" value="'+(amount||'')+'" style="width:120px;text-align:right"></td>'
     +'<td class="m-pct num">—</td>'
-    +'<td><select class="m-kind" name="row['+i+'][pay_kind]"><option value="monthly"'+((kind||def)==='monthly'?' selected':'')+'>ежемес.</option><option value="onetime"'+((kind||def)==='onetime'?' selected':'')+'>единоврем.</option></select></td>'
     +'<td><select class="m-purpose" name="row['+i+'][purpose]" title="За анкеты/визы — сделка сверх оклада закрывает стимул; за другое — гарантированная доплата">'+purposeOpts(purpose)+'</select></td>'
     +'<td><input class="m-reason" type="text" name="row['+i+'][reason]" list="reasonList" value="'+esc(reasonText||'')+'" placeholder="за что — выбор или ввод"></td>'
     +'<td><button type="button" class="btn btn-mini btn-danger" onclick="this.closest(\'tr\').remove();updTotal()">×</button></td>';
   tb.appendChild(tr);
   tr.querySelector('.m-user').addEventListener('change',function(){recalc(tr);});
   tr.querySelector('.m-amount').addEventListener('input',function(){recalc(tr);});
-  tr.querySelector('.m-kind').addEventListener('change',function(){recalc(tr);});
   recalc(tr);
   return tr;
 }
@@ -208,5 +205,8 @@ function pullPiece(kind){
   if(!added){ alert('За выбранный период (до 25 числа) нет начисленной сделки по '+(kind==='kvota'?'квоте':kind==='visy'?'визам':'квоте и визам')+'.'); }
 }
 if (EXIST.length) { EXIST.forEach(function(l){ addLine(l.user_id, l.amount, l.kind, l.purpose, l.reason); }); } else { addLine(); }
+// Вид выплаты единый на всю служебку: смена пересчитывает «уже назначено/станет» по всем строкам.
+var defKindEl=document.getElementById('defKind');
+if (defKindEl) defKindEl.addEventListener('change',function(){ document.querySelectorAll('#memoLines tbody tr').forEach(recalc); });
 updTotal();
 </script>

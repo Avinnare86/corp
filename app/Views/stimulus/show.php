@@ -71,19 +71,32 @@ if ($isMgmt) {
 <div>
     <section class="panel">
         <h2>Маршрут подписания</h2>
+        <?php $typeMap=['PEP'=>'ПЭП','UNEP'=>'УНЭП','UKEP'=>'УКЭП']; ?>
+        <?php if (!empty($flexStamps)): // штампы проставлены админом — показываем фактический набор ?>
+        <div class="stepper">
+            <?php foreach ($flexStamps as $fs): ?>
+                <div class="step ok">
+                    <span class="step-ic">🖋</span>
+                    <div class="step-body"><strong><?= e($fs['role_label']) ?></strong> — <?= e($fs['signer_name']) ?>
+                        <span class="muted" style="font-size:.76rem">ЭП <?= e($typeMap[$fs['sign_type']] ?? $fs['sign_type']) ?> · <?= e(substr((string)$fs['signed_at'],0,16)) ?></span>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <?php else: ?>
         <div class="stepper">
             <?php foreach ($steps as [$k,$label,$at,$type]):
                 $done = (bool)$at; $cls = $done ? 'ok' : 'wait'; ?>
                 <div class="step <?= $cls ?>">
                     <span class="step-ic"><?= $done ? '🖋' : '○' ?></span>
                     <div class="step-body"><strong><?= e($label) ?></strong>
-<?php $typeMap=['PEP'=>'ПЭП','UNEP'=>'УНЭП','UKEP'=>'УКЭП']; ?>
                         <?php if ($done): ?><span class="muted" style="font-size:.76rem">ЭП <?= e($typeMap[$type] ?? $type) ?> · <?= e(substr((string)$at,0,16)) ?></span>
                         <?php else: ?><span class="muted" style="font-size:.76rem">ожидает</span><?php endif; ?>
                     </div>
                 </div>
             <?php endforeach; ?>
         </div>
+        <?php endif; ?>
 
         <?php if ($canHeadSign || $canDeputySign || $canDirectorSign || !empty($canMgmtSign) || !empty($canDirectSign)): ?>
         <h3 class="sub">Подписать (ЭП — подтверждение паролем)</h3>
@@ -139,6 +152,82 @@ if ($isMgmt) {
         </tbody>
     </table>
 </section>
+
+<?php if (!empty($isAdmin)): ?>
+<section class="panel" id="stampBuilder">
+    <h2>Штампы ЭП — проставление задним числом <span class="muted" style="font-size:.8rem">(только администратор)</span></h2>
+    <p class="muted" style="margin-top:0">Если документ не подали вовремя — проставьте нужные штампы в любом порядке, у каждого своя дата и время.
+        Это <strong>не влияет на обычный маршрут подписи</strong>. После «Проставить штампы» служебка станет утверждённой и попадёт в бухгалтерию как обычная.</p>
+    <datalist id="roleLabels">
+        <option value="Начальник отдела (составил)"></option>
+        <option value="Курирующий заместитель директора (утвердил)"></option>
+        <option value="Директор (утвердил)"></option>
+    </datalist>
+    <form method="post" action="/memos/<?= (int)$memo['id'] ?>/stamps" id="stampForm">
+        <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
+        <table class="table" id="stampRows">
+            <thead><tr><th style="width:230px">Роль (штамп)</th><th>Подписант</th><th>Должность</th><th>Вид</th><th>Дата и время</th><th></th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <div class="form-inline" style="margin-top:8px;gap:8px">
+            <button type="button" class="btn btn-mini" onclick="addStampRow()">+ Штамп</button>
+            <button class="btn btn-primary" onclick="return confirm('Проставить штампы и утвердить служебку?')">🖋 Проставить штампы</button>
+        </div>
+    </form>
+    <?php if (!empty($flexStamps)): ?>
+    <form method="post" action="/memos/<?= (int)$memo['id'] ?>/stamps/clear" style="margin-top:8px" onsubmit="return confirm('Очистить гибкие штампы? Печать вернётся к стандартным подписям.')">
+        <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
+        <button class="btn btn-danger btn-mini">Очистить штампы</button>
+    </form>
+    <?php endif; ?>
+</section>
+<script>
+var STAMP_EMP = <?= json_encode($employees ?? [], JSON_UNESCAPED_UNICODE) ?>;
+var STAMP_PREFILL = <?= json_encode($flexStamps ?: [], JSON_UNESCAPED_UNICODE) ?>;
+var STAMP_LEGACY = <?= json_encode($legacyStamps ?? [], JSON_UNESCAPED_UNICODE) ?>;
+var stampIdx = 0;
+function sEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function empOpts(sel){
+  var o = '<option value="">— ввести вручную —</option>';
+  STAMP_EMP.forEach(function(m){ o += '<option value="'+m.id+'"'+(String(m.id)===String(sel)?' selected':'')+'>'+sEsc(m.full_name)+(m.position?(' — '+sEsc(m.position)):'')+'</option>'; });
+  return o;
+}
+function addStampRow(d){
+  d = d || {};
+  var i = stampIdx++;
+  var tb = document.querySelector('#stampRows tbody');
+  var tr = document.createElement('tr');
+  var types = [['PEP','ПЭП'],['UNEP','УНЭП'],['UKEP','УКЭП']];
+  var topt = types.map(function(t){ return '<option value="'+t[0]+'"'+((d.sign_type||'PEP')===t[0]?' selected':'')+'>'+t[1]+'</option>'; }).join('');
+  tr.innerHTML =
+    '<td><input type="text" name="srow['+i+'][role_label]" list="roleLabels" value="'+sEsc(d.role_label)+'" style="width:100%" placeholder="напр. Директор (утвердил)"></td>'
+    + '<td><select class="s-emp" name="srow['+i+'][signer_user_id]" onchange="stampEmpPick(this)">'+empOpts(d.signer_user_id)+'</select>'
+    + '<input type="text" class="s-name" name="srow['+i+'][signer_name]" value="'+sEsc(d.signer_name)+'" style="width:100%;margin-top:4px" placeholder="ФИО подписанта"></td>'
+    + '<td><input type="text" class="s-pos" name="srow['+i+'][signer_position]" value="'+sEsc(d.signer_position)+'" style="width:100%" placeholder="должность"></td>'
+    + '<td><select name="srow['+i+'][sign_type]">'+topt+'</select></td>'
+    + '<td><input type="datetime-local" name="srow['+i+'][signed_at]" value="'+sEsc((d.signed_at||'').replace(' ','T').substring(0,16))+'"></td>'
+    + '<td style="white-space:nowrap">'
+    + '<button type="button" class="btn btn-mini" title="выше" onclick="stampMove(this,-1)">↑</button> '
+    + '<button type="button" class="btn btn-mini" title="ниже" onclick="stampMove(this,1)">↓</button> '
+    + '<button type="button" class="btn btn-mini btn-danger" onclick="this.closest(\'tr\').remove()">×</button></td>';
+  tb.appendChild(tr);
+}
+function stampEmpPick(sel){
+  var tr = sel.closest('tr'); if(!sel.value){ return; }
+  var m = STAMP_EMP.find(function(x){ return String(x.id)===String(sel.value); });
+  if(m){ tr.querySelector('.s-name').value = m.full_name; tr.querySelector('.s-pos').value = m.position || ''; }
+}
+function stampMove(btn, dir){
+  var tr = btn.closest('tr');
+  if(dir<0 && tr.previousElementSibling){ tr.parentNode.insertBefore(tr, tr.previousElementSibling); }
+  if(dir>0 && tr.nextElementSibling){ tr.parentNode.insertBefore(tr.nextElementSibling, tr); }
+}
+(function(){
+  var seed = STAMP_PREFILL.length ? STAMP_PREFILL : STAMP_LEGACY;
+  if(seed.length){ seed.forEach(function(s){ addStampRow(s); }); } else { addStampRow(); }
+})();
+</script>
+<?php endif; ?>
 
 <section class="panel">
     <h2>Сформированный документ
