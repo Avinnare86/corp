@@ -16,6 +16,7 @@ $roleGroups = [
     'Руководство и финансы' => ['director','deputy_director','dept_head','accountant','hr','timekeeper'],
     'Менеджеры проектов'    => ['anketa_manager','visa_manager','controller'],
     'Специалисты (сделка)'  => ['anketa_worker','visa_worker','piecework_worker'],
+    'Визы — учёт и МИД'     => ['visa_mid'],
 ];
 $roleName = [];
 foreach ($rolesCatalog as $rc) { $roleName[$rc['slug']] = $rc['name']; }

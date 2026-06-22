@@ -160,9 +160,12 @@ class StimulusController extends Controller
 
     private function memoForm(?array $memo, int $authorId, string $kind = 'staff', ?string $direct = null): void
     {
+        // Введённое при ошибке валидации (backToForm сохранил в сессию) — чтобы не терять заполненное.
+        $old = $_SESSION['memo_old'] ?? null;
+        unset($_SESSION['memo_old']);
         $kind = ($memo['kind'] ?? $kind) === 'mgmt' ? 'mgmt' : $kind;
         $direct = $memo['direct_tier'] ?? $direct;   // при редактировании берём из служебки
-        $period = (string) ($memo['period'] ?? date('Y-m'));
+        $period = (string) ($old['period'] ?? $memo['period'] ?? date('Y-m'));
         $isMgmt = $kind === 'mgmt';
         $deptOpts = null;
         $globalMembers = false;   // создание по всей ветке (список всех сотрудников, разные отделы)
@@ -205,7 +208,7 @@ class StimulusController extends Controller
             $cats = self::CATS_STAFF;
             $branchIds = Org::branchDeptIds($authorId);
             $deptOpts = self::deptsByIds($branchIds);
-            $deptId = (int) ($this->input('dept') ?: 0);
+            $deptId = (int) (($old['department_id'] ?? 0) ?: ($this->input('dept') ?: 0));
             if ((!$deptId || !in_array($deptId, $branchIds, true)) && $deptOpts) { $deptId = (int) $deptOpts[0]['id']; }
             $members = $deptId ? Database::all(
                 'SELECT id, full_name, position, oklad, rate_volume, position_id FROM users WHERE department_id = ? AND is_active = 1 ORDER BY full_name',
@@ -246,6 +249,23 @@ class StimulusController extends Controller
         $lines = $memo ? Database::all(
             'SELECT l.*, r.text AS reason_text FROM stimulus_memo_lines l
                LEFT JOIN stimulus_reasons r ON r.id = l.reason_id WHERE l.memo_id = ? ORDER BY l.id', [$memo['id']]) : [];
+        // Восстановление введённого после ошибки: строки и основания берём из old (приоритетнее БД).
+        if ($old && !empty($old['row']) && is_array($old['row'])) {
+            $lines = [];
+            foreach ($old['row'] as $r) {
+                if (empty($r['user_id'])) { continue; }
+                $lines[] = [
+                    'user_id'     => (int) $r['user_id'],
+                    'amount'      => (float) str_replace([' ', ','], ['', '.'], (string) ($r['amount'] ?? 0)),
+                    'pay_kind'    => ($r['pay_kind'] ?? 'monthly') === 'onetime' ? 'onetime' : 'monthly',
+                    'purpose'     => in_array($r['purpose'] ?? '', ['anketas', 'visas', 'other'], true) ? $r['purpose'] : 'other',
+                    'reason_text' => trim((string) ($r['reason'] ?? '')),
+                ];
+            }
+        }
+        $selGrounds = $old
+            ? array_values(array_filter(array_map('intval', (array) ($old['grounds'] ?? []))))
+            : ($memo ? array_filter(array_map('intval', explode(',', (string) $memo['grounds_ids']))) : []);
         $this->view('stimulus/form', [
             'title' => $memo ? 'Служебка №' . ($memo['number'] ?: $memo['id'])
                 : ($isMgmt ? 'Стимул заместителям / гл. бухгалтеру' : 'Новая служебка о стимуле'),
@@ -264,7 +284,10 @@ class StimulusController extends Controller
                 ? Database::all('SELECT id, text FROM stimulus_reasons WHERE is_active = 1 ORDER BY (department_id IS NULL), text')
                 : Database::all('SELECT id, text FROM stimulus_reasons WHERE is_active = 1 AND (department_id = ? OR department_id IS NULL) ORDER BY (department_id IS NULL), text', [(int) $deptId]),
             'sources' => Database::all('SELECT * FROM pay_sources ORDER BY id'),
-            'selGrounds' => $memo ? array_filter(array_map('intval', explode(',', (string)$memo['grounds_ids']))) : [],
+            'selGrounds' => $selGrounds,
+            'fPeriod'  => $period,
+            'fPayKind' => (string) ($old['pay_kind'] ?? $memo['pay_kind'] ?? 'monthly'),
+            'fSource'  => isset($old['source_id']) ? (int) $old['source_id'] : (int) ($memo['source_id'] ?? 0),
             'forecast' => $forecast,
             'csrf' => Auth::csrf(),
         ]);
@@ -298,6 +321,7 @@ class StimulusController extends Controller
         }
 
         if (!$groundIds) { flash('Выберите хотя бы одно основание (раздел 4).', 'error'); $this->backToForm($id, $kind); }
+        if (!$sourceId)  { flash('Выберите источник выплат — это обязательное поле.', 'error'); $this->backToForm($id, $kind); }
         $groundTexts = [];
         foreach ($groundIds as $gid) {
             $t = Database::scalar('SELECT text FROM stimulus_grounds WHERE id = ?', [$gid]);
@@ -449,6 +473,8 @@ class StimulusController extends Controller
 
     private function backToForm(int $id, string $kind = 'staff'): void
     {
+        // Сохранить введённое, чтобы при ошибке валидации форма не очищалась (memoForm подхватит из сессии).
+        $_SESSION['memo_old'] = $_POST;
         if ($id) { $this->redirect('/memos/' . $id . '/edit'); }
         $this->redirect($kind === 'mgmt' ? '/memos/mgmt/new' : '/memos/new');
     }

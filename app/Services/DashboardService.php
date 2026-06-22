@@ -26,7 +26,10 @@ class DashboardService
     public static function forUser(int $uid): array
     {
         $role = Auth::role();
-        $tracksAttendance = $role === 'employee'; // явку ведут рядовые специалисты-сдельщики
+        // Явку ведут рядовые специалисты-сдельщики. «Учёт виз и передача в МИД» (visa_mid) сделкой не занят —
+        // открывать рабочий день ему не нужно (исключаем, если у него нет сдельной роли).
+        $tracksAttendance = $role === 'employee'
+            && !(Auth::has('visa_mid') && !Auth::has('anketa_worker', 'visa_worker', 'piecework_worker'));
 
         return [
             'tracksAttendance' => $tracksAttendance,

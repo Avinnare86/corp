@@ -55,18 +55,18 @@
         </label>
         <?php endif; ?>
         <div class="form-inline" style="align-items:flex-end">
-            <label>Период<input type="month" name="period" value="<?= e($memo['period'] ?? date('Y-m')) ?>" required></label>
+            <label>Период<input type="month" name="period" value="<?= e($fPeriod ?? ($memo['period'] ?? date('Y-m'))) ?>" required></label>
             <label>Вид выплаты по умолчанию
                 <select name="pay_kind" id="defKind">
-                    <option value="monthly" <?= ($memo['pay_kind']??'monthly')==='monthly'?'selected':'' ?>>ежемесячная (пропорц. отработке)</option>
-                    <option value="onetime" <?= ($memo['pay_kind']??'')==='onetime'?'selected':'' ?>>единовременная (полной суммой)</option>
+                    <option value="monthly" <?= ($fPayKind ?? 'monthly')==='monthly'?'selected':'' ?>>ежемесячная (пропорц. отработке)</option>
+                    <option value="onetime" <?= ($fPayKind ?? '')==='onetime'?'selected':'' ?>>единовременная (полной суммой)</option>
                 </select>
             </label>
-            <label>Источник выплат
-                <select name="source_id">
-                    <option value="">—</option>
+            <label>Источник выплат <span style="color:#c0392b">*</span>
+                <select name="source_id" required>
+                    <option value="">— выберите —</option>
                     <?php foreach ($sources as $s): ?>
-                        <option value="<?= (int)$s['id'] ?>" <?= (int)($memo['source_id']??0)===(int)$s['id']?'selected':'' ?>><?= e($s['name']) ?><?= $s['detail']?' ('.e($s['detail']).')':'' ?></option>
+                        <option value="<?= (int)$s['id'] ?>" <?= (int)($fSource ?? 0)===(int)$s['id']?'selected':'' ?>><?= e($s['name']) ?><?= $s['detail']?' ('.e($s['detail']).')':'' ?></option>
                     <?php endforeach; ?>
                 </select>
             </label>

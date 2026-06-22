@@ -44,7 +44,7 @@ if ($uid) {
         }
         if ($g) { $menu['Квота'] = $g; }
     }
-    if ($can('visa_worker', 'visa_manager', 'piecework_worker')) {
+    if ($can('visa_worker', 'visa_manager', 'piecework_worker', 'visa_mid')) {
         $g = [];
         $visaInbox = \App\Controllers\VisaController::inboxCount((int) $uid);
         if ($can('visa_worker')) {
@@ -60,6 +60,11 @@ if ($uid) {
             $g[] = ['/visas/report', 'Отчёт', 0];
             $g[] = ['/visas/report/status', 'Сводный отчёт', 0];
             $g[] = ['/visas/report/period', 'Динамика за период', 0];
+        }
+        // Учётчик виз / передача в МИД — описи и указания (без дублирования с виз-менеджером)
+        if ($can('visa_mid') && !$can('visa_manager')) {
+            $g[] = ['/visas/opis', 'Формирование описей', 0];
+            $g[] = ['/visas/opis/list', 'Описи / Указания', 0];
         }
         if ($can('visa_worker', 'visa_manager')) { $g[] = ['/visas/rating', 'Рейтинг', 0]; }
         if ($can('piecework_worker', 'visa_worker')) { $g[] = ['/piecework', 'Визы/операции (учёт)', 0]; }

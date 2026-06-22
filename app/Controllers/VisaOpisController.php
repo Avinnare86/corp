@@ -21,14 +21,15 @@ class VisaOpisController extends Controller
 {
     private function isVisaManager(array $me): bool
     {
-        return $me['role'] === 'admin' || (int) ($me['is_visa_manager'] ?? 0) === 1;
+        // Доступ к описям/указаниям/доработке: виз-менеджер или роль «Учёт виз и передача в МИД».
+        return Auth::isAdmin() || Auth::has('visa_manager', 'visa_mid');
     }
 
     private function guard(): array
     {
         Auth::requireLogin();
         $me = Auth::user();
-        if (!$this->isVisaManager($me)) { flash('Раздел виз-менеджера.', 'error'); $this->redirect('/'); }
+        if (!$this->isVisaManager($me)) { flash('Раздел учёта виз и передачи в МИД.', 'error'); $this->redirect('/'); }
         return $me;
     }
 
