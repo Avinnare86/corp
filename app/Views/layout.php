@@ -76,7 +76,7 @@ if ($uid) {
         $g = [];
         if ($isTimekeeper || $isHrMgr || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacations', 'Отпуска', $vacInbox]; }
         if ($isTimekeeper) { $g[] = ['/timesheet2', 'Эл. табель', 0]; }
-        if (\App\Controllers\ShiftController::canSee((int) $uid)) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; }
+        if (\App\Controllers\ShiftController::canSee((int) $uid)) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; $g[] = ['/timesheet2?kind=shift', 'Табель 0504421 (2/2)', 0]; }
         if ($isHrAcc) { $g[] = ['/timesheet2/coverage', 'Покрытие табелями', 0]; }
         if ($canSeeStaff) { $g[] = ['/admin/employees', 'Сотрудники', 0]; }
         // управление оргструктурой/должностями/табелем — только менеджер проекта кадры или кадровик

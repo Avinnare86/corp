@@ -7,8 +7,20 @@
     <form method="get" action="/shifts" class="form-inline" style="margin-bottom:10px">
         <label>Месяц<input type="month" name="month" value="<?= e($month) ?>"></label>
         <button class="btn btn-primary">Показать</button>
-        <a class="btn" href="/shifts/export?month=<?= e($month) ?>&range=full">⇩ Excel (весь месяц)</a>
+        <a class="btn" href="/shifts/export?month=<?= e($month) ?>&range=full">⇩ Excel (часы)</a>
     </form>
+    <?php if (!empty($grafikDepts)): ?>
+    <form method="get" action="/shifts/grafik" class="form-inline" style="margin-bottom:10px" target="_blank">
+        <input type="hidden" name="month" value="<?= e($month) ?>">
+        <label>График сменности (печать), отдел
+            <select name="dept">
+                <?php foreach ($grafikDepts as $gd): ?><option value="<?= (int)$gd['id'] ?>"><?= e($gd['name']) ?></option><?php endforeach; ?>
+            </select>
+        </label>
+        <button class="btn">📄 Открыть график (печать/PDF)</button>
+        <span class="muted">официальный «График сменности» на месяц: Р — рабочий, Р/Н — с ночными (дн/ночь), О — отпуск</span>
+    </form>
+    <?php endif; ?>
 
     <?php if (!$emps): ?>
         <p class="muted">Нет активных сотрудников на графике 2/2. Поставьте в карточке сотрудника режим «2/2 Call-центр».</p>

@@ -71,4 +71,18 @@ class Settings
     {
         return (float) self::get('overtime_mult', 1.5);
     }
+
+    /** Начало ночного времени 'HH:MM' (ТК ст.96, по умолчанию 22:00). */
+    public static function nightStart(): string
+    {
+        $v = (string) self::get('night_start', '22:00');
+        return preg_match('/^\d{1,2}:\d{2}$/', $v) ? $v : '22:00';
+    }
+
+    /** Конец ночного времени 'HH:MM' (по умолчанию 06:00). */
+    public static function nightEnd(): string
+    {
+        $v = (string) self::get('night_end', '06:00');
+        return preg_match('/^\d{1,2}:\d{2}$/', $v) ? $v : '06:00';
+    }
 }

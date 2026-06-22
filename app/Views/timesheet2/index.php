@@ -1,7 +1,14 @@
-<h1>Электронный табель</h1>
+<?php $isShift = ($kind ?? 'std') === 'shift'; $kq = $isShift ? '&kind=shift' : ''; ?>
+<h1><?= $isShift ? 'Табель 0504421 (сменный 2/2)' : 'Электронный табель' ?></h1>
+
+<div class="form-inline" style="gap:8px;margin-bottom:10px">
+    <a class="btn btn-mini <?= $isShift ? '' : 'btn-primary' ?>" href="/timesheet2?month=<?= e($month) ?>&half=<?= e((string)$half) ?>">Стандартный (5/2)</a>
+    <a class="btn btn-mini <?= $isShift ? 'btn-primary' : '' ?>" href="/timesheet2?kind=shift&month=<?= e($month) ?>&half=<?= e((string)$half) ?>">Сменный 0504421 (2/2)</a>
+</div>
 
 <section class="panel">
     <form method="get" action="/timesheet2" class="form-inline">
+        <?php if ($isShift): ?><input type="hidden" name="kind" value="shift"><?php endif; ?>
         <label>Месяц<input type="month" name="month" value="<?= e($month) ?>" onchange="this.form.submit()"></label>
         <label>Половина
             <select name="half" onchange="this.form.submit()">
@@ -15,17 +22,32 @@
     <form method="post" action="/timesheet2/create" class="form-inline" style="margin-top:8px">
         <?= csrf_field() ?>
         <input type="hidden" name="period" value="<?= e($period) ?>">
-        <label>Охват
-            <select name="department_id">
-                <?php if ($scope['org']): ?><option value="">Вся организация</option><?php endif; ?>
-                <?php foreach ($departments as $d): if (!$scope['org'] && !in_array((int)$d['id'], $scope['depts'], true)) continue; ?>
-                    <option value="<?= (int)$d['id'] ?>"><?= e($d['name']) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <button class="btn btn-primary">+ Сформировать табель</button>
-        <span class="muted">предзаполняется из явки и утверждённых отпусков; состав сотрудников можно сократить при редактировании</span>
+        <?php if ($isShift): ?>
+            <input type="hidden" name="kind" value="shift">
+            <label>Отдел (2/2)
+                <select name="department_id" required>
+                    <option value="">— выберите отдел —</option>
+                    <?php foreach ($shiftDepts as $d): if (!$scope['org'] && !in_array((int)$d['id'], $scope['depts'], true)) continue; ?>
+                        <option value="<?= (int)$d['id'] ?>"><?= e($d['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <button class="btn btn-primary">+ Сформировать 0504421 из графика</button>
+            <span class="muted">генерируется из сменного графика 2/2; день/ночь — автоматически</span>
+        <?php else: ?>
+            <label>Охват
+                <select name="department_id">
+                    <?php if ($scope['org']): ?><option value="">Вся организация</option><?php endif; ?>
+                    <?php foreach ($departments as $d): if (!$scope['org'] && !in_array((int)$d['id'], $scope['depts'], true)) continue; ?>
+                        <option value="<?= (int)$d['id'] ?>"><?= e($d['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <button class="btn btn-primary">+ Сформировать табель</button>
+            <span class="muted">предзаполняется из явки и утверждённых отпусков; состав сотрудников можно сократить при редактировании</span>
+        <?php endif; ?>
     </form>
+    <?php if ($isShift && !$shiftDepts): ?><p class="muted" style="margin:6px 0 0">Нет отделов с сотрудниками на графике 2/2. Назначьте сотрудникам режим 2/2 в карточке.</p><?php endif; ?>
     <?php endif; ?>
 </section>
 
@@ -45,7 +67,7 @@
                 <td class="muted"><?= e($tb['signer'] ?? '—') ?></td>
                 <td>
                     <?php if ($tb['status']==='draft'): ?>
-                        <a class="btn btn-mini btn-primary" href="/timesheet2/<?= (int)$tb['id'] ?>/edit">Редактировать / подписать</a>
+                        <a class="btn btn-mini btn-primary" href="/timesheet2/<?= (int)$tb['id'] ?>/edit"><?= $isShift ? 'Предпросмотр / подписать' : 'Редактировать / подписать' ?></a>
                         <form method="post" action="/timesheet2/<?= (int)$tb['id'] ?>/delete" class="inline" onsubmit="return confirm('Удалить черновик?')">
                             <?= csrf_field() ?><button class="btn btn-mini btn-danger">×</button></form>
                     <?php else: ?>
@@ -56,6 +78,7 @@
                             <?= csrf_field() ?>
                             <input type="hidden" name="period" value="<?= e($period) ?>">
                             <input type="hidden" name="department_id" value="<?= e($tb['department_id']) ?>">
+                            <?php if ($isShift): ?><input type="hidden" name="kind" value="shift"><?php endif; ?>
                             <button class="btn btn-mini" onclick="return confirm('Создать корректировочный табель?')">↻ Корректировочный</button>
                         </form>
                         <?php endif; ?>

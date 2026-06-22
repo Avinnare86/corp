@@ -919,6 +919,27 @@ if (!columnExists('stimulus_memos', 'pdf_downloaded_by')) {
     $pdo->exec("ALTER TABLE stimulus_memos ADD COLUMN pdf_downloaded_by INT NULL");
     echo "OK  колонка stimulus_memos.pdf_downloaded_by добавлена\n";
 }
+// Сменный график: время начала/конца смены (план/факт) — час дня/ночи считаются автоматически по ночному окну.
+foreach (['plan_start', 'plan_end', 'fact_start', 'fact_end'] as $col) {
+    if (!columnExists('shift_days', $col)) {
+        $pdo->exec("ALTER TABLE shift_days ADD COLUMN $col VARCHAR(5) NULL");   // 'HH:MM'
+        echo "OK  колонка shift_days.$col добавлена\n";
+    }
+}
+// Табель: вид — 'std' (прежний 8ч, один символ/день) | 'shift' (2/2 0504421, генерируется из графика).
+if (!columnExists('tabels', 'kind')) {
+    $pdo->exec("ALTER TABLE tabels ADD COLUMN kind VARCHAR(8) NOT NULL DEFAULT 'std'");
+    echo "OK  колонка tabels.kind добавлена\n";
+}
+// Сменный табель: ячейки по дням JSON [{c:'Я/Н',h:'4/8'},…] + сумма часов за охват (для итогов).
+if (!columnExists('tabel_rows', 'cells')) {
+    $pdo->exec("ALTER TABLE tabel_rows ADD COLUMN cells TEXT NULL");
+    echo "OK  колонка tabel_rows.cells добавлена\n";
+}
+if (!columnExists('tabel_rows', 'hours')) {
+    $pdo->exec($ddlFix("ALTER TABLE tabel_rows ADD COLUMN hours $MONEY NOT NULL DEFAULT 0"));
+    echo "OK  колонка tabel_rows.hours добавлена\n";
+}
 // Линия прибытия анкеты (квота): ЛП + ДЛП (FK на справочники).
 foreach (['arrival_line_id', 'arrival_detail_id'] as $col) {
     if (!columnExists('assignment_items', $col)) {

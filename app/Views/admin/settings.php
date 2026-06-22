@@ -24,6 +24,13 @@
         <label>Множитель сверхурочных часов (×)
             <input type="number" step="0.1" name="overtime_mult" value="<?= e($overtimeMult) ?>">
         </label>
+        <label>Начало ночного времени (ТК ст.96)
+            <input type="time" name="night_start" value="<?= e($nightStart) ?>">
+        </label>
+        <label>Конец ночного времени
+            <input type="time" name="night_end" value="<?= e($nightEnd) ?>">
+        </label>
+        <p class="muted" style="flex-basis:100%;margin:0">Ночное окно делит смены 2/2 на дневные/ночные часы автоматически (для дробного кода «Я/Н»). Применяется к сменам, сохранённым после изменения.</p>
         <button class="btn btn-primary">Сохранить</button>
     </form>
 </section>

@@ -743,6 +743,8 @@ class AdminController extends Controller
             'nightPct'             => Settings::nightPct(),
             'holidayMult'          => Settings::holidayMult(),
             'overtimeMult'         => Settings::overtimeMult(),
+            'nightStart'           => Settings::nightStart(),
+            'nightEnd'             => Settings::nightEnd(),
             'or' => [
                 'key_set' => Secrets::isSet('openrouter_key'),
                 'model'   => (string) Settings::get('openrouter_model'),
@@ -775,6 +777,9 @@ class AdminController extends Controller
         if ($this->input('night_pct') !== null) { Settings::set('night_pct', (float) $this->input('night_pct', 20)); }
         if ($this->input('holiday_mult') !== null) { Settings::set('holiday_mult', (float) $this->input('holiday_mult', 2)); }
         if ($this->input('overtime_mult') !== null) { Settings::set('overtime_mult', (float) $this->input('overtime_mult', 1.5)); }
+        // Ночное окно (ТК ст.96) — для авторазбивки смен на дневные/ночные часы
+        if ($this->input('night_start') !== null) { Settings::set('night_start', preg_match('/^\d{1,2}:\d{2}$/', (string) $this->input('night_start')) ? (string) $this->input('night_start') : '22:00'); }
+        if ($this->input('night_end') !== null) { Settings::set('night_end', preg_match('/^\d{1,2}:\d{2}$/', (string) $this->input('night_end')) ? (string) $this->input('night_end') : '06:00'); }
         // OpenRouter (ИИ для виз)
         if ($this->input('openrouter_key') !== '' && $this->input('openrouter_key') !== null) {
             Secrets::set('openrouter_key', trim((string) $this->input('openrouter_key')));

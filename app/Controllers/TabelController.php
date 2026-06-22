@@ -18,6 +18,67 @@ class TabelController extends Controller
 {
     public const CODES = ['1' => '8', 'V' => 'В', 'O' => 'ОТ', 'B' => 'Б', 'K' => 'К', 'N' => 'НН', '0' => ''];
     public const SIGN_TYPES = ['PEP' => 'Простая ЭП', 'UNEP' => 'УНЭП', 'UKEP' => 'УКЭП'];
+    /** Коды сменного табеля (0504421, колл-центр 2/2): Я=явка днём, Н=ночная работа, О=отпуск, В=выходной. */
+    public const SHIFT_CODES = ['Я' => 'явка днём', 'Н' => 'ночная работа', 'Я/Н' => 'день и ночь', 'О' => 'отпуск', 'В' => 'выходной', 'Б' => 'больничный', 'К' => 'командировка'];
+
+    /** Часы без хвостовых нулей: 12, 6.5, 4/8. */
+    private static function fmtH(float $v): string
+    {
+        return rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.');
+    }
+
+    /** Публичный форматтер часов для вьюх. */
+    public static function fmtHours(float $v): string
+    {
+        return self::fmtH($v);
+    }
+
+    /** Отделы, где есть сотрудники на графике 2/2 (для выбора при формировании сменного табеля). */
+    private static function shiftDeptIds(): array
+    {
+        return array_map(fn($r) => (int) $r['department_id'], Database::all(
+            "SELECT DISTINCT department_id FROM users WHERE schedule_type='2_2' AND is_active=1 AND department_id IS NOT NULL"));
+    }
+
+    /**
+     * Сформировать строки сменного табеля (0504421) из сменного графика shift_days за период.
+     * По каждому дню: факт (если введён) иначе план; разбивка день/ночь уже посчитана в shift_days.
+     * Ячейка: код Я/Н/Я-Н + часы «12» или «дн/ночь»; утверждённый отпуск → О; иначе пусто (выходной).
+     */
+    private function buildShift(int $tid, int $deptId, string $period): void
+    {
+        [$start, $end] = $this->range($period);
+        $nDays = (int) ((strtotime($end) - strtotime($start)) / 86400) + 1;
+        $emps = Database::all("SELECT id FROM users WHERE department_id=? AND schedule_type='2_2' AND is_active=1 ORDER BY full_name", [$deptId]);
+        foreach ($emps as $e) {
+            $eid = (int) $e['id'];
+            $cells = []; $days = 0; $hoursSum = 0.0;
+            for ($i = 0; $i < $nDays; $i++) {
+                $dte = date('Y-m-d', strtotime($start) + $i * 86400);
+                $cell = ['c' => '', 'h' => ''];
+                $sd = Database::one('SELECT * FROM shift_days WHERE employee_id=? AND work_date=?', [$eid, $dte]);
+                $onVac = Database::scalar("SELECT 1 FROM vacation_requests WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?", [$eid, $dte, $dte]);
+                $hours = 0.0; $night = 0.0;
+                if ($sd) {
+                    $useFact = (float) $sd['fact_hours'] > 0;
+                    $hours = (float) ($useFact ? $sd['fact_hours'] : $sd['plan_hours']);
+                    $night = (float) ($useFact ? $sd['fact_night'] : $sd['plan_night']);
+                }
+                if ($hours > 0) {
+                    $dayH = max(0.0, $hours - $night);
+                    if ($dayH > 0 && $night > 0) { $cell = ['c' => 'Я/Н', 'h' => self::fmtH($dayH) . '/' . self::fmtH($night)]; }
+                    elseif ($night > 0)          { $cell = ['c' => 'Н',   'h' => self::fmtH($night)]; }
+                    else                          { $cell = ['c' => 'Я',   'h' => self::fmtH($hours)]; }
+                    $days++; $hoursSum += $hours;
+                } elseif ($onVac) {
+                    $cell = ['c' => 'О', 'h' => ''];
+                }
+                $cells[] = $cell;
+            }
+            Database::insert('INSERT INTO tabel_rows (tabel_id, employee_id, day_marks, days, cells, hours) VALUES (?,?,?,?,?,?)',
+                [$tid, $eid, '', $days, json_encode($cells, JSON_UNESCAPED_UNICODE), round($hoursSum, 2)]);
+        }
+    }
 
     // ---------- права ----------
     /** Отделы, по которым пользователь может вести табель; 'org' = вся организация. */
@@ -57,20 +118,28 @@ class TabelController extends Controller
         $month = (string) ($this->input('month') ?: date('Y-m'));
         $half = (int) ($this->input('half') ?: (date('j') <= 15 ? 1 : 2));
         $period = "$month-$half";
+        $kind = $this->input('kind') === 'shift' ? 'shift' : 'std';
 
         $tabels = Database::all(
             "SELECT t.*, d.name AS dept_name, uc.full_name AS creator, us.full_name AS signer
                FROM tabels t LEFT JOIN departments d ON d.id = t.department_id
                LEFT JOIN users uc ON uc.id = t.created_by LEFT JOIN users us ON us.id = t.signer_id
-              WHERE t.period = ? ORDER BY t.department_id, t.revision", [$period]);
+              WHERE t.period = ? AND COALESCE(t.kind,'std') = ? ORDER BY t.department_id, t.revision", [$period, $kind]);
+
+        // для сменного табеля (2/2) — только отделы, где есть сотрудники на графике 2/2
+        $shiftIds = self::shiftDeptIds();
+        $shiftDepts = $shiftIds
+            ? Database::all('SELECT * FROM departments WHERE id IN (' . implode(',', $shiftIds) . ') ORDER BY name')
+            : [];
 
         $this->view('timesheet2/index', [
-            'title' => 'Электронный табель',
-            'month' => $month, 'half' => $half, 'period' => $period,
+            'title' => $kind === 'shift' ? 'Табель 0504421 (сменный 2/2)' : 'Электронный табель',
+            'month' => $month, 'half' => $half, 'period' => $period, 'kind' => $kind,
             'tabels' => $tabels,
             'canCreate' => (bool) ($scope['org'] || $scope['depts']),
             'scope' => $scope,
             'departments' => Database::all('SELECT * FROM departments ORDER BY name'),
+            'shiftDepts' => $shiftDepts,
         ]);
     }
 
@@ -82,17 +151,25 @@ class TabelController extends Controller
         $me = Auth::user();
         $scope = $this->scopeFor($me);
         $period = (string) $this->input('period');
+        $kind = $this->input('kind') === 'shift' ? 'shift' : 'std';
         $deptId = $this->input('department_id') !== '' && $this->input('department_id') !== null ? (int) $this->input('department_id') : null;
 
+        if ($kind === 'shift' && $deptId === null) { flash('Сменный табель (2/2) формируется по отделу — выберите отдел.', 'error'); $this->redirect('/timesheet2?kind=shift'); }
         if ($deptId === null && !$scope['org']) { flash('Табель по организации может вести только орг-табельщик.', 'error'); $this->redirect('/timesheet2'); }
         if ($deptId !== null && !$scope['org'] && !in_array($deptId, $scope['depts'], true)) { flash('Нет прав на этот отдел.', 'error'); $this->redirect('/timesheet2'); }
 
         $rev = (int) Database::scalar(
-            'SELECT COALESCE(MAX(revision),-1)+1 FROM tabels WHERE period=? AND ' . ($deptId === null ? 'department_id IS NULL' : 'department_id = ?'),
-            $deptId === null ? [$period] : [$period, $deptId]);
+            'SELECT COALESCE(MAX(revision),-1)+1 FROM tabels WHERE period=? AND COALESCE(kind,\'std\')=? AND ' . ($deptId === null ? 'department_id IS NULL' : 'department_id = ?'),
+            $deptId === null ? [$period, $kind] : [$period, $kind, $deptId]);
 
-        $tid = Database::insert('INSERT INTO tabels (period, department_id, revision, created_by) VALUES (?,?,?,?)',
-            [$period, $deptId, $rev, $me['id']]);
+        $tid = Database::insert('INSERT INTO tabels (period, department_id, revision, created_by, kind) VALUES (?,?,?,?,?)',
+            [$period, $deptId, $rev, $me['id'], $kind]);
+
+        if ($kind === 'shift') {
+            $this->buildShift($tid, (int) $deptId, $period);
+            flash($rev > 0 ? "Создан корректировочный сменный табель №{$rev} (из графика 2/2)." : 'Сменный табель 0504421 сформирован из графика 2/2.');
+            $this->redirect('/timesheet2/' . $tid . '/edit');
+        }
 
         // строки: сотрудники охвата; предзаполнение: явка='1', утверждённый отпуск='O'
         [$start, $end] = $this->range($period);
@@ -141,15 +218,44 @@ class TabelController extends Controller
         $dates = [];
         for ($ts = strtotime($start); $ts <= strtotime($end); $ts += 86400) { $dates[] = date('Y-m-d', $ts); }
         $rows = Database::all(
-            "SELECT r.*, u.full_name, d.name AS dept_name FROM tabel_rows r JOIN users u ON u.id=r.employee_id
+            "SELECT r.*, u.full_name, u.position, d.name AS dept_name FROM tabel_rows r JOIN users u ON u.id=r.employee_id
                LEFT JOIN departments d ON d.id=u.department_id WHERE r.tabel_id = ? ORDER BY d.name, u.full_name", [$id]);
         // мои сертификаты для блока подписи
         $certs = Database::all('SELECT * FROM user_certificates WHERE user_id = ? AND valid_to >= ? ORDER BY sign_type', [$me['id'], date('Y-m-d')]);
+        if (($t['kind'] ?? 'std') === 'shift') {
+            foreach ($rows as &$r) { $r['cells_arr'] = json_decode((string) $r['cells'], true) ?: []; }
+            unset($r);
+            $this->view('timesheet2/shift_edit', [
+                'title' => 'Сменный табель 0504421 — предпросмотр',
+                't' => $t, 'dates' => $dates, 'rows' => $rows,
+                'signTypes' => self::SIGN_TYPES, 'certs' => $certs,
+            ]);
+            return;
+        }
         $this->view('timesheet2/edit', [
             'title' => 'Табель — редактирование',
             't' => $t, 'dates' => $dates, 'rows' => $rows,
             'codes' => self::CODES, 'signTypes' => self::SIGN_TYPES, 'certs' => $certs,
         ]);
+    }
+
+    /** Пересформировать черновик сменного табеля из текущего графика 2/2 (после правок в /shifts). */
+    public function regenerate(string $id): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        $t = $this->loadTabel($id);
+        if (($t['kind'] ?? 'std') !== 'shift') { $this->redirect('/timesheet2/' . $id . '/edit'); }
+        if ($t['status'] !== 'draft') { flash('Подписанный табель пересформировать нельзя — создайте корректировочный.', 'error'); $this->redirect('/timesheet2/' . $id . '/view'); }
+        $scope = $this->scopeFor($me);
+        if (!$scope['org'] && !($t['department_id'] && in_array((int) $t['department_id'], $scope['depts'], true))) {
+            flash('Нет прав на редактирование.', 'error'); $this->redirect('/timesheet2');
+        }
+        Database::run('DELETE FROM tabel_rows WHERE tabel_id=?', [$id]);
+        $this->buildShift((int) $id, (int) $t['department_id'], (string) $t['period']);
+        flash('Сменный табель пересформирован из графика 2/2.');
+        $this->redirect('/timesheet2/' . $id . '/edit');
     }
 
     /** Сохранение отметок (и удаление снятых сотрудников / «на часть сотрудников»). */
@@ -217,8 +323,8 @@ class TabelController extends Controller
             }
         }
 
-        // криптографический отпечаток содержимого
-        $rows = Database::all('SELECT employee_id, day_marks, days FROM tabel_rows WHERE tabel_id = ? ORDER BY employee_id', [$id]);
+        // криптографический отпечаток содержимого (вкл. ячейки сменного табеля)
+        $rows = Database::all('SELECT employee_id, day_marks, cells, days, hours FROM tabel_rows WHERE tabel_id = ? ORDER BY employee_id', [$id]);
         $secret = Settings::get('sign_secret');
         if (!$secret) { $secret = bin2hex(random_bytes(16)); Settings::set('sign_secret', $secret); }
         $now = date('Y-m-d H:i:s');
@@ -280,6 +386,20 @@ class TabelController extends Controller
             "SELECT r.*, u.full_name, u.position, d.name AS dept_name FROM tabel_rows r JOIN users u ON u.id=r.employee_id
                LEFT JOIN departments d ON d.id=u.department_id WHERE r.tabel_id = ? ORDER BY d.name, u.full_name", [$id]);
         $cert = Database::one('SELECT * FROM user_certificates WHERE serial = ?', [$t['cert_serial']]);
+        if (($t['kind'] ?? 'std') === 'shift') {
+            foreach ($rows as &$r) { $r['cells_arr'] = json_decode((string) $r['cells'], true) ?: []; }
+            unset($r);
+            $this->view('timesheet2/shift_view', [
+                'title' => 'Табель 0504421 (подписан)',
+                't' => $t, 'dates' => $dates, 'rows' => $rows, 'cert' => $cert,
+                'orgName' => (string) (Settings::get('org_name', 'ФГБУ «Интеробразование»')),
+                'signers' => [
+                    Settings::get('tabel_sign_1', 'Заместитель генерального директора'),
+                    Settings::get('tabel_sign_2', 'Главный бухгалтер'),
+                ],
+            ], false);
+            return;
+        }
         $this->view('timesheet2/view', [
             'title' => 'Табель (подписан)',
             't' => $t, 'dates' => $dates, 'rows' => $rows, 'cert' => $cert, 'codes' => self::CODES,
@@ -356,10 +476,32 @@ class TabelController extends Controller
         [$start, $end] = $this->range($t['period']);
         $dates = [];
         for ($ts = strtotime($start); $ts <= strtotime($end); $ts += 86400) { $dates[] = date('d', $ts); }
-        $rows = [];
-        foreach (Database::all(
+        $src = Database::all(
             "SELECT r.*, u.full_name, u.position, d.name AS dept FROM tabel_rows r JOIN users u ON u.id=r.employee_id
-               LEFT JOIN departments d ON d.id=u.department_id WHERE r.tabel_id=? ORDER BY d.name, u.full_name", [$id]) as $r) {
+               LEFT JOIN departments d ON d.id=u.department_id WHERE r.tabel_id=? ORDER BY d.name, u.full_name", [$id]);
+
+        if (($t['kind'] ?? 'std') === 'shift') {
+            // Две строки на сотрудника: коды (Я/Н/О) и часы (12 / 4/8) — как в форме 0504421.
+            $rows = [];
+            foreach ($src as $r) {
+                $cells = json_decode((string) $r['cells'], true) ?: [];
+                $codeLine = [$r['full_name'], $r['position'], 'Код'];
+                $hourLine = ['', '', 'Часы'];
+                foreach ($dates as $i => $dd) { $codeLine[] = $cells[$i]['c'] ?? ''; $hourLine[] = $cells[$i]['h'] ?? ''; }
+                $codeLine[] = (int) $r['days'];
+                $hourLine[] = self::fmtH((float) $r['hours']);
+                $rows[] = $codeLine; $rows[] = $hourLine;
+            }
+            Xlsx::download("tabel-0504421-{$t['period']}-rev{$t['revision']}.xlsx", [[
+                'name' => '0504421',
+                'headers' => array_merge(['ФИО', 'Должность', ''], $dates, ['Итого дни/часы']),
+                'rows' => $rows,
+            ]]);
+            return;
+        }
+
+        $rows = [];
+        foreach ($src as $r) {
             $line = [$r['dept'] ?: '—', $r['full_name'], $r['position']];
             $m = str_split((string) $r['day_marks']);
             foreach ($dates as $i => $dd) { $line[] = self::CODES[$m[$i] ?? '0'] ?? ''; }

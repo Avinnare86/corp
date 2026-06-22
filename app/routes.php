@@ -276,6 +276,7 @@ $router->post('/timesheet2/create',      [TabelController::class, 'create']);
 $router->get('/timesheet2/{id}/edit',    [TabelController::class, 'edit']);
 $router->post('/timesheet2/{id}/save',   [TabelController::class, 'save']);
 $router->post('/timesheet2/{id}/sign',   [TabelController::class, 'sign']);
+$router->post('/timesheet2/{id}/regenerate', [TabelController::class, 'regenerate']);
 $router->get('/timesheet2/{id}/view',    [TabelController::class, 'viewSigned']);
 $router->get('/timesheet2/{id}/export',  [TabelController::class, 'export']);
 $router->post('/timesheet2/{id}/delete', [TabelController::class, 'destroy']);
@@ -284,6 +285,8 @@ $router->get('/shifts',         [\App\Controllers\ShiftController::class, 'index
 $router->get('/shifts/edit',    [\App\Controllers\ShiftController::class, 'edit']);
 $router->post('/shifts/save',   [\App\Controllers\ShiftController::class, 'save']);
 $router->get('/shifts/export',  [\App\Controllers\ShiftController::class, 'export']);
+$router->get('/shifts/grafik',  [\App\Controllers\ShiftController::class, 'grafik']);
+$router->get('/shifts/grafik/export', [\App\Controllers\ShiftController::class, 'grafikExport']);
 
 // --- Меню контролёра ---
 $router->get('/inspect',                  [InspectionController::class, 'index']);
