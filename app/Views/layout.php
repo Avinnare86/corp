@@ -149,8 +149,8 @@ if ($uid) {
     <link rel="stylesheet" href="/assets/style.css">
     <script defer src="/assets/app.js?v=2"></script>
 </head>
-<?php $mob = $_COOKIE['mobmode'] ?? ''; ?>
-<body class="<?= $mob === 'on' ? 'mobile-mode' : ($mob === 'off' ? 'force-desktop' : '') ?>">
+<?php $mobView = $_COOKIE['mobview'] ?? ''; ?>
+<body class="<?= $mobView === 'full' ? 'force-desktop' : '' ?>">
 <header class="topbar">
     <a class="brand" href="/">
         <span class="mark">
@@ -178,7 +178,9 @@ if ($uid) {
             echo '</div></div>';
         }
         ?>
+        <div class="nav-tablemode"><button type="button" id="tblViewBtn" onclick="toggleTableView()">📋 Показать полные таблицы</button></div>
     </nav>
+    <button type="button" class="nav-burger" onclick="navBurger()" aria-label="Меню">☰</button>
     <script>
     function navToggle(btn){
         var g = btn.parentElement, was = g.classList.contains('open');
@@ -190,7 +192,6 @@ if ($uid) {
     });
     </script>
     <div class="user">
-        <button type="button" id="mobToggle" class="btn-mob" onclick="toggleMobile()" title="Телефонный вид: авто / включить / выключить">📱 Телефон: авто</button>
         <span><?= e($authUser['full_name'] ?? '') ?></span>
         <a href="/password/change" title="Сменить пароль">Пароль</a>
         <a class="btn-logout" href="/logout">Выход</a>

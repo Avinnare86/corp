@@ -1,29 +1,43 @@
-/* Глобальный скрипт портала: сортировка таблиц по клику + карточки на телефоне + переключатель «телефонный вид».
-   Подключается один раз в layout.php (defer) и работает на всех страницах. */
+/* Глобальный скрипт портала (подключается один раз в layout.php, defer):
+   - гамбургер-меню на телефоне;
+   - умная адаптация таблиц: данные → карточки (data-label), формы/широкие → горизонтальная прокрутка;
+   - переключатель «Карточки / Полные таблицы» (внизу гамбургер-меню);
+   - сортировка любых таблиц по клику на заголовок. */
 (function () {
   'use strict';
 
-  // ---------- cookie ----------
   function getCookie(n) { var m = document.cookie.match('(?:^|; )' + n + '=([^;]*)'); return m ? decodeURIComponent(m[1]) : ''; }
   function setCookie(n, v) { document.cookie = n + '=' + encodeURIComponent(v) + ';path=/;max-age=' + (3600 * 24 * 365); }
 
-  // ---------- мобильный режим: '' (авто) | 'on' (всегда карточки) | 'off' (всегда таблицы) ----------
-  function applyMobile(state) {
-    document.body.classList.remove('mobile-mode', 'force-desktop');
-    if (state === 'on') document.body.classList.add('mobile-mode');
-    else if (state === 'off') document.body.classList.add('force-desktop');
-  }
-  function mobLabel(state) { return state === 'on' ? '📱 Телефон: вкл' : (state === 'off' ? '🖥 Полные таблицы' : '📱 Телефон: авто'); }
-  function updMobBtn(state) { var b = document.getElementById('mobToggle'); if (b) b.textContent = mobLabel(state); }
-  window.toggleMobile = function () {
-    var s = getCookie('mobmode');
-    var next = s === 'on' ? 'off' : (s === 'off' ? '' : 'on'); // авто → вкл → выкл → авто
-    setCookie('mobmode', next); applyMobile(next); updMobBtn(next);
+  // ---------- переключатель карточки/полные таблицы ----------
+  function applyView(v) { document.body.classList.toggle('force-desktop', v === 'full'); }
+  function viewLabel(v) { return v === 'full' ? '🗂 Показать карточки' : '📋 Показать полные таблицы'; }
+  window.toggleTableView = function () {
+    var v = getCookie('mobview') === 'full' ? '' : 'full';
+    setCookie('mobview', v); applyView(v);
+    var b = document.getElementById('tblViewBtn'); if (b) b.textContent = viewLabel(v);
   };
 
-  // ---------- карточки: проставить data-label из заголовков ----------
-  function labelTable(t) {
-    if (!t.tHead || !t.tHead.rows.length) return;
+  // ---------- гамбургер ----------
+  window.navBurger = function () {
+    var tb = document.querySelector('.topbar'); if (tb) tb.classList.toggle('nav-open');
+  };
+
+  // ---------- классификация таблиц ----------
+  function isWide(t) {
+    if (!t.tHead || !t.tHead.rows.length) return true;                 // нет шапки — не карточки
+    if (t.tBodies[0] && t.tBodies[0].querySelector('input,select,textarea')) return true; // поля ввода
+    // строки со span по колонкам ломают карточки
+    var tb = t.tBodies[0];
+    if (tb) { for (var i = 0; i < tb.rows.length; i++) { var r = tb.rows[i]; for (var j = 0; j < r.cells.length; j++) { if (r.cells[j].colSpan > 1) return true; } } }
+    return false;
+  }
+  function wrapScroll(t) {
+    if (t.parentElement && t.parentElement.classList.contains('table-scroll')) return;
+    var w = document.createElement('div'); w.className = 'table-scroll';
+    t.parentNode.insertBefore(w, t); w.appendChild(t);
+  }
+  function labelCards(t) {
     var labels = [].map.call(t.tHead.rows[0].cells, function (th) { return th.textContent.trim(); });
     [].forEach.call(t.tBodies, function (tb) {
       [].forEach.call(tb.rows, function (tr) {
@@ -34,29 +48,27 @@
 
   // ---------- сортировка ----------
   function num(s) {
-    var d = s.match(/^(\d{2})\.(\d{2})\.(\d{2,4})$/);              // дата дд.мм.гггг → число гггг-мм-дд
+    var d = s.match(/^(\d{2})\.(\d{2})\.(\d{2,4})$/);
     if (d) { var y = d[3].length === 2 ? '20' + d[3] : d[3]; return +(y + d[2] + d[1]); }
     var x = s.replace(/[^\d.,-]/g, '').replace(/\s/g, '').replace(',', '.');
-    var f = parseFloat(x);
-    return (x === '' || isNaN(f)) ? NaN : f;
+    var f = parseFloat(x); return (x === '' || isNaN(f)) ? NaN : f;
   }
   function cmp(a, b) { var na = num(a), nb = num(b); if (!isNaN(na) && !isNaN(nb)) return na - nb; return a.localeCompare(b, 'ru'); }
   function cellText(tr, i) { var c = tr.cells[i]; return c ? (c.textContent || '').trim() : ''; }
-
   function sortTable(t, col, asc) {
     var tb = t.tBodies[0]; if (!tb) return;
     var all = [].slice.call(tb.rows);
     var totals = all.filter(function (r) { return r.classList.contains('total'); });
     var rows = all.filter(function (r) { return !r.classList.contains('total'); });
     rows.sort(function (r1, r2) { var d = cmp(cellText(r1, col), cellText(r2, col)); return asc ? d : -d; });
-    rows.forEach(function (r) { tb.appendChild(r); });   // переносим целые <tr> — формы/textarea сохраняются
-    totals.forEach(function (r) { tb.appendChild(r); }); // итоговые строки всегда вниз
+    rows.forEach(function (r) { tb.appendChild(r); });
+    totals.forEach(function (r) { tb.appendChild(r); });
   }
   function makeSortable(t) {
     if (!t.tHead || !t.tHead.rows.length) return;
     var head = t.tHead.rows[0];
     [].forEach.call(head.cells, function (th, i) {
-      if (th.classList.contains('nosort') || th.textContent.trim() === '') return; // пропускаем «действие»/пустые
+      if (th.classList.contains('nosort') || th.textContent.trim() === '') return;
       th.classList.add('sortable'); th.title = 'Нажмите, чтобы упорядочить';
       th.addEventListener('click', function () {
         var asc = th.getAttribute('data-sort') !== 'asc';
@@ -69,9 +81,15 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
-    var state = getCookie('mobmode');
-    applyMobile(state); updMobBtn(state);
-    [].forEach.call(document.querySelectorAll('table.table'), function (t) { labelTable(t); makeSortable(t); });
+    applyView(getCookie('mobview'));
+    var b = document.getElementById('tblViewBtn'); if (b) b.textContent = viewLabel(getCookie('mobview'));
+
+    [].forEach.call(document.querySelectorAll('table.table'), function (t) {
+      if (isWide(t)) { t.classList.add('tbl-wide'); wrapScroll(t); }
+      else { t.classList.add('tbl-cards'); labelCards(t); }
+      makeSortable(t);
+    });
+    // Грид виз и прочие .vgrid — всегда широкие (прокрутка), сортируемые.
     [].forEach.call(document.querySelectorAll('table.vgrid'), function (t) { makeSortable(t); });
   });
 })();

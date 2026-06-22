@@ -544,35 +544,48 @@ button.btn{font-family:var(--body)}
 .table th.sort-asc::after,.vgrid th.sort-asc::after{content:" ▲";font-size:.7em}
 .table th.sort-desc::after,.vgrid th.sort-desc::after{content:" ▼";font-size:.7em}
 
-/* ===== Кнопка «телефонный вид» в шапке ===== */
-.btn-mob{background:transparent;border:1px solid rgba(255,255,255,.45);color:#fff;border-radius:8px;
-  padding:4px 9px;font-size:.78rem;cursor:pointer;white-space:nowrap;font-family:inherit}
-.btn-mob:hover{background:rgba(255,255,255,.16)}
-
-/* ===== Карточный режим таблиц (телефон) =====
-   Вертикально (узкий портрет, авто) ИЛИ принудительно (body.mobile-mode) → таблица превращается в карточки.
-   body.force-desktop отменяет авто-режим (полные таблицы + горизонтальная прокрутка). .vgrid не трогаем. */
-@media(max-width:560px){
-  body:not(.force-desktop) .table{min-width:0!important;border:0}
-  body:not(.force-desktop) .table thead{display:none}
-  body:not(.force-desktop) .table tbody tr{display:block;border:1px solid var(--line);border-radius:12px;
-    margin:0 0 10px;padding:6px 12px;background:var(--surface)}
-  body:not(.force-desktop) .table tbody tr:hover{background:var(--surface)}
-  body:not(.force-desktop) .table td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
-    border:0;padding:5px 0;text-align:right}
-  body:not(.force-desktop) .table td::before{content:attr(data-label);font-weight:600;color:var(--muted);
-    text-align:left;white-space:nowrap;flex:0 0 auto}
-  body:not(.force-desktop) .table td:empty{display:none}
+/* ===== Гамбургер-меню (телефон) + переключатель вида таблиц ===== */
+.nav-burger{display:none;background:transparent;border:1px solid var(--line);color:var(--primary);
+  border-radius:9px;padding:4px 11px;font-size:1.25rem;line-height:1.1;cursor:pointer;font-family:inherit}
+.nav-tablemode{display:none}
+@media(max-width:900px){
+  .nav-burger{display:inline-flex;align-items:center;order:2;margin-left:auto}
+  .user{order:3}
+  .topbar .nav{display:none}
+  .topbar.nav-open .nav{display:flex}
+  .nav-tablemode{display:block;width:100%;margin-top:8px;padding-top:10px;border-top:1px solid var(--line)}
+  .nav-tablemode button{width:100%;background:var(--sky);border:1px solid var(--line);color:var(--primary);
+    border-radius:10px;padding:11px;font-size:.92rem;font-weight:600;cursor:pointer;font-family:inherit}
 }
-body.mobile-mode .table{min-width:0!important;border:0}
-body.mobile-mode .table thead{display:none}
-body.mobile-mode .table tbody tr{display:block;border:1px solid var(--line);border-radius:12px;
-  margin:0 0 10px;padding:6px 12px;background:var(--surface)}
-body.mobile-mode .table tbody tr:hover{background:var(--surface)}
-body.mobile-mode .table td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
-  border:0;padding:5px 0;text-align:right}
-body.mobile-mode .table td::before{content:attr(data-label);font-weight:600;color:var(--muted);
-  text-align:left;white-space:nowrap;flex:0 0 auto}
-body.mobile-mode .table td:empty{display:none}
-/* Принудительно полные таблицы: широкие прокручиваются внутри панели */
+
+/* ===== Адаптация таблиц на телефоне =====
+   .tbl-cards (данные) → карточки; .tbl-wide (формы/грид) → горизонтальная прокрутка (.table-scroll).
+   body.force-desktop отменяет карточки. Классы проставляет app.js. */
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+@media(max-width:760px){
+  body:not(.force-desktop) .tbl-cards{min-width:0!important;border:0}
+  body:not(.force-desktop) .tbl-cards thead{display:none}
+  body:not(.force-desktop) .tbl-cards tbody tr{display:block;border:1px solid var(--line);border-radius:12px;
+    margin:0 0 10px;padding:8px 12px;background:var(--surface)}
+  body:not(.force-desktop) .tbl-cards tbody tr:hover{background:var(--surface)}
+  body:not(.force-desktop) .tbl-cards td{display:flex;justify-content:space-between;align-items:baseline;
+    gap:14px;border:0;padding:5px 0;text-align:right}
+  body:not(.force-desktop) .tbl-cards td::before{content:attr(data-label);font-weight:600;color:var(--muted);
+    text-align:left;white-space:nowrap;flex:0 0 auto}
+  body:not(.force-desktop) .tbl-cards td:empty{display:none}
+  body:not(.force-desktop) .tbl-cards tr.total{border:1px solid var(--primary)}
+  /* формы и тач-таргеты */
+  .dash-comm{grid-template-columns:1fr}
+  .row-form{flex-direction:column;align-items:stretch}
+  .row-form input,.row-form select{width:100%}
+  .row-form input[name=full_name]{min-width:0}
+  .btn,.btn-mini{min-height:38px;display:inline-flex;align-items:center}
+  .table-scroll input[type=checkbox],.vgrid input[type=checkbox]{width:20px;height:20px}
+  /* грид виз: плотнее + липкие первые столбцы (чекбокс + Загр. №) */
+  .vgrid{font-size:.82rem}
+  .vgrid th,.vgrid td{padding:4px 5px}
+  .vgrid th:nth-child(1),.vgrid td:nth-child(1){position:sticky;left:0;width:30px;background:var(--surface);z-index:2}
+  .vgrid th:nth-child(2),.vgrid td:nth-child(2){position:sticky;left:30px;background:var(--surface);z-index:2}
+}
+/* Принудительно полные таблицы (выбор пользователя): широкие прокручиваются */
 body.force-desktop .panel{overflow-x:auto}
