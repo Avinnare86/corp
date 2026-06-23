@@ -8,7 +8,7 @@ stages:
   - deploy
 
 variables:
-  SERVICE_DIR: "$SERVICE_DIR"
+  SERVICE_DIR: "/home/docker/corp"
 
 docker-build:
   tags:
