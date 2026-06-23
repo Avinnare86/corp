@@ -1,0 +1,46 @@
+image: docker:27.1.1
+
+services:
+  - docker:27.1.1-dind
+
+stages:
+  - build
+  - deploy
+
+variables:
+  SERVICE_DIR: "$SERVICE_DIR"
+
+docker-build:
+  tags:
+    - test
+  stage: build
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - echo \"$ENV_FILE\" > ./.env
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t registry.ined.ru/phpprojects/corp/corp:latest ./
+    - docker push registry.ined.ru/phpprojects/corp/corp:latest
+
+deploy test:
+  tags:
+    - test
+  stage: deploy
+  image: instrumentisto/rsync-ssh:alpine3.18-r4
+  script:
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo "$SSH_PRIVATE_KEY_TEST" >> ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -p $SSH_PORT_NEW_TEST $HOST_NEW_TEST >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - ssh -p $SSH_PORT_NEW_TEST $SSH_USER_TEST@$HOST_NEW_TEST "mkdir -p $SERVICE_DIR"
+    - ssh -p $SSH_PORT_NEW_TEST $SSH_USER_TEST@$HOST_NEW_TEST "test -f $SERVICE_DIR/docker-compose.yml && docker compose -f $SERVICE_DIR/docker-compose.yml down || echo \"no docker file\""
+    - rsync -avzhe "ssh -p $SSH_PORT_NEW_TEST" deploy/test/docker-compose.yml $SSH_USER_TEST@$HOST_NEW_TEST:$SERVICE_DIR/docker-compose.yml
+    - ssh -p $SSH_PORT_NEW_TEST $SSH_USER_TEST@$HOST_NEW_TEST "echo \"$ENV_FILE\" > $SERVICE_DIR/.env"
+    - ssh -p $SSH_PORT_NEW_TEST $SSH_USER_TEST@$HOST_NEW_TEST "docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY"
+    - ssh -p $SSH_PORT_NEW_TEST $SSH_USER_TEST@$HOST_NEW_TEST "docker compose -f $SERVICE_DIR/docker-compose.yml up -d"
+
+
