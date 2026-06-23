@@ -79,6 +79,7 @@ if ($uid) {
         if ($isTimekeeper || $canShift) { $g[] = ['/timesheet2', 'Электронный табель', 0]; }
         if ($canShift) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; }
         if ($isHrAcc) { $g[] = ['/timesheet2/coverage', 'Покрытие табелями', 0]; }
+        if ($isAdmin || $can('accountant', 'director', 'finance_manager')) { $g[] = ['/timesheet2/coverage-acc', 'Покрытие (бухгалтерия)', 0]; }
         if ($canSeeStaff) { $g[] = ['/admin/employees', 'Сотрудники', 0]; }
         // управление оргструктурой/должностями/табелем — только менеджер проекта кадры или кадровик
         if ($isHrMgr) {

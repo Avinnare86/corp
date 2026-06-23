@@ -272,6 +272,8 @@ $router->post('/budget/source/{id}/delete', [BudgetController::class, 'deleteSou
 // --- Электронный табель (полумесячный, с ЭП и ревизиями) ---
 $router->get('/timesheet2',              [TabelController::class, 'index']);
 $router->get('/timesheet2/coverage',     [TabelController::class, 'coverage']);
+$router->get('/timesheet2/coverage-acc', [TabelController::class, 'accCoverage']);
+$router->get('/timesheet2/coverage-acc/export', [TabelController::class, 'accCoverageExport']);
 $router->post('/timesheet2/create',      [TabelController::class, 'create']);
 $router->get('/timesheet2/{id}/edit',    [TabelController::class, 'edit']);
 $router->post('/timesheet2/{id}/save',   [TabelController::class, 'save']);

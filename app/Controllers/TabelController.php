@@ -532,6 +532,82 @@ class TabelController extends Controller
         ]);
     }
 
+    /** Доступ к покрытию для бухгалтерии (бухгалтер по флагу/роли, директор, фин-менеджер, админ). */
+    private function accGate(): void
+    {
+        Auth::requireLogin();
+        $me = Auth::user();
+        $ok = in_array($me['role'], ['admin', 'manager'], true) || (int) ($me['is_accountant'] ?? 0) === 1
+            || Auth::effectiveHas('accountant', 'director', 'finance_manager');
+        if (!$ok) { flash('Раздел покрытия доступен бухгалтерии и руководству.', 'error'); $this->redirect('/'); }
+    }
+
+    /** Подписанные документы учёта времени за месяц по отделам: последние ревизии табелей (обе половины) + графики 2/2. */
+    private function accCoverageData(string $month): array
+    {
+        $tabels = Database::all(
+            "SELECT t.*, d.name AS dept_name, us.full_name AS signer FROM tabels t
+               LEFT JOIN departments d ON d.id=t.department_id LEFT JOIN users us ON us.id=t.signer_id
+              WHERE t.status='signed' AND substr(t.period,1,7)=?
+                AND t.revision=(SELECT MAX(t2.revision) FROM tabels t2 WHERE t2.period=t.period
+                    AND ((t2.department_id IS NULL AND t.department_id IS NULL) OR t2.department_id=t.department_id) AND t2.status='signed')
+              ORDER BY (t.department_id IS NULL), d.name, t.period", [$month]);
+        $grafiks = Database::all(
+            "SELECT g.*, d.name AS dept_name FROM shift_grafiks g LEFT JOIN departments d ON d.id=g.department_id
+              WHERE g.period=? AND g.revision=(SELECT MAX(g2.revision) FROM shift_grafiks g2 WHERE g2.department_id=g.department_id AND g2.period=g.period)
+              ORDER BY d.name", [$month]);
+        $byDept = [];
+        foreach ($tabels as $t) { $byDept[$t['department_id'] ? (string) $t['dept_name'] : 'Вся организация / без отдела']['tabels'][] = $t; }
+        foreach ($grafiks as $g) { $byDept[$g['department_id'] ? (string) $g['dept_name'] : 'Вся организация / без отдела']['grafiks'][] = $g; }
+        ksort($byDept);
+        return ['byDept' => $byDept, 'nTab' => count($tabels), 'nGraf' => count($grafiks)];
+    }
+
+    /** Покрытие для бухгалтерии: подписанные табели и графики 2/2 по отделам (карточки-документы). */
+    public function accCoverage(): void
+    {
+        $this->accGate();
+        $month = (string) ($this->input('month') ?: date('Y-m'));
+        $data = $this->accCoverageData($month);
+        $periods = array_values(array_unique(array_merge(
+            array_column(Database::all("SELECT DISTINCT substr(period,1,7) AS m FROM tabels WHERE status='signed'"), 'm'),
+            array_column(Database::all('SELECT DISTINCT period AS m FROM shift_grafiks'), 'm')
+        )));
+        rsort($periods);
+        $this->view('timesheet2/coverage_acc', [
+            'title' => 'Покрытие (бухгалтерия)',
+            'month' => $month, 'periods' => $periods,
+            'byDept' => $data['byDept'], 'nTab' => $data['nTab'], 'nGraf' => $data['nGraf'],
+        ]);
+    }
+
+    /** Выгрузка покрытия (бухгалтерия) в Excel: отдел / документ / половина / ревизия / подпись / подписал / дата. */
+    public function accCoverageExport(): void
+    {
+        $this->accGate();
+        $month = (string) ($this->input('month') ?: date('Y-m'));
+        $data = $this->accCoverageData($month);
+        $rows = [];
+        foreach ($data['byDept'] as $dept => $g) {
+            foreach ($g['tabels'] ?? [] as $t) {
+                $rows[] = [$dept, ($t['kind'] ?? 'std') === 'shift' ? 'Табель 2/2 (0504421)' : 'Табель 5/2',
+                    (int) substr($t['period'], 8) === 1 ? '1–15' : '16–конец',
+                    (int) $t['revision'] === 0 ? 'первичный' : 'корр. №' . (int) $t['revision'],
+                    self::SIGN_TYPES[$t['sign_type']] ?? (string) $t['sign_type'], (string) $t['signer'], substr((string) $t['signed_at'], 0, 16)];
+            }
+            foreach ($g['grafiks'] ?? [] as $gr) {
+                $rows[] = [$dept, 'График сменности 2/2', '—',
+                    (int) $gr['revision'] === 0 ? 'первичный' : 'корр. №' . (int) $gr['revision'],
+                    self::SIGN_TYPES[$gr['sign_type']] ?? (string) $gr['sign_type'], (string) $gr['signer_name'], substr((string) $gr['signed_at'], 0, 16)];
+            }
+        }
+        Xlsx::download('coverage-timekeeping-' . $month . '.xlsx', [[
+            'name' => 'Покрытие табели+графики',
+            'headers' => ['Отдел', 'Документ', 'Половина', 'Ревизия', 'Подпись', 'Подписал', 'Дата подписи'],
+            'rows' => $rows,
+        ]]);
+    }
+
     public function destroy(string $id): void
     {
         Auth::requireLogin();
