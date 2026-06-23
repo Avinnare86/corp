@@ -289,6 +289,7 @@ $router->post('/shifts/employee/save',    [\App\Controllers\ShiftController::cla
 $router->post('/shifts/employee/days',    [\App\Controllers\ShiftController::class, 'saveDays']);
 $router->get('/shifts/export',  [\App\Controllers\ShiftController::class, 'export']);
 $router->get('/shifts/grafik',  [\App\Controllers\ShiftController::class, 'grafik']);
+$router->post('/shifts/grafik/sign',  [\App\Controllers\ShiftController::class, 'signGrafik']);
 $router->get('/shifts/grafik/export', [\App\Controllers\ShiftController::class, 'grafikExport']);
 
 // --- Меню контролёра ---

@@ -37,8 +37,13 @@ $link = fn($d, $m) => '/shifts?dept=' . (int)$d . '&month=' . e($month) . '&mode
             <a class="btn btn-mini <?= $isFact?'':'btn-primary' ?>" href="<?= $link($deptId,'plan') ?>">План</a>
             <a class="btn btn-mini <?= $isFact?'btn-primary':'' ?>" href="<?= $link($deptId,'fact') ?>">Факт</a>
         </span>
-        <a class="btn btn-mini" href="/shifts/grafik?dept=<?= (int)$deptId ?>&month=<?= e($month) ?>" target="_blank">📄 График сменности (печать)</a>
+        <a class="btn btn-mini" href="/shifts/grafik?dept=<?= (int)$deptId ?>&month=<?= e($month) ?>" target="_blank">📄 График сменности (печать / подпись ЭП)</a>
         <a class="btn btn-mini" href="/shifts/export?month=<?= e($month) ?>&range=full">⇩ Excel (часы)</a>
+        <?php if (!empty($signedGrafik)): ?>
+            <span class="st st-ok" title="<?= e(substr((string)$signedGrafik['signed_at'],0,16)) ?>">✔ График подписан ЭП<?= (int)$signedGrafik['revision']>0 ? ' (корр. №'.(int)$signedGrafik['revision'].')' : '' ?></span>
+        <?php elseif ($deptId): ?>
+            <span class="st st-wait">График не подписан ЭП</span>
+        <?php endif; ?>
     </div>
 
     <?php if (!$depts): ?>

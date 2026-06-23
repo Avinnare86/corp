@@ -404,6 +404,24 @@ $tables['tabel_rows'] = "CREATE TABLE IF NOT EXISTS tabel_rows (
     UNIQUE (tabel_id, employee_id)
 ) $ENGINE";
 
+// Подписанный ЭП график сменности (2/2): снимок плана отдела за месяц + подпись. Ревизии = корректировки.
+$tables['shift_grafiks'] = "CREATE TABLE IF NOT EXISTS shift_grafiks (
+    id $ID,
+    department_id   INT NOT NULL,
+    period          VARCHAR(7) NOT NULL,        -- YYYY-MM
+    revision        INT NOT NULL DEFAULT 0,     -- 0 = первичный, далее корректировочные
+    created_by      INT NOT NULL,
+    created_at      TIMESTAMP DEFAULT $NOW,
+    signer_id       INT NOT NULL,
+    signer_name     VARCHAR(150) NOT NULL DEFAULT '',
+    signer_position VARCHAR(255) NOT NULL DEFAULT '',
+    sign_type       VARCHAR(10) NOT NULL,
+    signed_at       TIMESTAMP NULL,
+    sign_hash       VARCHAR(64) NOT NULL DEFAULT '',
+    cert_serial     VARCHAR(100) NOT NULL DEFAULT '',
+    snapshot        TEXT NOT NULL               -- JSON: {rows, lastDay, digest}
+) $ENGINE";
+
 // ===== Визы: ходатайства из Word =====
 $tables['visa_batches'] = "CREATE TABLE IF NOT EXISTS visa_batches (
     id $ID,

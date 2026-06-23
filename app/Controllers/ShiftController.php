@@ -156,6 +156,7 @@ class ShiftController extends Controller
         $deptId = $this->pickDept($depts, (int) $this->input('dept'));   // только в пределах доступа (защита от чтения чужих отделов)
         $lastDay = (int) date('t', strtotime("$month-01"));
         $canEdit = $this->canEdit($me);
+        $signedGrafik = $deptId ? $this->latestGrafik($deptId, $month) : null;   // подпись ЭП графика отдела за месяц
 
         // Сотрудники 2/2 выбранного отдела (в области видимости) + ячейки графика по дням.
         $emps = [];
@@ -193,6 +194,7 @@ class ShiftController extends Controller
             'month'   => $month, 'mode' => $mode, 'deptId' => $deptId, 'depts' => $depts,
             'lastDay' => $lastDay, 'rows' => $rows,
             'canEdit' => $canEdit,
+            'signedGrafik' => $signedGrafik,
             'std'     => [
                 'day'   => [\App\Services\Settings::shiftDayStart(), \App\Services\Settings::shiftDayEnd()],
                 'night' => [\App\Services\Settings::shiftNightStart(), \App\Services\Settings::shiftNightEnd()],
@@ -314,7 +316,7 @@ class ShiftController extends Controller
                 $pn = $sd ? (float) $sd['plan_night'] : 0.0;
                 if ($ph > 0) {
                     if ($pn > 0) { $cell = ['c' => 'Р/Н', 'h' => self::fmtH(max(0.0, $ph - $pn)) . '/' . self::fmtH($pn)]; }
-                    else         { $cell = ['c' => 'Р', 'h' => '']; }
+                    else         { $cell = ['c' => 'Р', 'h' => self::fmtH($ph)]; }   // часы смены в каждой ячейке
                     $days++; $hours += $ph;
                 } elseif (Database::scalar("SELECT 1 FROM vacation_requests WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?", [$eid, $dte, $dte])) {
                     $cell = ['c' => 'О', 'h' => ''];
@@ -326,7 +328,31 @@ class ShiftController extends Controller
         return $out;
     }
 
-    /** Печатный график сменности (А4) за месяц по отделу — план из shift_days. */
+    /** Последняя (по ревизии) подпись графика отдела за месяц, либо null. */
+    private function latestGrafik(int $deptId, string $month): ?array
+    {
+        if (!$deptId) { return null; }
+        return Database::one('SELECT * FROM shift_grafiks WHERE department_id=? AND period=? ORDER BY revision DESC LIMIT 1', [$deptId, $month]);
+    }
+
+    /** Право подписать график отдела: кадры/орг-табельщик/админ либо начальник/табельщик этого отдела. */
+    private function canSignGrafik(array $me, int $deptId): bool
+    {
+        return $deptId > 0 && ($this->seesAllEdit($me) || in_array($deptId, $this->scopeDepts($me), true));
+    }
+
+    /** Канонический отпечаток содержимого графика (детекция изменений плана после подписи). */
+    private static function grafikDigest(array $rows): string
+    {
+        $norm = [];
+        foreach ($rows as $r) {
+            $cells = array_map(fn($c) => ($c['c'] ?? '') . (($c['h'] ?? '') !== '' ? ':' . $c['h'] : ''), $r['cells'] ?? []);
+            $norm[] = [(string) ($r['emp']['full_name'] ?? ''), $cells];
+        }
+        return hash('sha256', json_encode($norm, JSON_UNESCAPED_UNICODE));
+    }
+
+    /** Печатный график сменности (А4) за месяц по отделу. Подписанный — замороженный снимок + штамп ЭП. */
     public function grafik(): void
     {
         Auth::requireLogin();
@@ -337,14 +363,87 @@ class ShiftController extends Controller
         $deptId = $this->pickDept($depts, (int) $this->input('dept'));   // только доступный отдел
         if (!$deptId) { flash('Нет отдела с сотрудниками на графике 2/2.', 'error'); $this->redirect('/shifts'); }
         $dept = Database::one('SELECT * FROM departments WHERE id=?', [$deptId]);
+        $lastDay = (int) date('t', strtotime("$month-01"));
+
+        $liveRows = $this->buildGrafik($deptId, $month);
+        $liveDigest = self::grafikDigest($liveRows);
+        $signed = $this->latestGrafik($deptId, $month);
+        $rows = $liveRows; $stale = false; $cert = null;
+        if ($signed) {
+            $snap = json_decode((string) $signed['snapshot'], true) ?: [];
+            $rows = $snap['rows'] ?? $liveRows;                  // показываем замороженный план
+            $stale = ($snap['digest'] ?? '') !== $liveDigest;    // план изменён после подписи → нужна корректировка
+            $cert = Database::one('SELECT * FROM user_certificates WHERE serial=?', [$signed['cert_serial']]);
+        }
+
         $this->view('shifts/grafik', [
             'title'   => 'График сменности',
             'month'   => $month, 'deptId' => $deptId, 'dept' => $dept,
-            'lastDay' => (int) date('t', strtotime("$month-01")),
-            'rows'    => $this->buildGrafik($deptId, $month),
+            'lastDay' => $lastDay,
+            'rows'    => $rows,
             'orgName' => \App\Services\Settings::get('org_name', 'ФГБУ «Интеробразование»'),
             'signApprove' => \App\Services\Settings::get('tabel_sign_1', 'Заместитель генерального директора'),
+            'signed'  => $signed, 'stale' => $stale, 'cert' => $cert,
+            'canSign' => $this->canSignGrafik($me, $deptId),
+            'signTypes' => \App\Controllers\TabelController::SIGN_TYPES,
+            'certs'   => Database::all('SELECT * FROM user_certificates WHERE user_id=? AND valid_to>=? ORDER BY sign_type', [$me['id'], date('Y-m-d')]),
         ], false);
+    }
+
+    /** Подписать график сменности ЭП: снимок плана + HMAC; новая запись = новая ревизия (корректировка). */
+    public function signGrafik(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        $month = (string) ($this->input('month') ?: date('Y-m'));
+        $deptId = (int) $this->input('dept');
+        $back = '/shifts/grafik?dept=' . $deptId . '&month=' . urlencode($month);
+        if (!$this->canSignGrafik($me, $deptId)) { flash('Нет прав на подписание графика этого отдела.', 'error'); $this->redirect('/shifts'); }
+
+        $type = strtoupper((string) $this->input('sign_type'));
+        if (!isset(\App\Controllers\TabelController::SIGN_TYPES[$type])) { flash('Выберите вид подписи.', 'error'); $this->redirect($back); }
+
+        // подтверждение личности паролем учётной записи
+        $pwd = (string) $this->input('password');
+        $hash = Database::scalar('SELECT password_hash FROM users WHERE id=?', [$me['id']]);
+        if (!$pwd || !password_verify($pwd, (string) $hash)) { flash('Неверный пароль — подпись не выполнена.', 'error'); $this->redirect($back); }
+
+        // сертификат: ПЭП выпускается системой автоматически, УНЭП/УКЭП — должен быть зарегистрирован
+        if ($type === 'PEP') {
+            $cert = Database::one("SELECT * FROM user_certificates WHERE user_id=? AND sign_type='PEP' AND valid_to>=? LIMIT 1", [$me['id'], date('Y-m-d')]);
+            if (!$cert) {
+                $serial = 'PEP-' . strtoupper(bin2hex(random_bytes(6)));
+                Database::insert('INSERT INTO user_certificates (user_id, sign_type, serial, owner_name, issued_at, valid_to) VALUES (?,?,?,?,?,?)',
+                    [$me['id'], 'PEP', $serial, $me['full_name'], date('Y-m-d'), date('Y-m-d', strtotime('+5 years'))]);
+                $cert = Database::one('SELECT * FROM user_certificates WHERE serial=?', [$serial]);
+            }
+        } else {
+            $cert = Database::one('SELECT * FROM user_certificates WHERE user_id=? AND sign_type=? AND valid_to>=? LIMIT 1', [$me['id'], $type, date('Y-m-d')]);
+            if (!$cert) { flash(\App\Controllers\TabelController::SIGN_TYPES[$type] . ': сертификат не зарегистрирован (Оргструктура → Сертификаты ЭП).', 'error'); $this->redirect($back); }
+        }
+
+        $lastDay = (int) date('t', strtotime("$month-01"));
+        $rows = $this->buildGrafik($deptId, $month);
+        if (!$rows) { flash('В отделе нет сотрудников на графике 2/2 — нечего подписывать.', 'error'); $this->redirect($back); }
+        $digest = self::grafikDigest($rows);
+        $snapshot = json_encode(['rows' => $rows, 'lastDay' => $lastDay, 'digest' => $digest], JSON_UNESCAPED_UNICODE);
+
+        $rev = (int) Database::scalar('SELECT COALESCE(MAX(revision),-1)+1 FROM shift_grafiks WHERE department_id=? AND period=?', [$deptId, $month]);
+        $secret = \App\Services\Settings::get('sign_secret');
+        if (!$secret) { $secret = bin2hex(random_bytes(16)); \App\Services\Settings::set('sign_secret', $secret); }
+        $now = date('Y-m-d H:i:s');
+        $payload = json_encode([$deptId, $month, $rev, $digest, $me['id'], $cert['serial'], $now]);
+        $signHash = hash_hmac('sha256', $payload, $secret);
+
+        Database::insert(
+            'INSERT INTO shift_grafiks (department_id, period, revision, created_by, signer_id, signer_name, signer_position, sign_type, signed_at, sign_hash, cert_serial, snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+            [$deptId, $month, $rev, $me['id'], $me['id'], $me['full_name'], $me['position'] ?? '', $type, $now, $signHash, $cert['serial'], $snapshot]);
+
+        flash($rev > 0
+            ? "График пересоставлен и подписан заново — корректировка №{$rev} (" . \App\Controllers\TabelController::SIGN_TYPES[$type] . ')'
+            : 'График сменности подписан ЭП (' . \App\Controllers\TabelController::SIGN_TYPES[$type] . ').');
+        $this->redirect($back);
     }
 
     /** Выгрузка графика сменности в Excel (одна строка на сотрудника: код/день + итог). */

@@ -32,20 +32,53 @@ $wd = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   .signs{margin-top:22px;font-size:10pt;width:100%}
   .signs td{padding:12px 8px;vertical-align:bottom}
   .sig{border-bottom:1px solid #000;min-width:170px;display:inline-block}
-  @media print{ @page{size:A4 landscape} body{background:#fff;padding:0} .toolbar{display:none} .sheet{box-shadow:none;max-width:none;padding:6mm} .gwrap{overflow:visible} table.g{min-width:0;font-size:6.5pt} table.g th.d,table.g td.d{padding:0} table.g th .wd,table.g th span{font-size:6pt} }
+  .signbar{font-family:Arial;font-size:10.5pt;max-width:1280px;margin:0 auto 12px;padding:10px 14px;border-radius:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .signbar.ok{background:#e8f3ec;border:1px solid #b7d9c2;color:#1c5132}
+  .signbar.signform{background:#fff7e6;border:1px solid #e6c97a;color:#5a4a1a}
+  .signbar select,.signbar input,.signbar button{font-family:Arial;font-size:10.5pt;padding:7px 10px;border-radius:6px;border:1px solid #99a;background:#fff;color:#223}
+  .signbar button.primary{background:#26368B;color:#fff;border-color:#26368B;cursor:pointer}
+  .signbar .warn{color:#9a3412;font-weight:bold}
+  .stamp{margin-top:16px;border:2px solid #1a56b8;border-radius:10px;padding:12px 16px;max-width:520px;color:#1a56b8;font-family:Arial;font-size:9.5pt;line-height:1.5}
+  .stamp b{font-size:10.5pt;letter-spacing:.04em}
+  @media print{ @page{size:A4 landscape} body{background:#fff;padding:0} .toolbar,.signbar.signform{display:none} .signbar{margin:0 0 6px} .sheet{box-shadow:none;max-width:none;padding:6mm} .gwrap{overflow:visible} table.g{min-width:0;font-size:6.5pt} table.g th.d,table.g td.d{padding:0} table.g th .wd,table.g th span{font-size:6pt} }
 </style></head>
 <body>
 <div class="toolbar">
-    <a href="/shifts?month=<?= e($month) ?>">← К графику</a>
+    <a href="/shifts?month=<?= e($month) ?>&dept=<?= (int)$deptId ?>">← К графику</a>
     <button class="primary" onclick="window.print()">⬇ Скачать PDF / Печать</button>
     <a href="/shifts/grafik/export?dept=<?= (int)$deptId ?>&month=<?= e($month) ?>">Excel</a>
 </div>
+
+<?php if (!empty($signed)): ?>
+<div class="signbar ok">
+    ✔ График подписан ЭП: <strong><?= e($signed['signer_name']) ?></strong>
+    · <?= e(substr((string)$signed['signed_at'],0,16)) ?>
+    · <?= e(\App\Controllers\TabelController::SIGN_TYPES[$signed['sign_type']] ?? $signed['sign_type']) ?><?= (int)$signed['revision']>0 ? ' · корректировка №'.(int)$signed['revision'] : '' ?>
+    <?php if (!empty($stale)): ?><span class="warn">⚠ план изменён после подписи — требуется переподписать (корректировка)</span><?php endif; ?>
+</div>
+<?php endif; ?>
+
+<?php if (!empty($canSign) && (empty($signed) || !empty($stale))): ?>
+<form class="signbar signform" method="post" action="/shifts/grafik/sign">
+    <input type="hidden" name="_csrf" value="<?= e(\App\Core\Auth::csrf()) ?>">
+    <input type="hidden" name="month" value="<?= e($month) ?>">
+    <input type="hidden" name="dept" value="<?= (int)$deptId ?>">
+    <span><?= empty($signed) ? '🖋 Подписать график сменности ЭП:' : '🖋 Переподписать (корректировка):' ?></span>
+    <select name="sign_type">
+        <?php foreach (($signTypes ?? []) as $sv => $sl): $hasCert = $sv === 'PEP' || array_filter($certs ?? [], fn($c) => $c['sign_type'] === $sv); ?>
+            <option value="<?= $sv ?>" <?= !$hasCert ? 'disabled' : '' ?>><?= e($sl) ?><?= !$hasCert ? ' — нет сертификата' : '' ?></option>
+        <?php endforeach; ?>
+    </select>
+    <input type="password" name="password" placeholder="Пароль учётной записи" required autocomplete="current-password">
+    <button class="primary" onclick="return confirm('Подписать график сменности электронной подписью?')">Подписать</button>
+</form>
+<?php endif; ?>
 
 <div class="sheet">
     <p class="org"><strong><?= e($orgName) ?></strong></p>
     <p class="sub"><?= e($dept['name'] ?? '—') ?> <span style="color:#777">(наименование структурного подразделения)</span></p>
     <h1>График сменности</h1>
-    <p class="meta">Период графика: с 01.<?= sprintf('%02d', $mm) ?>.<?= $yy ?> по <?= $lastDay ?>.<?= sprintf('%02d', $mm) ?>.<?= $yy ?> г. · Дата составления: <?= date('d.m.Y') ?> · Учётный период: 1 (один) год</p>
+    <p class="meta">Период графика: с 01.<?= sprintf('%02d', $mm) ?>.<?= $yy ?> по <?= $lastDay ?>.<?= sprintf('%02d', $mm) ?>.<?= $yy ?> г. · Дата составления: <?= !empty($signed) ? e(date('d.m.Y', strtotime((string)$signed['signed_at']))) : date('d.m.Y') ?> · Учётный период: 1 (один) год</p>
 
     <div class="gwrap">
     <table class="g">
@@ -80,18 +113,26 @@ $wd = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
     </table>
     </div>
 
-    <p class="legend"><strong>Условные обозначения:</strong> <b>Р</b> — рабочий день; <b>Р/Н</b> — рабочий день с ночными часами (часы «дневные/ночные», напр. 4/8); <b>О</b> — отпуск; пусто — выходной по графику.</p>
-    <div class="foot">
-        Продолжительность ежедневной работы (смены) — 12 часов. Перерыв для отдыха и питания — 1 час.<br>
-        Время начала работы: 07 ч 30 мин. Время окончания работы: 20 ч 30 мин. (для ночных смен — по графику).<br>
-        <strong>Выходные дни — скользящие по графику сменности (воскресенье — рабочий день).</strong>
-    </div>
+    <p class="legend"><strong>Условные обозначения:</strong> <b>Р</b> — рабочий день (число — часы смены); <b>Р/Н</b> — рабочий день с ночными часами (часы «дневные/ночные», напр. 4/8); <b>О</b> — отпуск; пусто — выходной по графику. В каждой рабочей ячейке указано количество часов.</p>
 
     <table class="signs">
         <tr>
             <td style="width:50%">СОГЛАСОВАНО:<br><?= e($signApprove) ?> <span class="sig">&nbsp;</span></td>
-            <td>График составил:<br>Начальник отдела <span class="sig">&nbsp;</span></td>
+            <td>График составил:<br>Начальник отдела
+                <?php if (!empty($signed)): ?><strong><?= e($signed['signer_name']) ?></strong> <span style="color:#777;font-size:8.5pt">(подписано ЭП)</span><?php else: ?><span class="sig">&nbsp;</span><?php endif; ?></td>
         </tr>
     </table>
+
+    <?php if (!empty($signed)): ?>
+    <div class="stamp">
+        <b>ДОКУМЕНТ ПОДПИСАН ЭЛЕКТРОННОЙ ПОДПИСЬЮ</b><br>
+        Вид подписи: <?= e(\App\Controllers\TabelController::SIGN_TYPES[$signed['sign_type']] ?? $signed['sign_type']) ?><br>
+        Сертификат: <?= e($signed['cert_serial']) ?><br>
+        Владелец: <?= e($signed['signer_name']) ?><?= $signed['signer_position'] ? ', ' . e($signed['signer_position']) : '' ?><br>
+        <?php if (!empty($cert)): ?>Действителен: с <?= e($cert['issued_at']) ?> по <?= e($cert['valid_to']) ?><br><?php endif; ?>
+        Подписано: <?= e(substr((string)$signed['signed_at'],0,16)) ?><?= (int)$signed['revision']>0 ? ' · корректировка №'.(int)$signed['revision'] : '' ?><br>
+        Отпечаток: <?= e((string)$signed['sign_hash']) ?>
+    </div>
+    <?php endif; ?>
 </div>
 </body></html>
