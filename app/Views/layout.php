@@ -152,8 +152,8 @@ if ($uid) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/style.css?v=5">
-    <script defer src="/assets/app.js?v=4"></script>
+    <link rel="stylesheet" href="/assets/style.css?v=6">
+    <script defer src="/assets/app.js?v=5"></script>
 </head>
 <?php $mobView = $_COOKIE['mobview'] ?? ''; ?>
 <body class="<?= $mobView === 'full' ? 'force-desktop' : '' ?>">
