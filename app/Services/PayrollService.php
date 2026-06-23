@@ -452,7 +452,7 @@ class PayrollService
     }
 
     /** Календарные рабочие дни месяца (Пн–Пт) — норма по умолчанию, если нет табеля. Никогда 0. */
-    private static function calendarWorkingDays(string $period): int
+    public static function calendarWorkingDays(string $period): int
     {
         $parts = explode('-', $period);
         $y = (int) ($parts[0] ?? 0); $m = (int) ($parts[1] ?? 0);

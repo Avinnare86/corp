@@ -43,7 +43,6 @@ class Audit
         '#^/admin/operations/\d+/delete$#'  => 'Удаление операции',
         '#^/admin/extras$#'                 => 'Доплата: добавление',
         '#^/admin/extras/\d+/delete$#'      => 'Удаление доплаты',
-        '#^/admin/timesheet$#'              => 'Сохранение табеля',
         '#^/admin/settings$#'               => 'Сохранение настроек',
         '#^/orders$#'                       => 'Поручение: создано',
         '#^/orders/\d+/action$#'            => 'Поручение: действие',

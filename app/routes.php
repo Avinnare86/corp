@@ -342,8 +342,7 @@ $router->post('/admin/pricing',           [AdminController::class, 'savePricing'
 $router->get('/admin/errors',             [AdminController::class, 'errorTypes']);
 $router->post('/admin/errors',            [AdminController::class, 'storeErrorType']);
 $router->post('/admin/errors/{id}/delete',[AdminController::class, 'deleteErrorType']);
-$router->get('/admin/timesheet',          [AdminController::class, 'timesheet']);
-$router->post('/admin/timesheet',         [AdminController::class, 'saveTimesheet']);
+// /admin/timesheet удалён — данные времени ведутся в электронном табеле (/timesheet2)
 $router->get('/admin/settings',           [AdminController::class, 'settings']);
 $router->post('/admin/settings',          [AdminController::class, 'saveSettings']);
 // Управление данными: удаление/откат любых строк (только админ)

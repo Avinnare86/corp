@@ -38,7 +38,7 @@ $link = fn($d, $m) => '/shifts?dept=' . (int)$d . '&month=' . e($month) . '&mode
             <a class="btn btn-mini <?= $isFact?'btn-primary':'' ?>" href="<?= $link($deptId,'fact') ?>">Факт</a>
         </span>
         <a class="btn btn-mini" href="/shifts/grafik?dept=<?= (int)$deptId ?>&month=<?= e($month) ?>" target="_blank">📄 График сменности (печать / подпись ЭП)</a>
-        <a class="btn btn-mini" href="/shifts/grafik/archive">🗄 Архив графиков</a>
+        <a class="btn btn-mini" href="/shifts/grafik/archive">🗂 Ревизии графиков</a>
         <a class="btn btn-mini" href="/shifts/export?month=<?= e($month) ?>&range=full">⇩ Excel (часы)</a>
         <?php if (!empty($signedGrafik)): ?>
             <span class="st st-ok" title="<?= e(substr((string)$signedGrafik['signed_at'],0,16)) ?>">✔ График подписан ЭП<?= (int)$signedGrafik['revision']>0 ? ' (корр. №'.(int)$signedGrafik['revision'].')' : '' ?></span>

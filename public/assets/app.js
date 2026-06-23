@@ -38,9 +38,13 @@
     closeAllGroups();                                 // десктоп: один раскрыт за раз
     if (!was) {
       g.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
-      g.classList.remove('drop-left');                // флип, чтобы дропдаун не уехал за правый край
       var d = g.querySelector('.nav-drop');
-      if (d) { var r = d.getBoundingClientRect(); if (r.right > window.innerWidth - 8) g.classList.add('drop-left'); }
+      if (d) {                                        // фикс-позиция под кнопкой (дропдаун вне overflow:hidden у .nav)
+        var r = btn.getBoundingClientRect();
+        d.style.top = Math.round(r.bottom + 2) + 'px';
+        if (r.right < 230) { d.style.left = Math.round(r.left) + 'px'; d.style.right = 'auto'; }
+        else { d.style.left = 'auto'; d.style.right = Math.round(window.innerWidth - r.right) + 'px'; }
+      }
     }
   };
   window.navBurger = function () {

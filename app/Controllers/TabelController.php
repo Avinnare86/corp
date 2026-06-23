@@ -436,21 +436,23 @@ class TabelController extends Controller
             // последняя подписанная ревизия по каждому охвату
             $tabs = Database::all(
                 "SELECT t1.* FROM tabels t1
-                  WHERE t1.period = ? AND t1.status='signed'
+                  WHERE t1.period = ? AND t1.status='signed' AND t1.archived_at IS NULL
                     AND t1.revision = (SELECT MAX(t2.revision) FROM tabels t2 WHERE t2.period=t1.period
                                         AND ((t2.department_id IS NULL AND t1.department_id IS NULL) OR t2.department_id = t1.department_id)
-                                        AND t2.status='signed')", [$period]);
+                                        AND t2.status='signed' AND t2.archived_at IS NULL)", [$period]);
             foreach ($tabs as $tb) {
                 foreach (Database::all('SELECT employee_id, days FROM tabel_rows WHERE tabel_id = ?', [$tb['id']]) as $r) {
                     $byEmp[$r['employee_id']][$h] = (int) $r['days']; // орг-табель может перекрыть отдел — берём последнее
                 }
             }
         }
+        // Норма = рабочие дни месяца (электронный табель — единственный источник; /admin/timesheet удалён).
+        $norm = \App\Services\PayrollService::calendarWorkingDays($month);
         foreach ($byEmp as $empId => $halves) {
             $tot = array_sum($halves);
             $ex = Database::scalar('SELECT id FROM timesheets WHERE employee_id=? AND period=?', [$empId, $month]);
-            if ($ex) { Database::run('UPDATE timesheets SET worked_days=? WHERE id=?', [$tot, $ex]); }
-            else { Database::insert('INSERT INTO timesheets (employee_id, period, norm_days, worked_days) VALUES (?,?,21,?)', [$empId, $month, $tot]); }
+            if ($ex) { Database::run('UPDATE timesheets SET worked_days=?, norm_days=? WHERE id=?', [$tot, $norm, $ex]); }
+            else { Database::insert('INSERT INTO timesheets (employee_id, period, norm_days, worked_days) VALUES (?,?,?,?)', [$empId, $month, $norm, $tot]); }
         }
     }
 
@@ -630,6 +632,7 @@ class TabelController extends Controller
         if ($me['role'] !== 'admin' && !$this->canManage($me, $t)) { flash('Нет прав на архивирование этого табеля.', 'error'); $this->redirect('/timesheet2'); }
         if ($t['archived_at'] === null) {
             Database::run('UPDATE tabels SET archived_at=?, archived_by=? WHERE id=?', [date('Y-m-d H:i:s'), $me['id'], $id]);
+            self::syncMonth(substr((string) $t['period'], 0, 7));   // пересчёт ЗП: архивный табель больше не учитывается
         }
         flash('Табель перенесён в архив.');
         $this->redirect('/timesheet2');
@@ -644,6 +647,7 @@ class TabelController extends Controller
         $t = $this->loadTabel($id);
         if ($me['role'] !== 'admin' && !$this->canManage($me, $t)) { flash('Нет прав.', 'error'); $this->redirect('/timesheet2?archive=1'); }
         Database::run('UPDATE tabels SET archived_at=NULL, archived_by=NULL WHERE id=?', [$id]);
+        self::syncMonth(substr((string) $t['period'], 0, 7));   // пересчёт ЗП: табель снова учитывается
         flash('Табель возвращён в актуальные.');
         $this->redirect('/timesheet2?archive=1');
     }
@@ -667,8 +671,10 @@ class TabelController extends Controller
                 $this->redirect('/timesheet2');
             }
         }
+        $wasSigned = $t['status'] === 'signed';
         Database::run('DELETE FROM tabel_rows WHERE tabel_id = ?', [$id]);
         Database::run('DELETE FROM tabels WHERE id = ?', [$id]);
+        if ($wasSigned) { self::syncMonth(substr((string) $t['period'], 0, 7)); }   // пересчёт ЗП после удаления подписанного
         flash($isAdmin ? 'Табель удалён безвозвратно.' : 'Черновик табеля удалён.');
         $this->redirect($wasArchived ? '/timesheet2?archive=1' : '/timesheet2');
     }

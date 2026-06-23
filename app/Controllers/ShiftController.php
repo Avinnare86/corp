@@ -457,14 +457,24 @@ class ShiftController extends Controller
         $rows = [];
         if ($allowedIds) {
             $ph = implode(',', array_fill(0, count($allowedIds), '?'));
+            // ВСЕ ревизии (от первой до последней корректировочной), а не только архивные
             $rows = Database::all(
-                "SELECT g.*, d.name AS dept_name, u.full_name AS archiver FROM shift_grafiks g
-                   LEFT JOIN departments d ON d.id=g.department_id LEFT JOIN users u ON u.id=g.archived_by
-                  WHERE g.archived_at IS NOT NULL AND g.department_id IN ($ph)
-                  ORDER BY g.period DESC, d.name, g.revision DESC", $allowedIds);
+                "SELECT g.*, d.name AS dept_name, u.full_name AS archiver, s.full_name AS signer FROM shift_grafiks g
+                   LEFT JOIN departments d ON d.id=g.department_id
+                   LEFT JOIN users u ON u.id=g.archived_by LEFT JOIN users s ON s.id=g.signer_id
+                  WHERE g.department_id IN ($ph)
+                  ORDER BY d.name, g.period DESC, g.revision DESC", $allowedIds);
+        }
+        // «Актуальная» = максимальная НЕархивная ревизия по (отдел, период); остальные неархивные — «Заменена».
+        $latest = [];
+        foreach ($rows as $r) {
+            if ($r['archived_at'] === null) {
+                $k = $r['department_id'] . '|' . $r['period'];
+                if (!isset($latest[$k]) || (int) $r['revision'] > $latest[$k]) { $latest[$k] = (int) $r['revision']; }
+            }
         }
         $this->view('shifts/grafik_archive', [
-            'title' => 'Архив графиков 2/2', 'rows' => $rows,
+            'title' => 'Ревизии графиков 2/2', 'rows' => $rows, 'latest' => $latest,
             'isAdmin' => $me['role'] === 'admin',
             'signTypes' => \App\Controllers\TabelController::SIGN_TYPES,
         ]);

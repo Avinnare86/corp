@@ -46,9 +46,9 @@ h3.sub{font-family:var(--display);font-size:.82rem;font-weight:600;color:var(--a
 .nav-gbtn:hover,.nav-group.open .nav-gbtn{background:var(--sky);color:var(--primary)}
 .nav-gbtn .caret{font-size:.7rem;opacity:.6;transition:transform .15s}
 .nav-group.open .caret{transform:rotate(180deg)}
-.nav-drop{display:none;position:absolute;top:100%;right:0;min-width:210px;background:#fff;border:1px solid var(--line);
-  border-radius:12px;box-shadow:var(--shadow);padding:6px;z-index:120}
-.nav-group.drop-left .nav-drop{left:0;right:auto}
+/* дропдаун — position:fixed, чтобы НЕ обрезался overflow:hidden у .nav (координаты ставит JS под кнопкой) */
+.nav-drop{display:none;position:fixed;min-width:210px;max-width:300px;background:#fff;border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow);padding:6px;z-index:300;max-height:80vh;overflow-y:auto}
 .nav-group.open .nav-drop{display:block}
 .nav-drop a{display:flex;align-items:center;gap:6px;padding:.55rem .8rem;border-radius:8px}
 .nav-drop a .badge{margin-left:auto}

@@ -686,49 +686,7 @@ class AdminController extends Controller
         $this->redirect('/admin/errors');
     }
 
-    // ---------- Табель (отработанные дни) ----------
-    public function timesheet(): void
-    {
-        Auth::requireRole('admin', 'hr_manager', 'hr');
-        $period = $this->input('period', date('Y-m'));
-        $rows = Database::all(
-            "SELECT u.id, u.full_name, u.position, u.rate_volume,
-                    t.norm_days, t.worked_days
-               FROM users u
-               LEFT JOIN timesheets t ON t.employee_id = u.id AND t.period = ?
-              WHERE u.role IN ('employee','controller') AND u.is_active = 1
-              ORDER BY u.full_name",
-            [$period]
-        );
-        $this->view('admin/timesheet', ['title' => 'Табель', 'rows' => $rows, 'period' => $period]);
-    }
-
-    public function saveTimesheet(): void
-    {
-        Auth::requireRole('admin', 'hr_manager', 'hr');
-        Auth::verifyCsrf();
-        $period = $this->input('period', date('Y-m'));
-        $norm = $_POST['norm_days'] ?? [];
-        $worked = $_POST['worked_days'] ?? [];
-        foreach ($norm as $empId => $normDays) {
-            $empId = (int) $empId;
-            $nd = (int) $normDays;
-            $wd = (int) ($worked[$empId] ?? 0);
-            $exists = Database::scalar(
-                'SELECT id FROM timesheets WHERE employee_id = ? AND period = ?', [$empId, $period]
-            );
-            if ($exists) {
-                Database::run('UPDATE timesheets SET norm_days=?, worked_days=? WHERE id=?', [$nd, $wd, $exists]);
-            } else {
-                Database::insert(
-                    'INSERT INTO timesheets (employee_id, period, norm_days, worked_days) VALUES (?,?,?,?)',
-                    [$empId, $period, $nd, $wd]
-                );
-            }
-        }
-        flash('Табель сохранён.');
-        $this->redirect('/admin/timesheet?period=' . urlencode($period));
-    }
+    // (Табель отработанных дней удалён — норма/отработано теперь из электронного табеля через TabelController::syncMonth)
 
     // ---------- Настройки расчёта ----------
     public function settings(): void
