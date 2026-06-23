@@ -18,7 +18,12 @@ $hasShiftDepts = !empty($shiftDepts);
         <a class="btn btn-mini" href="/timesheet2/coverage?month=<?= e($month) ?>&half=<?= e((string)$half) ?>">📊 Покрытие</a>
     </form>
 
-    <?php if ($canCreate): ?>
+    <div class="form-inline" style="gap:6px;margin-top:10px">
+        <a class="btn btn-mini <?= $archive ? '' : 'btn-primary' ?>" href="/timesheet2?month=<?= e($month) ?>&half=<?= e((string)$half) ?>">Актуальные</a>
+        <a class="btn btn-mini <?= $archive ? 'btn-primary' : '' ?>" href="/timesheet2?month=<?= e($month) ?>&half=<?= e((string)$half) ?>&archive=1">🗄 Архив</a>
+    </div>
+
+    <?php if ($canCreate && !$archive): ?>
     <form method="post" action="/timesheet2/create" class="form-inline" style="margin-top:12px;align-items:flex-end;flex-wrap:wrap;gap:14px" id="create-form">
         <?= csrf_field() ?>
         <input type="hidden" name="period" value="<?= e($period) ?>">
@@ -54,7 +59,7 @@ $hasShiftDepts = !empty($shiftDepts);
 </section>
 
 <section class="panel">
-    <h2>Табели за период <?= e($period) ?></h2>
+    <h2><?= $archive ? '🗄 Архив табелей' : 'Табели' ?> за период <?= e($period) ?></h2>
     <table class="table">
         <thead><tr><th>Вид</th><th>Охват</th><th>Ревизия</th><th>Статус</th><th>Составил</th><th>Подписал</th><th>Действия</th></tr></thead>
         <tbody>
@@ -65,14 +70,24 @@ $hasShiftDepts = !empty($shiftDepts);
                 <td><?= (int)$tb['revision'] === 0 ? 'первичный' : 'корректировочный №' . (int)$tb['revision'] ?></td>
                 <td><?= $tb['status']==='signed'
                     ? '<span class="st st-ok">Подписан (' . e($tb['sign_type']) . ')</span><br><span class="muted" style="font-size:.74rem">' . e(substr((string)$tb['signed_at'],0,16)) . '</span>'
-                    : '<span class="st st-wait">Черновик</span>' ?></td>
+                    : '<span class="st st-wait">Черновик</span>' ?>
+                    <?php if ($archive && !empty($tb['archived_at'])): ?><br><span class="muted" style="font-size:.72rem">🗄 архив: <?= e($tb['archiver'] ?? '') ?> · <?= e(substr((string)$tb['archived_at'],0,16)) ?></span><?php endif; ?></td>
                 <td class="muted"><?= e($tb['creator']) ?></td>
                 <td class="muted"><?= e($tb['signer'] ?? '—') ?></td>
                 <td>
-                    <?php if ($tb['status']==='draft'): ?>
+                    <?php if ($archive): ?>
+                        <a class="btn btn-mini btn-primary" href="/timesheet2/<?= (int)$tb['id'] ?>/view">📄 PDF-вид</a>
+                        <a class="btn btn-mini" href="/timesheet2/<?= (int)$tb['id'] ?>/export">Excel</a>
+                        <form method="post" action="/timesheet2/<?= (int)$tb['id'] ?>/unarchive" class="inline" onsubmit="return confirm('Вернуть табель в актуальные?')">
+                            <?= csrf_field() ?><button class="btn btn-mini">↩ Вернуть</button></form>
+                        <?php if ($isAdmin): ?>
+                        <form method="post" action="/timesheet2/<?= (int)$tb['id'] ?>/delete" class="inline" onsubmit="return confirm('Удалить табель БЕЗВОЗВРАТНО? Действие необратимо.')">
+                            <?= csrf_field() ?><button class="btn btn-mini btn-danger">🗑 Удалить</button></form>
+                        <?php endif; ?>
+                    <?php elseif ($tb['status']==='draft'): ?>
                         <a class="btn btn-mini btn-primary" href="/timesheet2/<?= (int)$tb['id'] ?>/edit"><?= $isShift ? 'Предпросмотр / подписать' : 'Редактировать / подписать' ?></a>
                         <form method="post" action="/timesheet2/<?= (int)$tb['id'] ?>/delete" class="inline" onsubmit="return confirm('Удалить черновик?')">
-                            <?= csrf_field() ?><button class="btn btn-mini btn-danger">×</button></form>
+                            <?= csrf_field() ?><button class="btn btn-mini btn-danger" title="Удалить черновик">×</button></form>
                     <?php else: ?>
                         <a class="btn btn-mini btn-primary" href="/timesheet2/<?= (int)$tb['id'] ?>/view">📄 PDF-вид</a>
                         <a class="btn btn-mini" href="/timesheet2/<?= (int)$tb['id'] ?>/export">Excel</a>
@@ -85,11 +100,17 @@ $hasShiftDepts = !empty($shiftDepts);
                             <button class="btn btn-mini" onclick="return confirm('Создать корректировочный табель?')">↻ Корректировочный</button>
                         </form>
                         <?php endif; ?>
+                        <form method="post" action="/timesheet2/<?= (int)$tb['id'] ?>/archive" class="inline" onsubmit="return confirm('Перенести подписанный табель в архив?')">
+                            <?= csrf_field() ?><button class="btn btn-mini" title="В архив">🗄 В архив</button></form>
+                        <?php if ($isAdmin): ?>
+                        <form method="post" action="/timesheet2/<?= (int)$tb['id'] ?>/delete" class="inline" onsubmit="return confirm('Удалить подписанный табель БЕЗВОЗВРАТНО? Действие необратимо.')">
+                            <?= csrf_field() ?><button class="btn btn-mini btn-danger" title="Удалить безвозвратно (админ)">🗑</button></form>
+                        <?php endif; ?>
                     <?php endif; ?>
                 </td>
             </tr>
         <?php endforeach; ?>
-        <?php if (!$tabels): ?><tr><td colspan="7" class="muted">Табелей за период нет.</td></tr><?php endif; ?>
+        <?php if (!$tabels): ?><tr><td colspan="7" class="muted"><?= $archive ? 'В архиве за период пусто.' : 'Табелей за период нет.' ?></td></tr><?php endif; ?>
         </tbody>
     </table>
 </section>

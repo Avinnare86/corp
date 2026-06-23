@@ -216,13 +216,16 @@ class TabelController extends Controller
         $month = (string) ($this->input('month') ?: date('Y-m'));
         $half = (int) ($this->input('half') ?: (date('j') <= 15 ? 1 : 2));
         $period = "$month-$half";
+        $archive = (int) $this->input('archive') === 1;   // вкладка «Архив» (archived_at IS NOT NULL)
 
-        // Единый блок: оба вида табеля (обычный 5/2 и сменный 2/2) в одном списке.
+        // Единый блок: оба вида табеля (обычный 5/2 и сменный 2/2). Раздел Актуальные/Архив по archived_at.
         $tabels = Database::all(
-            "SELECT t.*, d.name AS dept_name, uc.full_name AS creator, us.full_name AS signer
+            "SELECT t.*, d.name AS dept_name, uc.full_name AS creator, us.full_name AS signer, ua.full_name AS archiver
                FROM tabels t LEFT JOIN departments d ON d.id = t.department_id
                LEFT JOIN users uc ON uc.id = t.created_by LEFT JOIN users us ON us.id = t.signer_id
-              WHERE t.period = ? ORDER BY COALESCE(t.kind,'std'), t.department_id, t.revision", [$period]);
+               LEFT JOIN users ua ON ua.id = t.archived_by
+              WHERE t.period = ? AND t.archived_at IS " . ($archive ? 'NOT NULL' : 'NULL') . "
+              ORDER BY COALESCE(t.kind,'std'), t.department_id, t.revision", [$period]);
 
         // для сменного табеля (2/2) — только отделы, где есть сотрудники на графике 2/2
         $shiftIds = self::shiftDeptIds();
@@ -232,9 +235,10 @@ class TabelController extends Controller
 
         $this->view('timesheet2/index', [
             'title' => 'Электронный табель',
-            'month' => $month, 'half' => $half, 'period' => $period,
+            'month' => $month, 'half' => $half, 'period' => $period, 'archive' => $archive,
             'tabels' => $tabels,
             'canCreate' => (bool) ($scope['org'] || $scope['depts']),
+            'isAdmin' => $me['role'] === 'admin',
             'scope' => $scope,
             'departments' => Database::all('SELECT * FROM departments ORDER BY name'),
             'shiftDepts' => $shiftDepts,
@@ -608,16 +612,65 @@ class TabelController extends Controller
         ]]);
     }
 
+    /** Ответственный за табель: орг-табельщик (для орг-табеля) или ведущий этот отдел. */
+    private function canManage(array $me, array $t): bool
+    {
+        $s = $this->scopeFor($me);
+        return $s['org'] || ($t['department_id'] && in_array((int) $t['department_id'], $s['depts'], true));
+    }
+
+    /** Перенос подписанного табеля в архив (вручную; только после ЭП). */
+    public function archive(string $id): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        $t = $this->loadTabel($id);
+        if ($t['status'] !== 'signed') { flash('В архив можно перенести только подписанный табель.', 'error'); $this->redirect('/timesheet2'); }
+        if ($me['role'] !== 'admin' && !$this->canManage($me, $t)) { flash('Нет прав на архивирование этого табеля.', 'error'); $this->redirect('/timesheet2'); }
+        if ($t['archived_at'] === null) {
+            Database::run('UPDATE tabels SET archived_at=?, archived_by=? WHERE id=?', [date('Y-m-d H:i:s'), $me['id'], $id]);
+        }
+        flash('Табель перенесён в архив.');
+        $this->redirect('/timesheet2');
+    }
+
+    /** Вернуть табель из архива в актуальные. */
+    public function unarchive(string $id): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        $t = $this->loadTabel($id);
+        if ($me['role'] !== 'admin' && !$this->canManage($me, $t)) { flash('Нет прав.', 'error'); $this->redirect('/timesheet2?archive=1'); }
+        Database::run('UPDATE tabels SET archived_at=NULL, archived_by=NULL WHERE id=?', [$id]);
+        flash('Табель возвращён в актуальные.');
+        $this->redirect('/timesheet2?archive=1');
+    }
+
+    /** Удаление: не-админ — только свой черновик; админ — безвозвратно любой (вкл. подписанные/архив). */
     public function destroy(string $id): void
     {
         Auth::requireLogin();
         Auth::verifyCsrf();
+        $me = Auth::user();
         $t = $this->loadTabel($id);
-        if ($t['status'] !== 'draft') { flash('Подписанный табель удалить нельзя — создайте корректировочный.', 'error'); $this->redirect('/timesheet2'); }
+        $isAdmin = $me['role'] === 'admin';
+        $wasArchived = $t['archived_at'] !== null;
+        if (!$isAdmin) {
+            if ($t['status'] !== 'draft' || $wasArchived) {
+                flash('Удалить безвозвратно может только администратор. Подписанный табель переносите в архив.', 'error');
+                $this->redirect('/timesheet2');
+            }
+            if ((int) $t['created_by'] !== (int) $me['id'] && !$this->canManage($me, $t)) {
+                flash('Удалить черновик может его автор/ответственный или администратор.', 'error');
+                $this->redirect('/timesheet2');
+            }
+        }
         Database::run('DELETE FROM tabel_rows WHERE tabel_id = ?', [$id]);
         Database::run('DELETE FROM tabels WHERE id = ?', [$id]);
-        flash('Черновик табеля удалён.');
-        $this->redirect('/timesheet2');
+        flash($isAdmin ? 'Табель удалён безвозвратно.' : 'Черновик табеля удалён.');
+        $this->redirect($wasArchived ? '/timesheet2?archive=1' : '/timesheet2');
     }
 
     public function export(string $id): void

@@ -44,10 +44,36 @@ $wd = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 </style></head>
 <body>
 <div class="toolbar">
-    <a href="/shifts?month=<?= e($month) ?>&dept=<?= (int)$deptId ?>">← К графику</a>
+    <?php if (!empty($gidView)): ?>
+        <a href="/shifts/grafik/archive">← В архив графиков</a>
+    <?php else: ?>
+        <a href="/shifts?month=<?= e($month) ?>&dept=<?= (int)$deptId ?>">← К графику</a>
+    <?php endif; ?>
     <button class="primary" onclick="window.print()">⬇ Скачать PDF / Печать</button>
     <a href="/shifts/grafik/export?dept=<?= (int)$deptId ?>&month=<?= e($month) ?>">Excel</a>
+    <?php if (!empty($canArchive) && empty($signed['archived_at'])): ?>
+    <form method="post" action="/shifts/grafik/archive" style="display:inline;margin:0">
+        <input type="hidden" name="_csrf" value="<?= e(\App\Core\Auth::csrf()) ?>"><input type="hidden" name="gid" value="<?= (int)$signed['id'] ?>">
+        <button onclick="return confirm('Перенести подписанный график в архив?')">🗄 В архив</button>
+    </form>
+    <?php endif; ?>
+    <?php if (!empty($isArchivedRev)): ?>
+    <form method="post" action="/shifts/grafik/unarchive" style="display:inline;margin:0">
+        <input type="hidden" name="_csrf" value="<?= e(\App\Core\Auth::csrf()) ?>"><input type="hidden" name="gid" value="<?= (int)$signed['id'] ?>">
+        <button>↩ Вернуть из архива</button>
+    </form>
+    <?php if (!empty($isAdmin)): ?>
+    <form method="post" action="/shifts/grafik/delete" style="display:inline;margin:0">
+        <input type="hidden" name="_csrf" value="<?= e(\App\Core\Auth::csrf()) ?>"><input type="hidden" name="gid" value="<?= (int)$signed['id'] ?>">
+        <button onclick="return confirm('Удалить ревизию графика БЕЗВОЗВРАТНО? Действие необратимо.')" style="color:#b00;border-color:#e0a0a0">🗑 Удалить</button>
+    </form>
+    <?php endif; ?>
+    <?php endif; ?>
 </div>
+
+<?php if (!empty($isArchivedRev)): ?>
+<div class="signbar" style="background:#eef0f4;border:1px solid #c8cdd8;color:#444">🗄 Архивная ревизия графика (только просмотр).</div>
+<?php endif; ?>
 
 <?php if (!empty($signed)): ?>
 <div class="signbar ok">

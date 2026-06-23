@@ -972,6 +972,15 @@ if (!columnExists('tabel_rows', 'hours')) {
     $pdo->exec($ddlFix("ALTER TABLE tabel_rows ADD COLUMN hours $MONEY NOT NULL DEFAULT 0"));
     echo "OK  колонка tabel_rows.hours добавлена\n";
 }
+// Архив документов (Актуальные/Архив): подписанные → в архив, безвозвратное удаление только админом.
+foreach (['tabels', 'shift_grafiks', 'stimulus_memos'] as $tbl) {
+    foreach (['archived_at' => 'TIMESTAMP NULL', 'archived_by' => 'INT NULL'] as $col => $ddl) {
+        if (!columnExists($tbl, $col)) {
+            $pdo->exec($ddlFix("ALTER TABLE $tbl ADD COLUMN $col $ddl"));
+            echo "OK  колонка $tbl.$col добавлена\n";
+        }
+    }
+}
 // Линия прибытия анкеты (квота): ЛП + ДЛП (FK на справочники).
 foreach (['arrival_line_id', 'arrival_detail_id'] as $col) {
     if (!columnExists('assignment_items', $col)) {

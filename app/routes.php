@@ -241,6 +241,8 @@ $router->get('/memos/{id}/edit',    [\App\Controllers\StimulusController::class,
 $router->get('/memos/{id}/print',   [\App\Controllers\StimulusController::class, 'printDoc']);
 $router->post('/memos/{id}/sign',   [\App\Controllers\StimulusController::class, 'sign']);
 $router->post('/memos/{id}/reject', [\App\Controllers\StimulusController::class, 'reject']);
+$router->post('/memos/{id}/reject-final', [\App\Controllers\StimulusController::class, 'rejectFinal']);
+$router->post('/memos/{id}/unarchive', [\App\Controllers\StimulusController::class, 'unarchive']);
 $router->post('/memos/{id}/delete', [\App\Controllers\StimulusController::class, 'delete']);
 $router->get('/admin/grounds',      [\App\Controllers\AdminController::class, 'grounds']);
 $router->post('/admin/grounds',     [\App\Controllers\AdminController::class, 'storeGround']);
@@ -281,6 +283,8 @@ $router->post('/timesheet2/{id}/sign',   [TabelController::class, 'sign']);
 $router->post('/timesheet2/{id}/regenerate', [TabelController::class, 'regenerate']);
 $router->get('/timesheet2/{id}/view',    [TabelController::class, 'viewSigned']);
 $router->get('/timesheet2/{id}/export',  [TabelController::class, 'export']);
+$router->post('/timesheet2/{id}/archive',   [TabelController::class, 'archive']);
+$router->post('/timesheet2/{id}/unarchive', [TabelController::class, 'unarchive']);
 $router->post('/timesheet2/{id}/delete', [TabelController::class, 'destroy']);
 // Сменный график колл-центра (2/2): план/факт часов
 $router->get('/shifts',                  [\App\Controllers\ShiftController::class, 'index']);
@@ -292,6 +296,10 @@ $router->post('/shifts/employee/days',    [\App\Controllers\ShiftController::cla
 $router->get('/shifts/export',  [\App\Controllers\ShiftController::class, 'export']);
 $router->get('/shifts/grafik',  [\App\Controllers\ShiftController::class, 'grafik']);
 $router->post('/shifts/grafik/sign',  [\App\Controllers\ShiftController::class, 'signGrafik']);
+$router->get('/shifts/grafik/archive',     [\App\Controllers\ShiftController::class, 'grafikArchive']);
+$router->post('/shifts/grafik/archive',    [\App\Controllers\ShiftController::class, 'archiveGrafik']);
+$router->post('/shifts/grafik/unarchive',  [\App\Controllers\ShiftController::class, 'unarchiveGrafik']);
+$router->post('/shifts/grafik/delete',     [\App\Controllers\ShiftController::class, 'deleteGrafik']);
 $router->get('/shifts/grafik/export', [\App\Controllers\ShiftController::class, 'grafikExport']);
 
 // --- Меню контролёра ---

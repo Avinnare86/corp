@@ -72,10 +72,21 @@ class StimulusController extends Controller
         Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
         $uid = (int) Auth::id();
         $roles = Auth::roles();
+        $archive = (int) $this->input('archive') === 1;   // вкладка «Архив» (отклонённые служебки)
+        $seesAllArchive = !empty($roles['deputy_director']) || !empty($roles['director']) || !empty($roles['accountant']) || !empty($roles['admin']);
+
+        // Архив: отклонённые служебки (после подписи). Автор видит свои; руководство/бухгалтерия — все.
+        $archived = [];
+        if ($archive) {
+            $sql = "SELECT m.*, d.name AS dept_name, u.full_name AS author_name, ua.full_name AS archiver FROM stimulus_memos m
+                       LEFT JOIN departments d ON d.id=m.department_id JOIN users u ON u.id=m.author_id LEFT JOIN users ua ON ua.id=m.archived_by
+                      WHERE m.archived_at IS NOT NULL " . ($seesAllArchive ? '' : 'AND m.author_id=? ') . 'ORDER BY m.id DESC';
+            $archived = Database::all($sql, $seesAllArchive ? [] : [$uid]);
+        }
 
         $mine = Database::all(
             "SELECT m.*, d.name AS dept_name FROM stimulus_memos m LEFT JOIN departments d ON d.id=m.department_id
-              WHERE m.author_id=? ORDER BY m.id DESC", [$uid]);
+              WHERE m.author_id=? AND m.archived_at IS NULL ORDER BY m.id DESC", [$uid]);
 
         // очередь на действие
         $todo = [];
@@ -83,14 +94,14 @@ class StimulusController extends Controller
             $todo = array_merge($todo, Database::all(
                 "SELECT m.*, d.name AS dept_name, u.full_name AS author_name FROM stimulus_memos m
                    LEFT JOIN departments d ON d.id=m.department_id JOIN users u ON u.id=m.author_id
-                  WHERE m.status='head_signed' AND (? = 1 OR d.curator_id = ?) ORDER BY m.id DESC",
+                  WHERE m.status='head_signed' AND m.archived_at IS NULL AND (? = 1 OR d.curator_id = ?) ORDER BY m.id DESC",
                 [!empty($roles['admin']) ? 1 : 0, $uid]));
         }
         if (!empty($roles['director']) || !empty($roles['admin'])) {
             $todo = array_merge($todo, Database::all(
                 "SELECT m.*, d.name AS dept_name, u.full_name AS author_name FROM stimulus_memos m
                    LEFT JOIN departments d ON d.id=m.department_id JOIN users u ON u.id=m.author_id
-                  WHERE m.status='deputy_signed' ORDER BY m.id DESC"));
+                  WHERE m.status='deputy_signed' AND m.archived_at IS NULL ORDER BY m.id DESC"));
         }
 
         // бухгалтерия видит подписанные (после зама) и утверждённые
@@ -99,11 +110,12 @@ class StimulusController extends Controller
             $accountant = Database::all(
                 "SELECT m.*, d.name AS dept_name, u.full_name AS author_name FROM stimulus_memos m
                    LEFT JOIN departments d ON d.id=m.department_id JOIN users u ON u.id=m.author_id
-                  WHERE m.status IN ('deputy_signed','approved') ORDER BY m.id DESC");
+                  WHERE m.status IN ('deputy_signed','approved') AND m.archived_at IS NULL ORDER BY m.id DESC");
         }
 
         $this->view('stimulus/index', [
             'title' => 'Служебки о стимуле',
+            'archive' => $archive, 'archived' => $archived, 'isAdmin' => !empty($roles['admin']),
             'mine' => $mine, 'todo' => $todo, 'accountant' => $accountant,
             'canCreate' => !empty($roles['dept_head']) || !empty($roles['deputy_director']) || !empty($roles['admin']),
             'canCreateMgmt' => !empty($roles['director']) || !empty($roles['admin']),
@@ -1190,17 +1202,58 @@ class StimulusController extends Controller
         $this->redirect('/memos/' . (int)$id);
     }
 
-    public function delete(string $id): void
+    /** Отклонить окончательно → в архив (отдельно от «вернуть на доработку»). Только для подписанной служебки. */
+    public function rejectFinal(string $id): void
     {
-        Auth::requireRole('dept_head', 'admin');
+        Auth::requireRole('deputy_director', 'director', 'admin');
         Auth::verifyCsrf();
         $memo = Database::one('SELECT * FROM stimulus_memos WHERE id=?', [$id]);
-        if ($memo && ((int)$memo['author_id'] === (int)Auth::id() || Auth::isAdmin()) && in_array($memo['status'], ['draft','revision'], true)) {
-            Database::run('DELETE FROM stimulus_memo_lines WHERE memo_id=?', [$id]);
-            Database::run('DELETE FROM stimulus_memos WHERE id=?', [$id]);
-            flash('Черновик служебки удалён.');
+        if (!$memo) { $this->redirect('/memos'); }
+        if (!in_array($memo['status'], ['head_signed', 'deputy_signed'], true)) {
+            flash('Окончательно отклонить можно только подписанную служебку (на рассмотрении).', 'error');
+            $this->redirect('/memos/' . (int) $id);
         }
+        $reason = trim((string) $this->input('reason'));
+        if ($reason === '') { flash('Укажите причину отклонения.', 'error'); $this->redirect('/memos/' . (int) $id); }
+        Database::run('UPDATE stimulus_memos SET status=?, reject_reason=?, archived_at=?, archived_by=? WHERE id=?',
+            ['rejected', $reason, date('Y-m-d H:i:s'), Auth::id(), $id]);
+        NotificationService::create((int) $memo['author_id'], 'Служебка отклонена окончательно', "Служебка №{$memo['number']} отклонена и перенесена в архив: {$reason}");
+        flash('Служебка отклонена окончательно и перенесена в архив.');
+        $this->redirect('/memos?archive=1');
+    }
+
+    /** Вернуть служебку из архива на доработку (автор или админ). */
+    public function unarchive(string $id): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'admin');
+        Auth::verifyCsrf();
+        $memo = Database::one('SELECT * FROM stimulus_memos WHERE id=?', [$id]);
+        if (!$memo) { $this->redirect('/memos?archive=1'); }
+        if (!Auth::isAdmin() && (int) $memo['author_id'] !== (int) Auth::id()) { flash('Вернуть из архива может автор или администратор.', 'error'); $this->redirect('/memos?archive=1'); }
+        Database::run('UPDATE stimulus_memos SET status=?, archived_at=NULL, archived_by=NULL WHERE id=?', ['revision', $id]);
+        flash('Служебка возвращена из архива на доработку.');
         $this->redirect('/memos');
+    }
+
+    /** Удаление: не-админ — только свой черновик/доработку; админ — безвозвратно любую (вкл. подписанные/архив). */
+    public function delete(string $id): void
+    {
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'admin');
+        Auth::verifyCsrf();
+        $memo = Database::one('SELECT * FROM stimulus_memos WHERE id=?', [$id]);
+        if (!$memo) { $this->redirect('/memos'); }
+        $isAdmin = Auth::isAdmin();
+        $wasArchived = $memo['archived_at'] !== null;
+        if (!$isAdmin) {
+            if ((int) $memo['author_id'] !== (int) Auth::id() || !in_array($memo['status'], ['draft', 'revision'], true) || $wasArchived) {
+                flash('Удалить безвозвратно может только администратор. Свой черновик удаляет автор.', 'error');
+                $this->redirect($wasArchived ? '/memos?archive=1' : '/memos');
+            }
+        }
+        Database::run('DELETE FROM stimulus_memo_lines WHERE memo_id=?', [$id]);
+        Database::run('DELETE FROM stimulus_memos WHERE id=?', [$id]);
+        flash($isAdmin ? 'Служебка удалена безвозвратно.' : 'Черновик служебки удалён.');
+        $this->redirect($wasArchived ? '/memos?archive=1' : '/memos');
     }
 
     /** Утверждённые служебки прошлого месяца, видимые пользователю (для переноса). */

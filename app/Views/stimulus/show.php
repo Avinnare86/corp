@@ -126,8 +126,16 @@ if ($isMgmt) {
             <form method="post" action="/memos/<?= (int)$memo['id'] ?>/reject" style="margin-top:8px">
                 <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
                 <label>Причина<input type="text" name="reason" required></label>
-                <button class="btn btn-danger" style="margin-top:6px">Вернуть автору</button>
+                <button class="btn btn-danger" style="margin-top:6px">↩ Вернуть на доработку</button>
             </form>
+            <?php if (in_array($memo['status'], ['head_signed','deputy_signed'], true)): ?>
+            <form method="post" action="/memos/<?= (int)$memo['id'] ?>/reject-final" style="margin-top:12px;border-top:1px dashed #ccc;padding-top:10px">
+                <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
+                <p class="muted" style="margin:0 0 6px;font-size:.84rem">Окончательное отклонение: служебка переносится в <b>архив</b> (без возврата на доработку).</p>
+                <label>Причина<input type="text" name="reason" required></label>
+                <button class="btn btn-danger" style="margin-top:6px" onclick="return confirm('Отклонить служебку ОКОНЧАТЕЛЬНО и перенести в архив?')">🗄 Отклонить → в архив</button>
+            </form>
+            <?php endif; ?>
         </details>
         <?php endif; ?>
     </section>

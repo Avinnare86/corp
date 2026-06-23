@@ -328,11 +328,11 @@ class ShiftController extends Controller
         return $out;
     }
 
-    /** Последняя (по ревизии) подпись графика отдела за месяц, либо null. */
+    /** Последняя (по ревизии) НЕ архивная подпись графика отдела за месяц, либо null. */
     private function latestGrafik(int $deptId, string $month): ?array
     {
         if (!$deptId) { return null; }
-        return Database::one('SELECT * FROM shift_grafiks WHERE department_id=? AND period=? ORDER BY revision DESC LIMIT 1', [$deptId, $month]);
+        return Database::one('SELECT * FROM shift_grafiks WHERE department_id=? AND period=? AND archived_at IS NULL ORDER BY revision DESC LIMIT 1', [$deptId, $month]);
     }
 
     /** Право подписать график отдела: кадры/орг-табельщик/админ либо начальник/табельщик этого отдела. */
@@ -352,29 +352,42 @@ class ShiftController extends Controller
         return hash('sha256', json_encode($norm, JSON_UNESCAPED_UNICODE));
     }
 
-    /** Печатный график сменности (А4) за месяц по отделу. Подписанный — замороженный снимок + штамп ЭП. */
+    /** Печатный график сменности (А4) за месяц по отделу. Подписанный — замороженный снимок + штамп ЭП.
+     *  ?gid=ID — просмотр конкретной (в т.ч. архивной) ревизии из раздела «Архив». */
     public function grafik(): void
     {
         Auth::requireLogin();
         $me = Auth::user();
         if (!$this->canView($me)) { $this->redirect('/'); }
-        $month = (string) ($this->input('month') ?: date('Y-m'));
         $depts = $this->grafikDepts($me);
-        $deptId = $this->pickDept($depts, (int) $this->input('dept'));   // только доступный отдел
-        if (!$deptId) { flash('Нет отдела с сотрудниками на графике 2/2.', 'error'); $this->redirect('/shifts'); }
+        $allowedIds = array_map(fn($d) => (int) $d['id'], $depts);
+
+        $gid = (int) $this->input('gid');
+        if ($gid) {
+            $signed = Database::one('SELECT * FROM shift_grafiks WHERE id=?', [$gid]);
+            if (!$signed || !in_array((int) $signed['department_id'], $allowedIds, true)) { flash('Ревизия графика не найдена или недоступна.', 'error'); $this->redirect('/shifts/grafik/archive'); }
+            $deptId = (int) $signed['department_id'];
+            $month = (string) $signed['period'];
+        } else {
+            $month = (string) ($this->input('month') ?: date('Y-m'));
+            $deptId = $this->pickDept($depts, (int) $this->input('dept'));   // только доступный отдел
+            if (!$deptId) { flash('Нет отдела с сотрудниками на графике 2/2.', 'error'); $this->redirect('/shifts'); }
+            $signed = $this->latestGrafik($deptId, $month);
+        }
         $dept = Database::one('SELECT * FROM departments WHERE id=?', [$deptId]);
         $lastDay = (int) date('t', strtotime("$month-01"));
 
         $liveRows = $this->buildGrafik($deptId, $month);
         $liveDigest = self::grafikDigest($liveRows);
-        $signed = $this->latestGrafik($deptId, $month);
         $rows = $liveRows; $stale = false; $cert = null;
         if ($signed) {
             $snap = json_decode((string) $signed['snapshot'], true) ?: [];
             $rows = $snap['rows'] ?? $liveRows;                  // показываем замороженный план
-            $stale = ($snap['digest'] ?? '') !== $liveDigest;    // план изменён после подписи → нужна корректировка
+            $stale = !$gid && ($snap['digest'] ?? '') !== $liveDigest;  // для архивной/конкретной ревизии «изменён» не показываем
             $cert = Database::one('SELECT * FROM user_certificates WHERE serial=?', [$signed['cert_serial']]);
         }
+        $isArchivedRev = $gid && $signed && $signed['archived_at'] !== null;
+        $canArchive = $signed && !$gid && ($me['role'] === 'admin' || $this->canSignGrafik($me, $deptId));
 
         $this->view('shifts/grafik', [
             'title'   => 'График сменности',
@@ -384,10 +397,77 @@ class ShiftController extends Controller
             'orgName' => \App\Services\Settings::get('org_name', 'ФГБУ «Интеробразование»'),
             'signApprove' => \App\Services\Settings::get('tabel_sign_1', 'Заместитель генерального директора'),
             'signed'  => $signed, 'stale' => $stale, 'cert' => $cert,
-            'canSign' => $this->canSignGrafik($me, $deptId),
+            'gidView' => $gid > 0, 'isArchivedRev' => $isArchivedRev, 'canArchive' => $canArchive,
+            'isAdmin' => $me['role'] === 'admin',
+            'canSign' => !$gid && $this->canSignGrafik($me, $deptId),
             'signTypes' => \App\Controllers\TabelController::SIGN_TYPES,
             'certs'   => Database::all('SELECT * FROM user_certificates WHERE user_id=? AND valid_to>=? ORDER BY sign_type', [$me['id'], date('Y-m-d')]),
         ], false);
+    }
+
+    /** Перенести подписанную ревизию графика в архив (вручную; только подписанную). */
+    public function archiveGrafik(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        $g = Database::one('SELECT * FROM shift_grafiks WHERE id=?', [(int) $this->input('gid')]);
+        if (!$g) { $this->redirect('/shifts'); }
+        if ($me['role'] !== 'admin' && !$this->canSignGrafik($me, (int) $g['department_id'])) { flash('Нет прав на архивирование графика этого отдела.', 'error'); $this->redirect('/shifts/grafik?dept=' . (int) $g['department_id'] . '&month=' . urlencode((string) $g['period'])); }
+        if ($g['archived_at'] === null) {
+            Database::run('UPDATE shift_grafiks SET archived_at=?, archived_by=? WHERE id=?', [date('Y-m-d H:i:s'), $me['id'], (int) $g['id']]);
+        }
+        flash('График перенесён в архив.');
+        $this->redirect('/shifts/grafik?dept=' . (int) $g['department_id'] . '&month=' . urlencode((string) $g['period']));
+    }
+
+    /** Вернуть ревизию графика из архива. */
+    public function unarchiveGrafik(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        $g = Database::one('SELECT * FROM shift_grafiks WHERE id=?', [(int) $this->input('gid')]);
+        if (!$g) { $this->redirect('/shifts/grafik/archive'); }
+        if ($me['role'] !== 'admin' && !$this->canSignGrafik($me, (int) $g['department_id'])) { flash('Нет прав.', 'error'); $this->redirect('/shifts/grafik/archive'); }
+        Database::run('UPDATE shift_grafiks SET archived_at=NULL, archived_by=NULL WHERE id=?', [(int) $g['id']]);
+        flash('График возвращён из архива.');
+        $this->redirect('/shifts/grafik/archive');
+    }
+
+    /** Удалить ревизию графика безвозвратно — только администратор. */
+    public function deleteGrafik(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $me = Auth::user();
+        if ($me['role'] !== 'admin') { flash('Удалить график безвозвратно может только администратор.', 'error'); $this->redirect('/shifts/grafik/archive'); }
+        Database::run('DELETE FROM shift_grafiks WHERE id=?', [(int) $this->input('gid')]);
+        flash('Ревизия графика удалена безвозвратно.');
+        $this->redirect('/shifts/grafik/archive');
+    }
+
+    /** Архив графиков 2/2: все архивные ревизии по доступным отделам. */
+    public function grafikArchive(): void
+    {
+        Auth::requireLogin();
+        $me = Auth::user();
+        if (!$this->canView($me)) { $this->redirect('/'); }
+        $allowedIds = array_map(fn($d) => (int) $d['id'], $this->grafikDepts($me));
+        $rows = [];
+        if ($allowedIds) {
+            $ph = implode(',', array_fill(0, count($allowedIds), '?'));
+            $rows = Database::all(
+                "SELECT g.*, d.name AS dept_name, u.full_name AS archiver FROM shift_grafiks g
+                   LEFT JOIN departments d ON d.id=g.department_id LEFT JOIN users u ON u.id=g.archived_by
+                  WHERE g.archived_at IS NOT NULL AND g.department_id IN ($ph)
+                  ORDER BY g.period DESC, d.name, g.revision DESC", $allowedIds);
+        }
+        $this->view('shifts/grafik_archive', [
+            'title' => 'Архив графиков 2/2', 'rows' => $rows,
+            'isAdmin' => $me['role'] === 'admin',
+            'signTypes' => \App\Controllers\TabelController::SIGN_TYPES,
+        ]);
     }
 
     /** Подписать график сменности ЭП: снимок плана + HMAC; новая запись = новая ревизия (корректировка). */
