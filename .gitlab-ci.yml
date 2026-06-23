@@ -32,7 +32,7 @@ deploy test:
   script:
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
-    - echo "$SSH_PRIVATE_KEY_TEST" >> ~/.ssh/id_rsa
+    - echo "$PRIVATE_KEY_TEST" >> ~/.ssh/id_rsa
     - chmod 600 ~/.ssh/id_rsa
     - ssh-keyscan -p $PORT_TEST $HOST_TEST >> ~/.ssh/known_hosts
     - chmod 644 ~/.ssh/known_hosts
