@@ -38,7 +38,7 @@ deploy test:
     - chmod 644 ~/.ssh/known_hosts
     - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "mkdir -p $SERVICE_DIR"
     - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "test -f $SERVICE_DIR/docker-compose.yml && docker compose -f $SERVICE_DIR/docker-compose.yml down || echo \"no docker file\""
-    - rsync -avzhe "ssh -p $PORT_TEST" deploy/test/docker-compose.yml $USER_TEST@$HOST_TEST:$SERVICE_DIR/docker-compose.yml
+    - rsync -avzhe "ssh -p $PORT_TEST" docker-compose.yml $USER_TEST@$HOST_TEST:$SERVICE_DIR/docker-compose.yml
     - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "echo \"$ENV_FILE\" > $SERVICE_DIR/.env"
     - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY"
     - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "docker compose -f $SERVICE_DIR/docker-compose.yml up -d"
