@@ -289,8 +289,8 @@ class AdminController extends Controller
     /** Список сотрудников: НЕ грузим всех сразу — по буквам/поиску, компактно. */
     public function employees(): void
     {
-        // Кадры управляют; бухгалтерия/директор/замы — для надбавок и просмотра.
-        Auth::requireRole('admin', 'hr_manager', 'hr', 'accountant', 'director', 'deputy_director');
+        // Раздел «Сотрудники» — только кадры (кадровик/менеджер кадров) и директор (+ админ).
+        Auth::requireRole('admin', 'hr_manager', 'hr', 'director');
         $q = trim((string) $this->input('q'));
         $letter = (string) $this->input('letter');
 
@@ -335,7 +335,7 @@ class AdminController extends Controller
     /** Карточка одного сотрудника: подробности, перевод, удаление + роли/доступы + надбавка. */
     public function employeeCard(string $id): void
     {
-        Auth::requireRole('admin', 'hr_manager', 'hr', 'accountant', 'director', 'deputy_director');
+        Auth::requireRole('admin', 'hr_manager', 'hr', 'director');
         $u = Database::one(
             'SELECT u.*, d.name AS dept_name FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=?', [$id]);
         if (!$u) { flash('Сотрудник не найден.', 'error'); $this->redirect('/admin/employees'); }

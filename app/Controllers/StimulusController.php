@@ -173,17 +173,15 @@ class StimulusController extends Controller
         return null;
     }
 
-    /** Прямое назначение стимула вышестоящим (без участия начальников ниже): директор/зам. */
+    /**
+     * «Назначить напрямую» объединено с обычным созданием служебки: маршрут подписи теперь
+     * определяется должностью оформителя автоматически (зам/директор подписывают сразу, без начальника ниже).
+     * Оставлено как алиас на единую форму /memos/new.
+     */
     public function createDirect(): void
     {
         Auth::requireRole('director', 'deputy_director', 'admin');
-        $tier = self::signTier((int) Auth::id());   // по реальной должности, не по админ-правам
-        if (!in_array($tier, ['director', 'deputy'], true)) {
-            // Админ без реальной должности директора/зама оформляет с подписью инициатора (далее утверждает директор).
-            if (Auth::isAdmin()) { $tier = 'deputy'; }
-            else { flash('Прямое назначение доступно директору или курирующему заместителю.', 'error'); $this->redirect('/memos'); }
-        }
-        $this->memoForm(null, (int) Auth::id(), 'staff', $tier);
+        $this->redirect('/memos/new');
     }
 
     public function edit(string $id): void
@@ -475,16 +473,17 @@ class StimulusController extends Controller
                 flash('У сотрудников не указан отдел — некуда направить служебку: ' . implode(', ', array_unique($noDept)) . '. Сначала назначьте им отдел.', 'error');
                 $this->backToForm($id, $kind);
             }
-            // Маршрут — по фактической должности оформителя; админ НЕ повышается до директора
-            // (для стимула первая подпись всегда того, кто оформляет, а не согласующего).
-            $isDir = self::signTier($uid) === 'director';
+            // Маршрут подписи — по фактической должности ОФОРМИТЕЛЯ (а не согласующего); админ НЕ повышается до директора.
+            // Директор → утверждено сразу; зам (по ЛЮБОМУ отделу своей ветки, не только курируемому лично) →
+            // подписывает сразу как зам (deputy_signed → директор); начальник отдела → обычный маршрут (начальник → курирующий зам → директор).
+            $atier = self::signTier($uid);
             $pdo = Database::pdo();
             $pdo->beginTransaction();
             $batchId = null; $created = []; $noCurator = [];
             foreach ($byDept as $d => $dlines) {
                 $curator = (int) Database::scalar('SELECT curator_id FROM departments WHERE id=?', [$d]);
-                $ctier = $isDir ? 'director' : ($curator === $uid ? 'deputy' : null);
-                if (!$isDir && $ctier === null && !$curator) { $noCurator[] = (string) Database::scalar('SELECT name FROM departments WHERE id=?', [$d]); }
+                $ctier = $atier === 'director' ? 'director' : ($atier === 'deputy' ? 'deputy' : null);
+                if ($ctier === null && !$curator) { $noCurator[] = (string) Database::scalar('SELECT name FROM departments WHERE id=?', [$d]); }
                 $memoId = Database::insert(
                     'INSERT INTO stimulus_memos (department_id, author_id, period, pay_kind, source_id, grounds, grounds_ids, kind, direct_tier, status, batch_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                     [$d, $uid, $period, $payKind, $sourceId, implode('; ', $groundTexts), implode(',', $groundIds), 'staff', $ctier, 'draft', null]);
@@ -963,7 +962,7 @@ class StimulusController extends Controller
     /** Отчёт «служебки на печать»: по отделам, в разрезе ежемес./единовр., со ссылками на PDF. */
     public function printReport(): void
     {
-        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager', 'admin');
         $period = (string) $this->input('period', date('Y-m'));
         $memos = $this->reportMemos($period);
         $this->view('stimulus/print_report', [
@@ -978,7 +977,7 @@ class StimulusController extends Controller
     /** Печать ВСЕХ подходящих служебок одной страницей (A4-страницы) → один PDF из браузера. */
     public function printBatch(): void
     {
-        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'admin');
+        Auth::requireRole('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager', 'admin');
         $period = (string) $this->input('period', date('Y-m'));
         $batch = [];
         foreach ($this->reportMemos($period) as $m) {
@@ -995,15 +994,20 @@ class StimulusController extends Controller
         if ($period !== '') { $where .= ' AND m.period=?'; $params[] = $period; }
         $rows = Database::all(
             "SELECT m.id, m.number, m.period, m.status, m.pay_kind, m.department_id, m.author_id,
+                    m.head_id, m.deputy_id, m.director_id,
                     d.name AS dept_name, a.full_name AS author_name,
                     (SELECT COUNT(*) FROM stimulus_memo_lines l WHERE l.memo_id=m.id) AS people
                FROM stimulus_memos m LEFT JOIN departments d ON d.id=m.department_id JOIN users a ON a.id=m.author_id
               WHERE $where ORDER BY d.name, m.pay_kind DESC, m.id", $params);
+        // Бухгалтерия / менеджер финансов / директор / админ — видят все; остальные (начальник/зам) —
+        // только служебки, которые САМИ создали или СОГЛАСОВАЛИ (подписали как начальник/зам/директор).
         if ($this->seesAllStimulus()) { return $rows; }
         $uid = (int) Auth::id();
-        $scope = array_flip(Org::branchDeptIds($uid));
         return array_values(array_filter($rows, fn($m) =>
-            (int) $m['author_id'] === $uid || (($m['department_id'] ?? 0) && isset($scope[(int) $m['department_id']]))));
+            (int) $m['author_id'] === $uid
+            || (int) ($m['head_id'] ?? 0) === $uid
+            || (int) ($m['deputy_id'] ?? 0) === $uid
+            || (int) ($m['director_id'] ?? 0) === $uid));
     }
 
     /** Отчёт для бухгалтерии: по отделам — все служебки периода значками PDF (скачано / не скачано). */
@@ -1423,9 +1427,10 @@ class StimulusController extends Controller
         $canBase = Auth::has('director') || Auth::isAdmin();
         $out = [];
         foreach ($rows as $r) {
-            // Видно: всё (директор/бух/фин/админ) | свои назначения | по сотруднику | отдел в своей ветке (ниже по структуре).
+            // Строго по своей ветке: всё видят директор/бухгалтерия/фин-менеджер/админ; остальные (зам/начальник) —
+            // только отделы своей ветки (свой отдел и ниже по структуре). Чужая ветка не видна, даже если сам автор/получатель.
             $dept = (int) ($r['department_id'] ?? 0);
-            $visible = $seeAll || (int) $r['author_id'] === $uid || (int) $r['user_id'] === $uid || ($dept && isset($scope[$dept]));
+            $visible = $seeAll || ($dept && isset($scope[$dept]));
             if (!$visible) { continue; }
             $oversee = Org::canOverseeUser($uid, (int) $r['user_id']);
             $r['effective'] = $r['ov_amount'] !== null ? (float) $r['ov_amount'] : (float) $r['amount'];

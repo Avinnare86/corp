@@ -70,9 +70,9 @@ if ($uid) {
         if ($can('visa_manager'))     { $g[] = ['/admin/operations', 'Каталог операций', 0]; }
         if ($g) { $menu['Визы'] = $g; }
     }
-    // Кадры — по ролям. Бухгалтерия/директор/руководители тоже видят «Сотрудники» (для надбавок/просмотра).
-    $canSeeStaff = $isHrMgr || $can('accountant', 'director', 'deputy_director');
-    if ($isHrMgr || $isTimekeeper || $canSeeStaff || $can('dept_head')) {
+    // «Сотрудники» — только кадры (кадровик/менеджер кадров) и директор (+ админ). Бухгалтерия/замы — нет.
+    $canSeeStaff = $isHrMgr || $can('director');
+    if ($isHrMgr || $isTimekeeper || $canSeeStaff || $can('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager')) {
         $g = [];
         if ($isTimekeeper || $isHrMgr || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacations', 'Отпуска', $vacInbox]; }
         $canShift = \App\Controllers\ShiftController::canSee((int) $uid);
@@ -93,7 +93,6 @@ if ($uid) {
         $memoInbox = \App\Controllers\StimulusController::inboxCount((int) $uid);
         $g = [['/memos', 'Служебки о стимуле', $memoInbox], ['/memos/summary', 'Сводная по стимулу', 0]];
         if ($can('dept_head', 'deputy_director', 'director')) { $g[] = ['/memos/carry', 'Перенос с прошлого месяца', 0]; }
-        if ($can('director', 'deputy_director')) { $g[] = ['/memos/direct/new', 'Назначить напрямую', 0]; }
         $g[] = ['/memos/print-report', 'Служебки на печать', 0];
         if ($can('accountant', 'director', 'finance_manager')) { $g[] = ['/memos/coverage', 'Покрытие (бухгалтерия)', 0]; }
         if ($can('dept_head', 'deputy_director', 'director')) { $g[] = ['/memos/reasons', 'Основания (справочник)', 0]; }

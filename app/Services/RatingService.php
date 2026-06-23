@@ -34,7 +34,8 @@ class RatingService
                        AND substr(ai.checked_at,1,7) = ?
                      GROUP BY i.employee_id
                ) chk ON chk.employee_id = u.id
-              WHERE u.role = 'employee' AND u.is_active = 1",
+              WHERE u.role = 'employee' AND u.is_active = 1
+                AND EXISTS (SELECT 1 FROM assignment_items ai3 WHERE ai3.assigned_to = u.id)",
             [$period, $period]
         );
 
