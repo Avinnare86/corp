@@ -146,8 +146,10 @@ class SamplingService
         foreach ($ids as $did) {
             $ai = Database::one('SELECT id, assigned_to FROM assignment_items WHERE id=? AND checked_at IS NOT NULL AND assigned_to IS NOT NULL', [$did]);
             if (!$ai) { continue; }
-            // не дублируем: анкета уже в НЕзавершённой выборке
-            if (Database::scalar("SELECT 1 FROM inspections i JOIN sample_batches b ON b.id=i.batch_id WHERE i.dossier_id=? AND b.finished_at IS NULL", [$did])) { continue; }
+            // dossier_id в inspections — UNIQUE: анкета инспектируется лишь раз. Уже инспектированную
+            // (в любой выборке, завершённой или нет) пропускаем — иначе INSERT упадёт на UNIQUE.
+            // Повторный контроль брака идёт через recheck-копию с новым dossier_id, а не по той же анкете.
+            if (Database::scalar('SELECT 1 FROM inspections WHERE dossier_id=?', [$did])) { continue; }
             Database::insert('INSERT INTO inspections (batch_id, dossier_id, employee_id) VALUES (?,?,?)', [$batchId, $did, (int) $ai['assigned_to']]);
             $added++;
         }

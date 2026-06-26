@@ -42,13 +42,14 @@
                 <tr><td colspan="6" class="muted" style="text-align:center;padding:16px">Нет проверенных анкет по фильтру. Измените период/специалиста/страну.</td></tr>
             <?php endif; ?>
             <?php foreach ($cands as $a): ?>
-                <tr>
-                    <td><input type="checkbox" class="pick" name="pick[]" value="<?= (int) $a['id'] ?>"></td>
+                <?php $done = (int) $a['inspected'] > 0; ?>
+                <tr<?= $done ? ' class="muted"' : '' ?>>
+                    <td><input type="checkbox" class="pick" name="pick[]" value="<?= (int) $a['id'] ?>"<?= $done ? ' disabled title="анкета уже проходила контроль"' : '' ?>></td>
                     <td><?= e($a['employee_name']) ?></td>
                     <td><strong><?= e($a['reg_number']) ?></strong></td>
                     <td><?= e($a['country_code']) ?></td>
                     <td><?= e($a['checked_day']) ?></td>
-                    <td><?= (int) $a['inspected'] > 0 ? '<span class="muted">контролировалась</span>' : '—' ?></td>
+                    <td><?= $done ? '<span class="muted">контролировалась</span>' : '—' ?></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>

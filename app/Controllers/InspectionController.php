@@ -211,7 +211,7 @@ class InspectionController extends Controller
         $ids = array_map('intval', (array) ($_POST['pick'] ?? []));
         [$batchId, $added] = SamplingService::createManualBatch((int) Auth::id(), (string) $this->input('title', ''), $ids);
         if (!$batchId) {
-            flash('Не выбрано ни одной анкеты (или все уже в незавершённой выборке).', 'error');
+            flash('Не выбрано ни одной анкеты (или все выбранные уже проходили контроль).', 'error');
             $this->redirect('/inspect/manual');
         }
         flash("Ручная выборка сформирована: анкет на проверку — {$added}.");
