@@ -214,7 +214,13 @@ class ManagerController extends Controller
         ]);
     }
 
-    /** Выгрузка отчёта о проверке в Excel (с учётом фильтров периода и страны). */
+    /**
+     * Выгрузка отчёта о проверке в Excel (с учётом фильтров периода/дат/страны).
+     * Лист 1 «Сводка» — как на странице; лист 2 «Детально по анкетам» — каждая
+     * проверенная анкета: специалист, рег.номер, страна, дата, первичная/повтор,
+     * результат проверки и замечание, результат контроля (тип ошибки, комментарий,
+     * снижение, повтор №), дата контроля.
+     */
     public function qualityReportExport(): void
     {
         Auth::requireRole('anketa_manager', 'controller', 'director', 'deputy_director', 'admin');
@@ -222,19 +228,87 @@ class ManagerController extends Controller
         $country = (string) $this->input('country', '');
         $from = (string) $this->input('from', '');
         $to = (string) $this->input('to', '');
-        $rows = $this->qualityRows($period, $country, $from, $to);
-        $data = [];
-        foreach ($rows as $r) {
-            $data[] = [
+
+        // --- Лист 1: сводка по специалистам ---
+        $summary = [];
+        foreach ($this->qualityRows($period, $country, $from, $to) as $r) {
+            $summary[] = [
                 $r['full_name'], (int) $r['checked'], (int) $r['check_err'], $r['check_pct'] . '%',
                 (int) $r['inspected'], (int) $r['ctrl_err'], $r['ctrl_pct'] === null ? '—' : $r['ctrl_pct'] . '%',
             ];
         }
-        \App\Services\Xlsx::download('proverka-' . ($country ?: 'all') . '-' . ($period ?: 'all') . '.xlsx', [[
-            'name'    => 'Качество проверки',
-            'headers' => ['Специалист', 'Проверено', 'Ошибок при проверке', '% ошибок (проверка)', 'Проконтролировано', 'Ошибок при контроле', '% ошибок (контроль)'],
-            'rows'    => $data,
-        ]]);
+
+        // --- Лист 2: детально по каждой анкете ---
+        $detail = [];
+        foreach ($this->qualityDetailRows($period, $country, $from, $to) as $d) {
+            $ctrl = $d['insp_id'] === null ? 'Не контролировалась'
+                  : ($d['ctrl_correct'] === null ? 'На контроле (не завершён)'
+                  : ((int) $d['ctrl_correct'] === 1 ? 'Корректно' : 'Ошибка'));
+            $detail[] = [
+                $d['full_name'],
+                $d['reg_number'],
+                $d['country_code'],
+                $d['country_name'] ?: $d['country_code'],
+                $d['checked_day'],
+                ((int) $d['is_recheck'] === 1) ? 'Повтор' : 'Первичная',
+                ((int) $d['has_dorabotka'] === 1) ? 'Доработка' : 'Без замечаний',
+                (string) ($d['comment_text'] ?? ''),
+                $ctrl,
+                (string) ($d['ctrl_error'] ?? ''),
+                (string) ($d['controller_comment'] ?? ''),
+                ($d['penalty_amount'] !== null && (float) $d['penalty_amount'] != 0.0) ? (float) $d['penalty_amount'] : '',
+                ((int) ($d['occurrence'] ?? 0) > 1) ? (int) $d['occurrence'] : '',
+                (string) ($d['ctrl_day'] ?? ''),
+            ];
+        }
+
+        \App\Services\Xlsx::download('proverka-' . ($country ?: 'all') . '-' . ($period ?: 'all') . '.xlsx', [
+            [
+                'name'    => 'Сводка',
+                'headers' => ['Специалист', 'Проверено', 'Ошибок при проверке', '% ошибок (проверка)', 'Проконтролировано', 'Ошибок при контроле', '% ошибок (контроль)'],
+                'rows'    => $summary,
+            ],
+            [
+                'name'    => 'Детально по анкетам',
+                'headers' => ['Специалист', 'Рег. номер', 'Код страны', 'Страна', 'Дата проверки', 'Вид проверки',
+                              'Результат проверки', 'Замечание специалиста', 'Контроль', 'Тип ошибки (контроль)',
+                              'Комментарий контролёра', 'Снижение, ₽', 'Повтор № (контроль)', 'Дата контроля'],
+                'rows'    => $detail,
+            ],
+        ]);
+    }
+
+    /**
+     * Детально по каждой проверенной анкете для выгрузки (те же фильтры, что и сводка).
+     * Одна инспекция на досье (inspections.dossier_id UNIQUE) — прямой LEFT JOIN.
+     */
+    private function qualityDetailRows(string $period, string $country, string $from = '', string $to = ''): array
+    {
+        $where = 'ai.checked_at IS NOT NULL AND ai.assigned_to IS NOT NULL';
+        $params = [];
+        if ($from !== '' || $to !== '') {
+            if ($from !== '') { $where .= ' AND ai.checked_at >= ?'; $params[] = $from . ' 00:00:00'; }
+            if ($to !== '')   { $where .= ' AND ai.checked_at <= ?'; $params[] = $to . ' 23:59:59'; }
+        } elseif ($period !== '') { $where .= ' AND substr(ai.checked_at,1,7)=?'; $params[] = $period; }
+        if ($country !== '') { $where .= ' AND ai.country_code=?'; $params[] = $country; }
+        return Database::all(
+            "SELECT u.full_name, ai.reg_number, ai.country_code, c.name AS country_name,
+                    substr(ai.checked_at,1,10) AS checked_day,
+                    CASE WHEN COALESCE(ai.recheck,0)=1 THEN 1 ELSE 0 END AS is_recheck,
+                    CASE WHEN ai.comment_id IS NOT NULL
+                            OR EXISTS(SELECT 1 FROM item_comments ic WHERE ic.item_id=ai.id)
+                         THEN 1 ELSE 0 END AS has_dorabotka,
+                    ai.comment_text,
+                    i.id AS insp_id, i.is_correct AS ctrl_correct, i.penalty_amount, i.occurrence,
+                    i.controller_comment, substr(i.reviewed_at,1,10) AS ctrl_day,
+                    et.name AS ctrl_error
+               FROM assignment_items ai
+               JOIN users u ON u.id = ai.assigned_to
+               LEFT JOIN countries c ON c.code = ai.country_code
+               LEFT JOIN inspections i ON i.dossier_id = ai.id
+               LEFT JOIN error_types et ON et.id = i.error_type_id
+              WHERE $where
+              ORDER BY u.full_name, ai.checked_at DESC", $params);
     }
 
     /** Раскрытие специалиста в отчёте о проверке: его проверенные анкеты (с доработкой и вердиктом контроля). Partial. */
