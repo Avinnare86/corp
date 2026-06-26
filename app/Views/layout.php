@@ -33,6 +33,7 @@ if ($uid) {
         if ($can('anketa_worker')) { $g[] = ['/dossiers', 'Проверка досье', 0]; $g[] = ['/norm', 'Мой норматив', 0]; }
         if ($can('controller'))    { $g[] = ['/inspect', 'Контроль анкет', 0]; }
         if ($can('anketa_manager')) { $g[] = ['/manager', 'Распределение', 0]; $g[] = ['/manager/report', 'Отчёт', 0]; $g[] = ['/norm/report', 'Норматив', 0]; }
+        if ($can('anketa_manager', 'controller')) { $g[] = ['/manager/quality', 'Отчёт о проверке', 0]; }
         $g[] = ['/rating', 'Рейтинг', 0];
         // настройки менеджера проекта по квоте
         if ($can('anketa_manager')) {

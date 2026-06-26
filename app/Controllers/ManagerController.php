@@ -143,6 +143,90 @@ class ManagerController extends Controller
         ]);
     }
 
+    /**
+     * Строки отчёта «качество проверки» в разрезе специалистов: ошибки, выявленные при проверке
+     * (анкеты с доработками), и ошибки, выявленные при последующем контроле (inspections.is_correct=0),
+     * с фильтром по периоду (месяц checked_at) и по стране (country_code).
+     */
+    private function qualityRows(string $period, string $country): array
+    {
+        $where = 'ai.checked_at IS NOT NULL AND ai.assigned_to IS NOT NULL';
+        $params = [];
+        if ($period !== '') { $where .= ' AND substr(ai.checked_at,1,7)=?'; $params[] = $period; }
+        if ($country !== '') { $where .= ' AND ai.country_code=?'; $params[] = $country; }
+        $rows = Database::all(
+            "SELECT ai.assigned_to AS uid, u.full_name,
+                    COUNT(*) AS checked,
+                    SUM(CASE WHEN ai.comment_id IS NOT NULL
+                                OR EXISTS(SELECT 1 FROM item_comments ic WHERE ic.item_id=ai.id)
+                             THEN 1 ELSE 0 END) AS check_err,
+                    SUM(CASE WHEN insp.iid IS NOT NULL THEN 1 ELSE 0 END) AS inspected,
+                    SUM(CASE WHEN insp.err = 1 THEN 1 ELSE 0 END) AS ctrl_err
+               FROM assignment_items ai
+               JOIN users u ON u.id = ai.assigned_to
+               LEFT JOIN (
+                    SELECT dossier_id, MAX(id) AS iid, MAX(CASE WHEN is_correct=0 THEN 1 ELSE 0 END) AS err
+                      FROM inspections WHERE is_correct IS NOT NULL GROUP BY dossier_id
+               ) insp ON insp.dossier_id = ai.id
+              WHERE $where
+              GROUP BY ai.assigned_to, u.full_name
+              HAVING COUNT(*) > 0
+              ORDER BY u.full_name", $params);
+        foreach ($rows as &$r) {
+            $checked = (int) $r['checked']; $insp = (int) $r['inspected'];
+            $r['check_err'] = (int) $r['check_err']; $r['ctrl_err'] = (int) $r['ctrl_err'];
+            $r['inspected'] = $insp;
+            $r['check_pct'] = $checked > 0 ? round($r['check_err'] / $checked * 100, 1) : 0.0;
+            $r['ctrl_pct']  = $insp > 0 ? round($r['ctrl_err'] / $insp * 100, 1) : null;
+        }
+        unset($r);
+        return $rows;
+    }
+
+    /** Отчёт о проверке в разрезе специалистов (ошибки при проверке и при контроле) с фильтрами. */
+    public function qualityReport(): void
+    {
+        Auth::requireRole('anketa_manager', 'controller', 'director', 'deputy_director', 'admin');
+        $period  = (string) $this->input('period', '');
+        $country = (string) $this->input('country', '');
+        $rows = $this->qualityRows($period, $country);
+        $tot = ['checked' => 0, 'check_err' => 0, 'inspected' => 0, 'ctrl_err' => 0];
+        foreach ($rows as $r) { foreach (['checked', 'check_err', 'inspected', 'ctrl_err'] as $k) { $tot[$k] += (int) $r[$k]; } }
+        $tot['check_pct'] = $tot['checked'] > 0 ? round($tot['check_err'] / $tot['checked'] * 100, 1) : 0.0;
+        $tot['ctrl_pct']  = $tot['inspected'] > 0 ? round($tot['ctrl_err'] / $tot['inspected'] * 100, 1) : null;
+        $this->view('manager/quality', [
+            'title'     => 'Отчёт о проверке (в разрезе специалистов)',
+            'rows'      => $rows,
+            'tot'       => $tot,
+            'period'    => $period,
+            'country'   => $country,
+            'periods'   => array_column(Database::all("SELECT DISTINCT substr(checked_at,1,7) AS p FROM assignment_items WHERE checked_at IS NOT NULL ORDER BY p DESC"), 'p'),
+            'countries' => Database::all("SELECT ai.country_code AS code, c.name FROM assignment_items ai LEFT JOIN countries c ON c.code=ai.country_code WHERE ai.country_code IS NOT NULL AND ai.country_code<>'' GROUP BY ai.country_code, c.name ORDER BY c.name, ai.country_code"),
+            'countryName' => $country !== '' ? (string) Database::scalar('SELECT name FROM countries WHERE code=?', [$country]) : '',
+        ]);
+    }
+
+    /** Выгрузка отчёта о проверке в Excel (с учётом фильтров периода и страны). */
+    public function qualityReportExport(): void
+    {
+        Auth::requireRole('anketa_manager', 'controller', 'director', 'deputy_director', 'admin');
+        $period  = (string) $this->input('period', '');
+        $country = (string) $this->input('country', '');
+        $rows = $this->qualityRows($period, $country);
+        $data = [];
+        foreach ($rows as $r) {
+            $data[] = [
+                $r['full_name'], (int) $r['checked'], (int) $r['check_err'], $r['check_pct'] . '%',
+                (int) $r['inspected'], (int) $r['ctrl_err'], $r['ctrl_pct'] === null ? '—' : $r['ctrl_pct'] . '%',
+            ];
+        }
+        \App\Services\Xlsx::download('proverka-' . ($country ?: 'all') . '-' . ($period ?: 'all') . '.xlsx', [[
+            'name'    => 'Качество проверки',
+            'headers' => ['Специалист', 'Проверено', 'Ошибок при проверке', '% ошибок (проверка)', 'Проконтролировано', 'Ошибок при контроле', '% ошибок (контроль)'],
+            'rows'    => $data,
+        ]]);
+    }
+
     /** Загрузка списка (docx/xlsx/csv/txt). */
     public function upload(): void
     {

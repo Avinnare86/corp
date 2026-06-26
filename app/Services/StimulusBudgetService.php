@@ -29,24 +29,32 @@ class StimulusBudgetService
 
         // Сотрудники отдела (оклад берём по должности, иначе личный).
         $emps = Database::all(
-            'SELECT u.id, u.rate_volume, u.allowance, u.oklad, p.oklad AS pos_oklad
+            'SELECT u.id, u.rate_volume, u.allowance, u.oklad, u.hire_date, u.fire_date, p.oklad AS pos_oklad
                FROM users u LEFT JOIN positions p ON p.id=u.position_id
               WHERE u.department_id=? AND u.is_active=1', [$deptId]);
 
-        $okladPart = 0.0;   // оклад×ставка (база для отпускных)
-        $monthly   = 0.0;   // оклад×ставка + надбавка + фикс-доплаты
+        // Оклад в бюджет отдела — пропорционально занятости: дни до приёма и после увольнения не списываются.
+        // okladMonthly — по доле текущего месяца; okladYear — сумма помесячных долей за год; okladPart (отпускной резерв) — по годовой доле.
+        $okladPart = 0.0;   // оклад×ставка (база для отпускных), с учётом доли года
+        $okladMonthly = 0.0;
+        $okladYear = 0.0;
         foreach ($emps as $e) {
             $okl = $e['pos_oklad'] !== null ? (float) $e['pos_oklad'] : (float) ($e['oklad'] ?? 0);
             $base = $okl * (float) ($e['rate_volume'] ?? 1);
             $fix = (float) Database::scalar(
                 'SELECT COALESCE(SUM(monthly_amount),0) FROM employee_fixed_extras WHERE employee_id=? AND is_active=1',
                 [$e['id']]);
-            $okladPart += $base;
-            $monthly   += $base + (float) ($e['allowance'] ?? 0) + $fix;
+            $monthlyFull = $base + (float) ($e['allowance'] ?? 0) + $fix;
+            $hire = $e['hire_date'] ?? null; $fire = $e['fire_date'] ?? null;
+            $mp = \App\Services\PayrollService::employmentProrate($period, $hire, $fire);   // доля текущего месяца
+            $yf = \App\Services\PayrollService::employmentYearFactor($yy, $hire, $fire);     // фактор года (0..12)
+            $okladMonthly += $monthlyFull * $mp;
+            $okladYear    += $monthlyFull * $yf;
+            $okladPart    += $base * ($yf / 12.0);
         }
         $okladPart = round($okladPart, 2);
-        $okladMonthly = round($monthly, 2);
-        $okladYear = round($okladMonthly * 12, 2);
+        $okladMonthly = round($okladMonthly, 2);
+        $okladYear = round($okladYear, 2);
 
         // Действующий ежемесячный стимул: уровень текущего периода (утв. служебки), ×12.
         $stimMonthly = (float) (Database::scalar(

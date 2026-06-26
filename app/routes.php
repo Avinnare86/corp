@@ -66,6 +66,8 @@ $router->post('/notifications/{id}/read', [NotificationController::class, 'markR
 $router->get('/manager',                  [ManagerController::class, 'index']);
 $router->get('/manager/report',           [ManagerController::class, 'report']);
 $router->get('/manager/report/export',    [ManagerController::class, 'reportExport']);
+$router->get('/manager/quality',          [ManagerController::class, 'qualityReport']);
+$router->get('/manager/quality/export',   [ManagerController::class, 'qualityReportExport']);
 $router->post('/manager/upload',          [ManagerController::class, 'upload']);
 $router->post('/manager/manual',           [ManagerController::class, 'manualAdd']);
 $router->get('/manager/items',            [ManagerController::class, 'items']);

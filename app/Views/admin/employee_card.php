@@ -60,6 +60,8 @@ $rate = rtrim(rtrim(number_format((float)$u['rate_volume'], 2, '.', ''), '0'), '
                 </select>
                 <?php if (($u['schedule_type']??'')==='2_2'): ?><span class="muted" style="font-size:.78rem">для 2/2 «оклад» = ставка ₽/час; ЗП — по сменному графику</span><?php endif; ?>
             </label>
+            <label>Дата приёма<input type="date" name="hire_date" value="<?= e(substr((string)($u['hire_date'] ?? ''), 0, 10)) ?>" title="дни до приёма — нерабочие (табель, ЗП, бюджет отдела)"></label>
+            <label>Дата увольнения<input type="date" name="fire_date" value="<?= e(substr((string)($u['fire_date'] ?? ''), 0, 10)) ?>" title="дни после увольнения — нерабочие; оклад за них не списывается из бюджета отдела"></label>
             <label>Персональная надбавка, %<input type="number" step="0.1" name="hourly_bonus_pct" value="<?= e(rtrim(rtrim(number_format((float)($u['hourly_bonus_pct']??0),2,'.',''),'0'),'.')) ?>" title="надбавка по ТК, % от начисленного (для почасовиков)"></label>
             <label>…или фикс, ₽/мес<input type="number" step="0.01" name="hourly_bonus_rub" value="<?= e(rtrim(rtrim(number_format((float)($u['hourly_bonus_rub']??0),2,'.',''),'0'),'.')) ?>" title="если % не задан"></label>
             <label>Email<input type="email" name="email" value="<?= e($u['email'] ?? '') ?>" placeholder="user@org.ru"></label>

@@ -455,8 +455,10 @@ class AdminController extends Controller
         }
         // does_anketas/does_operations — из ролей (Оргструктура → syncLegacyFlags).
         // Надбавка НЕ здесь: её устанавливает только бухгалтерия (setAllowance), кадры её не трогают.
+        $hireDate = trim((string) $this->input('hire_date', '')) ?: null;   // дата приёма; пусто → NULL
+        $fireDate = trim((string) $this->input('fire_date', '')) ?: null;   // дата увольнения; пусто → NULL
         Database::run(
-            'UPDATE users SET full_name=?, role=?, position=?, position_id=?, oklad=?, rate_volume=?, schedule_type=?, email=?, is_active=?, hourly_bonus_pct=?, hourly_bonus_rub=? WHERE id=?',
+            'UPDATE users SET full_name=?, role=?, position=?, position_id=?, oklad=?, rate_volume=?, schedule_type=?, email=?, is_active=?, hourly_bonus_pct=?, hourly_bonus_rub=?, hire_date=?, fire_date=? WHERE id=?',
             [
                 $this->input('full_name'),
                 $this->input('role', 'employee'),
@@ -467,6 +469,7 @@ class AdminController extends Controller
                 (int) ($this->input('is_active') ? 1 : 0),
                 max(0.0, (float) str_replace(',', '.', (string) $this->input('hourly_bonus_pct', 0))),
                 max(0.0, (float) str_replace(',', '.', (string) $this->input('hourly_bonus_rub', 0))),
+                $hireDate, $fireDate,
                 $id,
             ]
         );

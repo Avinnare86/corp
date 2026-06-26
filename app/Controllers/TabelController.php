@@ -130,15 +130,19 @@ class TabelController extends Controller
         [$start, $end] = $this->range($period);
         $nDays = (int) ((strtotime($end) - strtotime($start)) / 86400) + 1;
         $emps = $deptId === null
-            ? Database::all("SELECT id FROM users WHERE role IN ('employee','controller') AND is_active=1 AND COALESCE(schedule_type,'5_2')<>'2_2' ORDER BY full_name")
-            : Database::all("SELECT id FROM users WHERE department_id=? AND is_active=1 AND COALESCE(schedule_type,'5_2')<>'2_2' ORDER BY full_name", [$deptId]);
+            ? Database::all("SELECT id, hire_date, fire_date FROM users WHERE role IN ('employee','controller') AND is_active=1 AND COALESCE(schedule_type,'5_2')<>'2_2' ORDER BY full_name")
+            : Database::all("SELECT id, hire_date, fire_date FROM users WHERE department_id=? AND is_active=1 AND COALESCE(schedule_type,'5_2')<>'2_2' ORDER BY full_name", [$deptId]);
         foreach ($emps as $e) {
             $eid = (int) $e['id'];
+            $hire = ($e['hire_date'] ?? '') !== '' ? substr((string) $e['hire_date'], 0, 10) : null;
+            $fire = ($e['fire_date'] ?? '') !== '' ? substr((string) $e['fire_date'], 0, 10) : null;
             $cells = []; $days = 0;
             for ($i = 0; $i < $nDays; $i++) {
                 $dte = date('Y-m-d', strtotime($start) + $i * 86400);
                 $dow = (int) date('w', strtotime($dte));   // 0=вс, 6=сб
-                if (Database::scalar("SELECT 1 FROM vacation_requests WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?", [$eid, $dte, $dte])) {
+                if (($hire !== null && $dte < $hire) || ($fire !== null && $dte > $fire)) {
+                    $c = '';   // до приёма / после увольнения — нерабочий день, не в счёт отработанных
+                } elseif (Database::scalar("SELECT 1 FROM vacation_requests WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?", [$eid, $dte, $dte])) {
                     $c = 'О';
                 } elseif ($dow === 0 || $dow === 6) {
                     $c = 'В';

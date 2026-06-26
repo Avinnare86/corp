@@ -58,7 +58,10 @@ class PayrollService
         // отсутствии явки/табеля: ЗП не опускается ниже минимума за полный месяц.
         $tsNorm   = $ts ? (int) $ts['norm_days'] : 0;
         $tsWorked = $ts ? (int) $ts['worked_days'] : 0;
-        $prorate  = ($ts && $tsNorm > 0 && $tsWorked < $tsNorm) ? max(0.0, min(1.0, $tsWorked / $tsNorm)) : 1.0;
+        // Доля занятости по дате приёма/увольнения: дни до приёма и после увольнения — нерабочие.
+        // Если табель явно фиксирует неполный месяц — берём его; иначе пропорция по периоду занятости.
+        $empPro   = self::employmentProrate($period, $user['hire_date'] ?? null, $user['fire_date'] ?? null);
+        $prorate  = ($ts && $tsNorm > 0 && $tsWorked < $tsNorm) ? max(0.0, min(1.0, $tsWorked / $tsNorm)) : $empPro;
 
         // Гарантированная база по окладу (пропорц. фактору). Надбавка переведена на стимул.
         $okladGuaranteed = round($oklad * $rate * $prorate, 2);
@@ -463,6 +466,47 @@ class PayrollService
             if ((int) date('N', mktime(0, 0, 0, $m, $d, $y)) <= 5) { $cnt++; } // 1=Пн..5=Пт
         }
         return $cnt > 0 ? $cnt : 21;
+    }
+
+    /**
+     * Рабочие дни (Пн–Пт) периода, ПОПАДАЮЩИЕ в период занятости [дата приёма; дата увольнения].
+     * Дни до приёма и после увольнения считаются нерабочими (не учитываются). День увольнения — рабочий.
+     */
+    public static function employmentWorkingDays(string $period, ?string $hire, ?string $fire): int
+    {
+        $parts = explode('-', $period);
+        $y = (int) ($parts[0] ?? 0); $m = (int) ($parts[1] ?? 0);
+        if ($y < 1 || $m < 1 || $m > 12) { return 0; }
+        $days = (int) date('t', mktime(0, 0, 0, $m, 1, $y));
+        $hireTs = ($hire !== null && $hire !== '') ? strtotime(substr((string) $hire, 0, 10)) : null;
+        $fireTs = ($fire !== null && $fire !== '') ? strtotime(substr((string) $fire, 0, 10)) : null;
+        $cnt = 0;
+        for ($d = 1; $d <= $days; $d++) {
+            $t = mktime(0, 0, 0, $m, $d, $y);
+            if ((int) date('N', $t) > 5) { continue; }            // выходной
+            if ($hireTs !== null && $t < $hireTs) { continue; }   // до приёма
+            if ($fireTs !== null && $t > $fireTs) { continue; }   // после увольнения
+            $cnt++;
+        }
+        return $cnt;
+    }
+
+    /** Доля занятости месяца (рабочие дни занятости ÷ рабочие дни месяца), 0..1. Без дат приёма/увольнения = 1. */
+    public static function employmentProrate(string $period, ?string $hire, ?string $fire): float
+    {
+        if (($hire === null || $hire === '') && ($fire === null || $fire === '')) { return 1.0; }
+        $cal = self::calendarWorkingDays($period);
+        if ($cal <= 0) { return 1.0; }
+        return max(0.0, min(1.0, self::employmentWorkingDays($period, $hire, $fire) / $cal));
+    }
+
+    /** Годовой фактор занятости (сумма помесячных долей за год, 0..12). Полный год без дат = 12. */
+    public static function employmentYearFactor(int $year, ?string $hire, ?string $fire): float
+    {
+        if (($hire === null || $hire === '') && ($fire === null || $fire === '')) { return 12.0; }
+        $f = 0.0;
+        for ($m = 1; $m <= 12; $m++) { $f += self::employmentProrate(sprintf('%04d-%02d', $year, $m), $hire, $fire); }
+        return round($f, 4);
     }
 
     /**

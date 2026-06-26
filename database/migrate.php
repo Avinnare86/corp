@@ -981,6 +981,14 @@ foreach (['tabels', 'shift_grafiks', 'stimulus_memos'] as $tbl) {
         }
     }
 }
+// Дата приёма на работу и дата увольнения: дни до приёма и после увольнения — нерабочие
+// (табель, расчётный листок, пропорция оклада в бюджете отдела).
+foreach (['hire_date' => 'DATE NULL', 'fire_date' => 'DATE NULL'] as $col => $ddl) {
+    if (!columnExists('users', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE users ADD COLUMN $col $ddl"));
+        echo "OK  колонка users.$col добавлена\n";
+    }
+}
 // Линия прибытия анкеты (квота): ЛП + ДЛП (FK на справочники).
 foreach (['arrival_line_id', 'arrival_detail_id'] as $col) {
     if (!columnExists('assignment_items', $col)) {
