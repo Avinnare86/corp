@@ -218,10 +218,13 @@ $hnum = fn($v) => rtrim(rtrim(number_format((float) $v, 2, '.', ' '), '0'), '.')
         </tr>
     </table>
 
-    <?php if (($p['piece_carry'] ?? 0) > 0 || ($p['piece_settled'] ?? 0) > 0): ?>
-    <p class="muted" style="margin-top:8px">📅 <strong>Сделка по отсечке 25-го числа:</strong>
-        к выплате в служебку этого месяца (до 25-го) — <strong><?= money($p['piece_settled']) ?></strong>;
-        <?php if (($p['piece_carry']??0)>0): ?>проверено после 25-го (перейдёт в служебку следующего месяца) — <strong><?= money($p['piece_carry']) ?></strong>.<?php else: ?>после 25-го пока ничего.<?php endif; ?>
+    <?php $sdEff = round((float) ($p['piece_settled'] ?? 0) + (float) ($p['piece_carry_in'] ?? 0), 2); ?>
+    <?php if (($p['piece_carry'] ?? 0) > 0 || ($p['piece_settled'] ?? 0) > 0 || ($p['piece_carry_in'] ?? 0) > 0): ?>
+    <p class="muted" style="margin-top:8px">📅 <strong>Сделка по отсечке 25-го числа.</strong>
+        В расчёт этого месяца учтено — <strong><?= money($sdEff) ?></strong>
+        (этого месяца до 25-го <?= money($p['piece_settled']) ?><?php if (($p['piece_carry_in']??0)>0): ?> + перенос с прошлого месяца <?= money($p['piece_carry_in']) ?><?php endif; ?>).
+        <?php if (($p['piece_carry']??0)>0): ?>Проверено после 25-го (перейдёт в следующий месяц) — <strong><?= money($p['piece_carry']) ?></strong>.<?php endif; ?>
+        <br><span style="font-size:.92em">Таблица «Сделка — детализация» выше — за полный месяц (справочно); на начисление влияет учтённая сумма.</span>
         <?php if (($p['penalty_deferred']??0)>0): ?><br>⚠ Штраф −<?= money($p['penalty_deferred']) ?> зафиксирован после 25-го — учтётся в следующем месяце.<?php endif; ?>
     </p>
     <?php endif; ?>

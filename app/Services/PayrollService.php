@@ -153,15 +153,13 @@ class PayrollService
         // Классика: max(оклад, сделка). В обоих случаях gross ≥ floor (floor-защита сохраняется).
         $gross  = $normModel ? round($floor + $earned, 2) : round(max($floor, $earned), 2);
 
-        // --- Сделка к 25-му: финализируется в служебку; после 25-го переходит в следующий месяц ---
+        // --- Сделка к 25-му: учитывается в этом месяце; после 25-го переходит в следующий ---
         $cutoff = 25;
-        if ($normModel) {
-            // Анкеты — только сверхнормативные с днём ≤25; операции — как обычно.
-            $pieceSettled = round(($norm['above_sum_to_day25'] ?? 0) + self::opsSum($employeeId, $period, 1, $cutoff), 2);
-        } else {
-            $pieceSettled = self::pieceworkSum($employeeId, $period, 1, $cutoff);
-        }
-        $pieceCarry   = round($piecework - $pieceSettled, 2);
+        $cutThis = self::pieceByKind($employeeId, $period, 1, $cutoff); // сделка этого месяца до 25-го, по источникам
+        $pieceSettledAnk = round($cutThis['anketa'], 2);               // анкеты до 25-го
+        $pieceSettledViz = round($cutThis['ops'], 2);                  // визы/операции до 25-го
+        $pieceSettled    = round($cutThis['total'], 2);
+        $pieceCarry      = round($piecework - $pieceSettled, 2);       // сделка этого месяца после 25-го → след. месяц
 
         // --- Штрафы: зафиксированные после 25-го переносятся в следующий месяц ---
         // Включают как штрафы контролёра по анкетам (inspections), так и визовые вычеты за отказ МИД.
@@ -200,8 +198,14 @@ class PayrollService
         $stimTotal      = round($stimMonthly + $stimOnetime, 2); // legacy-ключ
 
         // ===== Модель «минимум + сверх минимума» (3 вида начислений) =====
-        $sAnk   = round($anketaSum, 2);  // сделка-анкеты (классика: все проверенные; norm: сверхнорматив)
-        $sViz   = round($opsSum, 2);     // сделка-операции (визы)
+        // Сделка В РАСЧЁТ — по отсечке 25-го числа (как штрафы): сделка этого месяца до 25-го
+        // ПЛЮС перенос с прошлого месяца (после 25-го). Сделка этого месяца после 25-го уйдёт
+        // в следующий месяц. Детализация сделки выше (anketaSum/opsSum/piecework) — за ПОЛНЫЙ
+        // месяц, справочно; на начисление влияет именно эта эффективная сделка.
+        $cutPrev = self::pieceByKind($employeeId, $prev, 26, 31);  // перенос с прошлого месяца
+        $pieceCarryIn = round($cutPrev['total'], 2);
+        $sAnk   = round($pieceSettledAnk + $cutPrev['anketa'], 2); // эфф. сделка-анкеты (к выплате сейчас)
+        $sViz   = round($pieceSettledViz + $cutPrev['ops'], 2);    // эфф. сделка-визы
         $sTotal = round($sAnk + $sViz, 2);
         $okladCap = $okladGuaranteed;    // блок 1 = оклад × ставка × prorate
 
@@ -281,8 +285,9 @@ class PayrollService
             'penalty_effective'=> $penaltyEffective,
             'penalty_capped'   => $penaltyCapped,
             // сделка по отсечке 25-го числа
-            'piece_settled'    => $pieceSettled,   // до 25-го — в служебку этого месяца
-            'piece_carry'      => $pieceCarry,     // после 25-го — перейдёт в следующий месяц
+            'piece_settled'    => $pieceSettled,   // этого месяца до 25-го — учтено сейчас
+            'piece_carry_in'   => $pieceCarryIn,   // перенос с прошлого месяца (после 25-го) — учтён сейчас
+            'piece_carry'      => $pieceCarry,     // этого месяца после 25-го — перейдёт в следующий месяц
             // штрафы с переносом
             'penalty_carry_in' => round($penCarryIn, 2),  // перенос из прошлого месяца (зафиксированы после 25-го)
             'penalty_deferred' => round($penDeferred, 2), // уйдут в следующий месяц
