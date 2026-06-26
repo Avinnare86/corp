@@ -9,7 +9,7 @@ stages:
 
 variables:
   SERVICE_DIR: "/home/docker/corp"
-  IMAGE_NAME: "registry.ined.ru/phpprojects/corp/corp:'$CI_COMMIT_TIMESTAMP'"
+  IMAGE_NAME: "registry.ined.ru/phpprojects/corp/corp:$CI_COMMIT_SHORT_SHA"
 
 docker-build:
   tags:
@@ -20,8 +20,8 @@ docker-build:
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: ""
   script:
-    - echo \"$ENVIROMENT\" > ./.env
-    - sed -i 's/${IMAGE_NAME}/'$IMAGE_NAME'/g' .env
+    - printf '%s\n' "$ENVIROMENT" > ./.env
+    - sed -i "s|\${IMAGE_NAME}|$IMAGE_NAME|g" ./.env
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - docker build -t $IMAGE_NAME ./
     - docker push $IMAGE_NAME
@@ -41,7 +41,9 @@ deploy test:
     - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "mkdir -p $SERVICE_DIR"
     - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "test -f $SERVICE_DIR/docker-compose.yml && docker compose -f $SERVICE_DIR/docker-compose.yml down || echo \"no docker file\""
     - rsync -avzhe "ssh -p $PORT_TEST" docker-compose.yml $USER_TEST@$HOST_TEST:$SERVICE_DIR/docker-compose.yml
-    - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "echo \"$ENVIROMENT\" > $SERVICE_DIR/.env && sed -i 's/${IMAGE_NAME}/'$IMAGE_NAME'/g' .env"
+    - printf '%s\n' "$ENVIROMENT" > ./.env
+    - sed -i "s|\${IMAGE_NAME}|$IMAGE_NAME|g" ./.env
+    - rsync -avzhe "ssh -p $PORT_TEST" ./.env $USER_TEST@$HOST_TEST:$SERVICE_DIR/.env
     - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY"
     - ssh -p $PORT_TEST $USER_TEST@$HOST_TEST "docker compose -f $SERVICE_DIR/docker-compose.yml up -d"
 
