@@ -36,6 +36,27 @@
 </section>
 
 <section class="panel">
+    <h2>Производственный календарь РФ</h2>
+    <p class="muted" style="margin-top:0">Норма рабочих дней месяца (для оклада и бюджета ФОТ) берётся из официального
+        производственного календаря РФ (праздники и переносы), источник — isdayoff.ru. Если год не загружен —
+        откат на простой счёт Пн–Пт. Обновляйте, когда правительство публикует переносы на следующий год (обычно осенью).</p>
+    <table class="table" style="max-width:520px;margin-bottom:12px">
+        <tbody>
+            <tr><td>Текущий год (<?= (int) $calendar['curYear'] ?>)</td>
+                <td><?= $calendar['curFetched'] ? '<span class="tag ok">загружен</span> ' . e(substr((string) $calendar['curFetched'], 0, 16)) : '<span class="tag off">не загружен (Пн–Пт)</span>' ?></td></tr>
+            <tr><td>Следующий год (<?= (int) $calendar['nextYear'] ?>)</td>
+                <td><?= $calendar['nextFetched'] ? '<span class="tag ok">загружен</span> ' . e(substr((string) $calendar['nextFetched'], 0, 16)) : '<span class="tag off">не загружен</span>' ?></td></tr>
+            <tr><td>Рабочих дней в текущем месяце</td>
+                <td><strong><?= $calendar['curMonthWd'] !== null ? (int) $calendar['curMonthWd'] . ' дн.' : '— (по календарю не загружено)' ?></strong></td></tr>
+        </tbody>
+    </table>
+    <form method="post" action="/admin/calendar/refresh" style="margin:0">
+        <?= csrf_field() ?>
+        <button class="btn">Обновить календарь (<?= (int) $calendar['curYear'] ?> и <?= (int) $calendar['nextYear'] ?>)</button>
+    </form>
+</section>
+
+<section class="panel">
     <h2>ИИ для виз (OpenRouter)</h2>
     <form method="post" action="/admin/settings" class="grid-form">
         <?= csrf_field() ?>

@@ -454,12 +454,20 @@ class PayrollService
             [$employeeId, $period]);
     }
 
-    /** Календарные рабочие дни месяца (Пн–Пт) — норма по умолчанию, если нет табеля. Никогда 0. */
+    /**
+     * Рабочие дни месяца — норма по умолчанию (если нет табеля). Никогда 0.
+     * Источник: производственный календарь РФ (isdayoff.ru, учитывает праздники и переносы),
+     * если он загружен; иначе откат на простой счёт Пн–Пт.
+     */
     public static function calendarWorkingDays(string $period): int
     {
         $parts = explode('-', $period);
         $y = (int) ($parts[0] ?? 0); $m = (int) ($parts[1] ?? 0);
         if ($y < 1 || $m < 1 || $m > 12) { return 21; }
+        // Производственный календарь РФ (с праздниками/переносами) — приоритетно.
+        $cal = \App\Services\ProductionCalendar::workingDaysInMonth($y, $m);
+        if ($cal !== null && $cal > 0) { return $cal; }
+        // Откат: Пн–Пт (если календарь на год не загружен / нет сети).
         $days = (int) date('t', mktime(0, 0, 0, $m, 1, $y));
         $cnt = 0;
         for ($d = 1; $d <= $days; $d++) {

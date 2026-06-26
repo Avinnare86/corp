@@ -351,6 +351,7 @@ $router->post('/admin/errors/{id}/delete',[AdminController::class, 'deleteErrorT
 // /admin/timesheet удалён — данные времени ведутся в электронном табеле (/timesheet2)
 $router->get('/admin/settings',           [AdminController::class, 'settings']);
 $router->post('/admin/settings',          [AdminController::class, 'saveSettings']);
+$router->post('/admin/calendar/refresh',  [AdminController::class, 'refreshCalendar']);
 // Управление данными: удаление/откат любых строк (только админ)
 $router->get('/admin/data',                       [AdminController::class, 'dataManagement']);
 $router->post('/admin/data/{entity}/{id}/delete', [AdminController::class, 'superDelete']);

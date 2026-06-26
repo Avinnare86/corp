@@ -647,9 +647,27 @@ $tables['message_attachments'] = "CREATE TABLE IF NOT EXISTS message_attachments
     size_bytes   INT NOT NULL DEFAULT 0
 ) $ENGINE";
 
+// Производственный календарь РФ (источник isdayoff.ru): строка дней года 0=раб/1=вых/2=сокр/4=раб.
+$tables['prod_calendar'] = "CREATE TABLE IF NOT EXISTS prod_calendar (
+    year       INT NOT NULL PRIMARY KEY,
+    data       TEXT NOT NULL,
+    fetched_at TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
 foreach ($tables as $name => $sql) {
     $pdo->exec($ddlFix($sql));
     echo "OK  таблица {$name}\n";
+}
+
+// Засев производственного календаря (текущий + следующий год), best-effort — не валит миграцию.
+foreach ([(int) date('Y'), (int) date('Y') + 1] as $yr) {
+    if (!Database::scalar('SELECT 1 FROM prod_calendar WHERE year = ?', [$yr])) {
+        try {
+            echo \App\Services\ProductionCalendar::fetch($yr)
+                ? "OK  производственный календарь $yr загружен (isdayoff.ru)\n"
+                : "··  производственный календарь $yr: источник недоступен, откат на Пн-Пт\n";
+        } catch (\Throwable $e) { echo "··  производственный календарь $yr: пропуск ({$e->getMessage()})\n"; }
+    }
 }
 
 // Добавление недостающих колонок к существующим таблицам (миграции «на месте»).

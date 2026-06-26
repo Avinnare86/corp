@@ -723,7 +723,27 @@ class AdminController extends Controller
             'visaSignerPosition' => (string) Settings::get('visa_signer_position', \App\Services\VisaDocs::DEFAULT_POSITION),
             'stimulDirectorName'     => (string) Settings::get('stimul_director_name', ''),
             'stimulDirectorPosition' => (string) Settings::get('stimul_director_position', ''),
+            'calendar' => [
+                'curYear'   => (int) date('Y'),
+                'nextYear'  => (int) date('Y') + 1,
+                'curFetched'  => \App\Services\ProductionCalendar::fetchedAt((int) date('Y')),
+                'nextFetched' => \App\Services\ProductionCalendar::fetchedAt((int) date('Y') + 1),
+                'curMonthWd'  => \App\Services\ProductionCalendar::workingDaysInMonth((int) date('Y'), (int) date('n')),
+            ],
         ]);
+    }
+
+    /** Обновить производственный календарь РФ (isdayoff.ru) на текущий и следующий год. */
+    public function refreshCalendar(): void
+    {
+        Auth::requireRole('admin');
+        Auth::verifyCsrf();
+        $done = [];
+        foreach ([(int) date('Y'), (int) date('Y') + 1] as $yr) {
+            $done[] = $yr . ': ' . (\App\Services\ProductionCalendar::fetch($yr) ? 'обновлён' : 'источник недоступен');
+        }
+        flash('Производственный календарь — ' . implode('; ', $done) . '.');
+        $this->redirect('/admin/settings');
     }
 
     public function saveSettings(): void
