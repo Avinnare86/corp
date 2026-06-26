@@ -308,6 +308,7 @@ $router->get('/shifts/grafik/export', [\App\Controllers\ShiftController::class, 
 $router->get('/inspect',                  [InspectionController::class, 'index']);
 $router->get('/inspect/queue',            [InspectionController::class, 'queue']);
 $router->post('/inspect/generate',        [InspectionController::class, 'generate']);
+$router->post('/inspect/generate-all',    [InspectionController::class, 'generateAll']);
 $router->post('/inspect/{id}/review',     [InspectionController::class, 'review']);
 $router->post('/inspect/finish',          [InspectionController::class, 'finish']);
 

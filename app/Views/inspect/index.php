@@ -11,6 +11,29 @@
         </label>
         <button type="submit" class="btn btn-primary">Сформировать выборку</button>
     </form>
+
+    <?php $pendingCnt = count($pending ?? []); ?>
+    <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+        <form method="post" action="/inspect/generate-all" style="margin:0">
+            <?= csrf_field() ?>
+            <button type="submit" class="btn" <?= $pendingCnt ? '' : 'disabled' ?>>
+                Сформировать выборку по всем непроверенным датам<?= $pendingCnt ? ' (' . $pendingCnt . ')' : '' ?>
+            </button>
+        </form>
+        <?php if ($pendingCnt): ?>
+            <p class="muted" style="margin:8px 0 4px">Даты с проверенными анкетами, по которым выборка ещё не сформирована:</p>
+            <table class="table" style="max-width:520px">
+                <thead><tr><th>Дата</th><th class="num">Проверено анкет</th></tr></thead>
+                <tbody>
+                <?php foreach ($pending as $p): ?>
+                    <tr><td><?= e($p['d']) ?></td><td class="num"><?= (int) $p['cnt'] ?></td></tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php else: ?>
+            <p class="muted" style="margin:8px 0 0">Все даты с проверенными анкетами уже охвачены выборкой.</p>
+        <?php endif; ?>
+    </div>
 </section>
 
 <section class="panel">

@@ -2,7 +2,7 @@
 <p class="muted" style="margin-top:0">Качество работы специалистов: ошибки, выявленные <strong>при проверке</strong> (анкеты, отправленные на доработку), и ошибки, выявленные <strong>при последующем контроле</strong>. Фильтр — по периоду и по стране (по всем сразу либо по конкретной).</p>
 
 <form method="get" action="/manager/quality" class="panel" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
-    <label>Период<br>
+    <label>Месяц<br>
         <select name="period">
             <option value="">Все периоды</option>
             <?php foreach ($periods as $p): ?>
@@ -10,6 +10,8 @@
             <?php endforeach; ?>
         </select>
     </label>
+    <label>или с<br><input type="date" name="from" value="<?= e($from ?? '') ?>"></label>
+    <label>по<br><input type="date" name="to" value="<?= e($to ?? '') ?>"></label>
     <label>Страна<br>
         <select name="country">
             <option value="">Все страны</option>
@@ -21,7 +23,7 @@
         </select>
     </label>
     <button class="btn primary" type="submit">Показать</button>
-    <a class="btn" href="/manager/quality/export?period=<?= urlencode($period) ?>&country=<?= urlencode($country) ?>">⤓ Excel</a>
+    <a class="btn" href="/manager/quality/export?period=<?= urlencode($period) ?>&country=<?= urlencode($country) ?>&from=<?= urlencode($from ?? '') ?>&to=<?= urlencode($to ?? '') ?>">⤓ Excel</a>
 </form>
 
 <p class="muted" style="margin-top:0">

@@ -1,10 +1,12 @@
 <h1>Рейтинг специалистов</h1>
 
-<form method="get" action="/rating" class="form-inline">
-    <label>Период
-        <input type="month" name="period" value="<?= e($period) ?>" onchange="this.form.submit()">
-    </label>
+<form method="get" action="/rating" class="form-inline" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
+    <label>Месяц<br><input type="month" name="period" value="<?= e($period) ?>"></label>
+    <label>или с<br><input type="date" name="from" value="<?= e($from ?? '') ?>"></label>
+    <label>по<br><input type="date" name="to" value="<?= e($to ?? '') ?>"></label>
+    <button class="btn primary" type="submit">Показать</button>
 </form>
+<p class="muted" style="margin-top:4px;font-size:.85rem">Если задан диапазон дат (с/по) — он имеет приоритет над выбором месяца.</p>
 
 <section class="panel">
     <table class="table">

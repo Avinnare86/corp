@@ -148,11 +148,15 @@ class ManagerController extends Controller
      * (анкеты с доработками), и ошибки, выявленные при последующем контроле (inspections.is_correct=0),
      * с фильтром по периоду (месяц checked_at) и по стране (country_code).
      */
-    private function qualityRows(string $period, string $country): array
+    private function qualityRows(string $period, string $country, string $from = '', string $to = ''): array
     {
         $where = 'ai.checked_at IS NOT NULL AND ai.assigned_to IS NOT NULL';
         $params = [];
-        if ($period !== '') { $where .= ' AND substr(ai.checked_at,1,7)=?'; $params[] = $period; }
+        // Диапазон дат (с/по) имеет приоритет над выбором месяца.
+        if ($from !== '' || $to !== '') {
+            if ($from !== '') { $where .= ' AND ai.checked_at >= ?'; $params[] = $from . ' 00:00:00'; }
+            if ($to !== '')   { $where .= ' AND ai.checked_at <= ?'; $params[] = $to . ' 23:59:59'; }
+        } elseif ($period !== '') { $where .= ' AND substr(ai.checked_at,1,7)=?'; $params[] = $period; }
         if ($country !== '') { $where .= ' AND ai.country_code=?'; $params[] = $country; }
         $rows = Database::all(
             "SELECT ai.assigned_to AS uid, u.full_name,
@@ -189,7 +193,9 @@ class ManagerController extends Controller
         Auth::requireRole('anketa_manager', 'controller', 'director', 'deputy_director', 'admin');
         $period  = (string) $this->input('period', '');
         $country = (string) $this->input('country', '');
-        $rows = $this->qualityRows($period, $country);
+        $from = (string) $this->input('from', '');
+        $to = (string) $this->input('to', '');
+        $rows = $this->qualityRows($period, $country, $from, $to);
         $tot = ['checked' => 0, 'check_err' => 0, 'inspected' => 0, 'ctrl_err' => 0];
         foreach ($rows as $r) { foreach (['checked', 'check_err', 'inspected', 'ctrl_err'] as $k) { $tot[$k] += (int) $r[$k]; } }
         $tot['check_pct'] = $tot['checked'] > 0 ? round($tot['check_err'] / $tot['checked'] * 100, 1) : 0.0;
@@ -200,6 +206,8 @@ class ManagerController extends Controller
             'tot'       => $tot,
             'period'    => $period,
             'country'   => $country,
+            'from'      => $from,
+            'to'        => $to,
             'periods'   => array_column(Database::all("SELECT DISTINCT substr(checked_at,1,7) AS p FROM assignment_items WHERE checked_at IS NOT NULL ORDER BY p DESC"), 'p'),
             'countries' => Database::all("SELECT ai.country_code AS code, c.name FROM assignment_items ai LEFT JOIN countries c ON c.code=ai.country_code WHERE ai.country_code IS NOT NULL AND ai.country_code<>'' GROUP BY ai.country_code, c.name ORDER BY c.name, ai.country_code"),
             'countryName' => $country !== '' ? (string) Database::scalar('SELECT name FROM countries WHERE code=?', [$country]) : '',
@@ -212,7 +220,9 @@ class ManagerController extends Controller
         Auth::requireRole('anketa_manager', 'controller', 'director', 'deputy_director', 'admin');
         $period  = (string) $this->input('period', '');
         $country = (string) $this->input('country', '');
-        $rows = $this->qualityRows($period, $country);
+        $from = (string) $this->input('from', '');
+        $to = (string) $this->input('to', '');
+        $rows = $this->qualityRows($period, $country, $from, $to);
         $data = [];
         foreach ($rows as $r) {
             $data[] = [

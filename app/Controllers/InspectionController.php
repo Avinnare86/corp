@@ -28,7 +28,28 @@ class InspectionController extends Controller
             'batches'   => $batches,
             'yesterday' => SamplingService::yesterday(),
             'percent'   => Settings::inspectionPercent(),
+            'pending'   => SamplingService::unsampledDates(),
         ]);
+    }
+
+    /** Сформировать выборку сразу по ВСЕМ непроверенным датам (где есть проверенные анкеты, но выборки нет). */
+    public function generateAll(): void
+    {
+        Auth::requireRole('controller', 'admin', 'manager');
+        Auth::verifyCsrf();
+        $dates = SamplingService::unsampledDates();
+        $created = 0; $picked = 0;
+        foreach ($dates as $row) {
+            $bid = SamplingService::generateForDate($row['d'], (int) Auth::id());
+            $cnt = (int) Database::scalar('SELECT COUNT(*) FROM inspections WHERE batch_id = ?', [$bid]);
+            if ($cnt > 0) { $created++; $picked += $cnt; }
+        }
+        if (!$created) {
+            flash('Нет непроверенных дат для формирования выборки.', 'error');
+        } else {
+            flash("Сформировано выборок по датам: {$created}. Анкет на проверку — {$picked}.");
+        }
+        $this->redirect('/inspect');
     }
 
     public function generate(): void
