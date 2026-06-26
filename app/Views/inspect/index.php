@@ -34,22 +34,33 @@
             <p class="muted" style="margin:8px 0 0">Все даты с проверенными анкетами уже охвачены выборкой.</p>
         <?php endif; ?>
     </div>
+
+    <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+        <a class="btn" href="/inspect/manual">+ Ручная выборка анкет на контроль (вне даты)</a>
+        <p class="muted" style="margin:6px 0 0">Выбрать конкретные проверенные анкеты вручную — отрабатываются как обычная выборка (вердикт, штраф, повторная проверка).</p>
+    </div>
 </section>
 
 <section class="panel">
     <h2>Выборки</h2>
     <table class="table">
         <thead>
-        <tr><th>Рабочий день</th><th class="num">Анкет</th><th class="num">Проверено</th><th>Статус</th><th></th></tr>
+        <tr><th>Выборка</th><th class="num">Анкет</th><th class="num">Проверено</th><th>Статус</th><th></th></tr>
         </thead>
         <tbody>
         <?php foreach ($batches as $b): ?>
             <tr>
-                <td><?= e($b['work_date']) ?></td>
+                <td>
+                    <?php if (!empty($b['is_manual'])): ?>
+                        <?= e($b['title'] ?: 'Ручная выборка') ?> <span class="tag">ручная</span>
+                    <?php else: ?>
+                        <?= e($b['work_date']) ?>
+                    <?php endif; ?>
+                </td>
                 <td class="num"><?= (int) $b['total'] ?></td>
                 <td class="num"><?= (int) $b['done'] ?></td>
                 <td><?= $b['finished_at'] ? '<span class="tag ok">завершена</span>' : '<span class="tag">в работе</span>' ?></td>
-                <td><a class="btn btn-mini" href="/inspect/queue?date=<?= urlencode($b['work_date']) ?>">Открыть</a></td>
+                <td><a class="btn btn-mini" href="/inspect/queue?batch=<?= (int) $b['id'] ?>">Открыть</a></td>
             </tr>
         <?php endforeach; ?>
         <?php if (!$batches): ?>

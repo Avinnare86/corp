@@ -989,6 +989,43 @@ foreach (['hire_date' => 'DATE NULL', 'fire_date' => 'DATE NULL'] as $col => $dd
         echo "OK  колонка users.$col добавлена\n";
     }
 }
+// Ручная выборка контроля (вне привязки к дате): признак + заголовок.
+foreach (['is_manual' => 'INT NOT NULL DEFAULT 0', 'title' => 'VARCHAR(200) NULL'] as $col => $ddl) {
+    if (!columnExists('sample_batches', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE sample_batches ADD COLUMN $col $ddl"));
+        echo "OK  колонка sample_batches.$col добавлена\n";
+    }
+}
+// Снять UNIQUE с work_date (ручные выборки могут совпадать по дате); уникальность одной ДАТНОЙ
+// выборки на день обеспечивается частичным индексом (ручные is_manual=1 не ограничены).
+if ($driver === 'pgsql') {
+    $pdo->exec("ALTER TABLE sample_batches DROP CONSTRAINT IF EXISTS sample_batches_work_date_key");
+} elseif ($driver === 'mysql') {
+    try { $pdo->exec("ALTER TABLE sample_batches DROP INDEX work_date"); } catch (\Throwable $e) {}
+} else {
+    // SQLite: колоночный UNIQUE нельзя снять ALTER'ом — перестраиваем таблицу (только если ограничение ещё есть).
+    $hasUnique = (bool) Database::scalar("SELECT 1 FROM sqlite_master WHERE type='index' AND tbl_name='sample_batches' AND name='sqlite_autoindex_sample_batches_1'");
+    if ($hasUnique) {
+        $pdo->exec('PRAGMA foreign_keys=OFF');
+        $pdo->exec("CREATE TABLE sample_batches_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            work_date DATE NOT NULL,
+            controller_id INT,
+            generated_at TIMESTAMP DEFAULT (datetime('now','localtime')),
+            finished_at TIMESTAMP NULL,
+            is_manual INT NOT NULL DEFAULT 0,
+            title VARCHAR(200) NULL)");
+        $pdo->exec("INSERT INTO sample_batches_new (id, work_date, controller_id, generated_at, finished_at, is_manual, title)
+                    SELECT id, work_date, controller_id, generated_at, finished_at, COALESCE(is_manual,0), title FROM sample_batches");
+        $pdo->exec("DROP TABLE sample_batches");
+        $pdo->exec("ALTER TABLE sample_batches_new RENAME TO sample_batches");
+        $pdo->exec('PRAGMA foreign_keys=ON');
+        echo "OK  sample_batches.work_date: снят UNIQUE (перестроена)\n";
+    }
+}
+if ($driver !== 'mysql') { // MySQL не поддерживает частичные индексы — там хватает гейта в коде
+    try { $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_sample_batches_date ON sample_batches(work_date) WHERE is_manual=0"); } catch (\Throwable $e) {}
+}
 // Линия прибытия анкеты (квота): ЛП + ДЛП (FK на справочники).
 foreach (['arrival_line_id', 'arrival_detail_id'] as $col) {
     if (!columnExists('assignment_items', $col)) {

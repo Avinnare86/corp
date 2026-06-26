@@ -68,6 +68,7 @@ $router->get('/manager/report',           [ManagerController::class, 'report']);
 $router->get('/manager/report/export',    [ManagerController::class, 'reportExport']);
 $router->get('/manager/quality',          [ManagerController::class, 'qualityReport']);
 $router->get('/manager/quality/export',   [ManagerController::class, 'qualityReportExport']);
+$router->get('/manager/quality/dossiers', [ManagerController::class, 'qualityDossiers']);
 $router->post('/manager/upload',          [ManagerController::class, 'upload']);
 $router->post('/manager/manual',           [ManagerController::class, 'manualAdd']);
 $router->get('/manager/items',            [ManagerController::class, 'items']);
@@ -309,6 +310,8 @@ $router->get('/inspect',                  [InspectionController::class, 'index']
 $router->get('/inspect/queue',            [InspectionController::class, 'queue']);
 $router->post('/inspect/generate',        [InspectionController::class, 'generate']);
 $router->post('/inspect/generate-all',    [InspectionController::class, 'generateAll']);
+$router->get('/inspect/manual',           [InspectionController::class, 'manualForm']);
+$router->post('/inspect/manual',          [InspectionController::class, 'manualCreate']);
 $router->post('/inspect/{id}/review',     [InspectionController::class, 'review']);
 $router->post('/inspect/finish',          [InspectionController::class, 'finish']);
 

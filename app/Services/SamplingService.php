@@ -12,7 +12,7 @@ class SamplingService
      */
     public static function generateForDate(string $workDate, int $controllerId): int
     {
-        $existing = Database::one('SELECT * FROM sample_batches WHERE work_date = ?', [$workDate]);
+        $existing = Database::one('SELECT * FROM sample_batches WHERE work_date = ? AND COALESCE(is_manual,0) = 0', [$workDate]);
         if ($existing) {
             return (int) $existing['id'];
         }
@@ -99,5 +99,59 @@ class SamplingService
                   ORDER BY d"
             )
         );
+    }
+
+    /**
+     * Кандидаты для РУЧНОЙ выборки контроля: проверенные анкеты по фильтрам (период/специалист/страна),
+     * с пометкой, контролировалась ли анкета ранее. Для экрана выбора контролёром.
+     */
+    public static function manualCandidates(string $from, string $to, ?int $empId, string $country, int $limit = 500): array
+    {
+        $where = "ai.checked_at IS NOT NULL AND ai.assigned_to IS NOT NULL AND u.role = 'employee'";
+        $p = [];
+        if ($from !== '')    { $where .= ' AND ai.checked_at >= ?'; $p[] = $from . ' 00:00:00'; }
+        if ($to !== '')      { $where .= ' AND ai.checked_at <= ?'; $p[] = $to . ' 23:59:59'; }
+        if ($empId)          { $where .= ' AND ai.assigned_to = ?'; $p[] = $empId; }
+        if ($country !== '') { $where .= ' AND ai.country_code = ?'; $p[] = $country; }
+        return Database::all(
+            "SELECT ai.id, ai.reg_number, ai.country_code, substr(ai.checked_at,1,10) AS checked_day,
+                    u.full_name AS employee_name,
+                    (SELECT COUNT(*) FROM inspections i WHERE i.dossier_id = ai.id) AS inspected
+               FROM assignment_items ai
+               JOIN users u ON u.id = ai.assigned_to
+              WHERE $where
+              ORDER BY ai.checked_at DESC, u.full_name
+              LIMIT " . (int) $limit,
+            $p
+        );
+    }
+
+    /**
+     * РУЧНАЯ выборка контроля (вне привязки к дате): контролёр сам выбирает анкеты.
+     * Создаёт пакет is_manual=1 и добавляет инспекции по выбранным досье (пропуская те, что уже
+     * в НЕзавершённой выборке). Отработка (вердикт/штраф/повторная проверка) — по общей логике.
+     * @param int[] $dossierIds
+     * @return array{0:int,1:int} [batchId, добавлено]
+     */
+    public static function createManualBatch(int $controllerId, string $title, array $dossierIds): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $dossierIds))));
+        if (!$ids) { return [0, 0]; }
+        $title = trim($title) !== '' ? trim($title) : ('Ручная выборка от ' . date('d.m.Y H:i'));
+        $batchId = Database::insert(
+            'INSERT INTO sample_batches (work_date, controller_id, is_manual, title) VALUES (?,?,1,?)',
+            [date('Y-m-d'), $controllerId, $title]
+        );
+        $added = 0;
+        foreach ($ids as $did) {
+            $ai = Database::one('SELECT id, assigned_to FROM assignment_items WHERE id=? AND checked_at IS NOT NULL AND assigned_to IS NOT NULL', [$did]);
+            if (!$ai) { continue; }
+            // не дублируем: анкета уже в НЕзавершённой выборке
+            if (Database::scalar("SELECT 1 FROM inspections i JOIN sample_batches b ON b.id=i.batch_id WHERE i.dossier_id=? AND b.finished_at IS NULL", [$did])) { continue; }
+            Database::insert('INSERT INTO inspections (batch_id, dossier_id, employee_id) VALUES (?,?,?)', [$batchId, $did, (int) $ai['assigned_to']]);
+            $added++;
+        }
+        if ($added === 0) { Database::run('DELETE FROM sample_batches WHERE id=?', [$batchId]); return [0, 0]; }
+        return [$batchId, $added];
     }
 }

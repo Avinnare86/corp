@@ -52,8 +52,8 @@
             <tr><td colspan="7" class="muted" style="text-align:center;padding:18px">Нет проверенных анкет за выбранный период/страну.</td></tr>
         <?php endif; ?>
         <?php foreach ($rows as $r): ?>
-            <tr>
-                <td><?= e($r['full_name']) ?></td>
+            <tr class="qd-row" data-uid="<?= (int) $r['uid'] ?>" style="cursor:pointer" title="Показать проверенные анкеты">
+                <td><span class="qd-arrow" style="display:inline-block;width:1em;color:#6b7280">▸</span><?= e($r['full_name']) ?></td>
                 <td style="text-align:right"><?= (int) $r['checked'] ?></td>
                 <td style="text-align:right"><?= (int) $r['check_err'] ?></td>
                 <td style="text-align:right"><?= number_format((float) $r['check_pct'], 1, ',', ' ') ?>%</td>
@@ -82,4 +82,38 @@
     «Ошибок при проверке» — число анкет, по которым специалист указал доработку (выявил недочёты).
     «% ошибок (проверка)» — доля таких анкет от проверенных.
     «Ошибок при контроле» — число анкет, в которых контролёр при выборочной проверке нашёл недочёт (учтены только проконтролированные анкеты).
+    <br>Нажмите на строку специалиста, чтобы раскрыть его проверенные анкеты.
 </p>
+
+<script>
+(function () {
+    var f = { period: <?= json_encode($period) ?>, country: <?= json_encode($country) ?>, from: <?= json_encode($from ?? '') ?>, to: <?= json_encode($to ?? '') ?> };
+    Array.prototype.forEach.call(document.querySelectorAll('.qd-row'), function (row) {
+        row.addEventListener('click', function () {
+            var arrow = row.querySelector('.qd-arrow');
+            var next = row.nextElementSibling;
+            if (next && next.classList.contains('qd-detail')) {
+                var show = next.style.display === 'none';
+                next.style.display = show ? '' : 'none';
+                if (arrow) arrow.textContent = show ? '▾' : '▸';
+                return;
+            }
+            var tr = document.createElement('tr');
+            tr.className = 'qd-detail';
+            var td = document.createElement('td');
+            td.colSpan = 7; td.style.padding = '6px 10px'; td.style.background = '#f7f9fc';
+            td.innerHTML = '<span class="muted">Загрузка…</span>';
+            tr.appendChild(td);
+            row.parentNode.insertBefore(tr, row.nextSibling);
+            if (arrow) arrow.textContent = '▾';
+            var qs = 'uid=' + encodeURIComponent(row.getAttribute('data-uid'))
+                + '&period=' + encodeURIComponent(f.period) + '&country=' + encodeURIComponent(f.country)
+                + '&from=' + encodeURIComponent(f.from) + '&to=' + encodeURIComponent(f.to);
+            fetch('/manager/quality/dossiers?' + qs, { credentials: 'same-origin' })
+                .then(function (r) { return r.text(); })
+                .then(function (html) { td.innerHTML = html; })
+                .catch(function () { td.innerHTML = '<span class="muted">Ошибка загрузки</span>'; });
+        });
+    });
+})();
+</script>

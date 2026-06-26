@@ -237,6 +237,35 @@ class ManagerController extends Controller
         ]]);
     }
 
+    /** Раскрытие специалиста в отчёте о проверке: его проверенные анкеты (с доработкой и вердиктом контроля). Partial. */
+    public function qualityDossiers(): void
+    {
+        Auth::requireRole('anketa_manager', 'controller', 'director', 'deputy_director', 'admin');
+        $uid = (int) $this->input('uid', 0);
+        if (!$uid) { echo ''; return; }
+        $period = (string) $this->input('period', '');
+        $country = (string) $this->input('country', '');
+        $from = (string) $this->input('from', '');
+        $to = (string) $this->input('to', '');
+        $where = 'ai.assigned_to = ? AND ai.checked_at IS NOT NULL';
+        $p = [$uid];
+        if ($from !== '' || $to !== '') {
+            if ($from !== '') { $where .= ' AND ai.checked_at >= ?'; $p[] = $from . ' 00:00:00'; }
+            if ($to !== '')   { $where .= ' AND ai.checked_at <= ?'; $p[] = $to . ' 23:59:59'; }
+        } elseif ($period !== '') { $where .= ' AND substr(ai.checked_at,1,7)=?'; $p[] = $period; }
+        if ($country !== '') { $where .= ' AND ai.country_code=?'; $p[] = $country; }
+        $rows = Database::all(
+            "SELECT ai.reg_number, ai.country_code, substr(ai.checked_at,1,10) AS checked_day, ai.comment_text,
+                    CASE WHEN ai.comment_id IS NOT NULL OR EXISTS(SELECT 1 FROM item_comments ic WHERE ic.item_id=ai.id) THEN 1 ELSE 0 END AS has_dorabotka,
+                    (SELECT i.is_correct FROM inspections i WHERE i.dossier_id=ai.id AND i.is_correct IS NOT NULL ORDER BY i.id DESC LIMIT 1) AS ctrl_correct,
+                    (SELECT et.name FROM inspections i LEFT JOIN error_types et ON et.id=i.error_type_id WHERE i.dossier_id=ai.id AND i.is_correct=0 ORDER BY i.id DESC LIMIT 1) AS ctrl_error
+               FROM assignment_items ai
+              WHERE $where
+              ORDER BY ai.checked_at DESC
+              LIMIT 1000", $p);
+        $this->view('manager/_quality_dossiers', ['rows' => $rows], false);
+    }
+
     /** Загрузка списка (docx/xlsx/csv/txt). */
     public function upload(): void
     {

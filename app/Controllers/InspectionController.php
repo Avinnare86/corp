@@ -72,11 +72,16 @@ class InspectionController extends Controller
     public function queue(): void
     {
         Auth::requireRole('controller', 'admin', 'manager');
-        $date = $this->input('date', SamplingService::yesterday());
-
-        $batch = Database::one('SELECT * FROM sample_batches WHERE work_date = ?', [$date]);
+        // Навигация по id выборки (даёт работу с ручными выборками); fallback — по дате (старые ссылки).
+        $batchId = (int) $this->input('batch', 0);
+        if ($batchId) {
+            $batch = Database::one('SELECT * FROM sample_batches WHERE id = ?', [$batchId]);
+        } else {
+            $date = (string) $this->input('date', SamplingService::yesterday());
+            $batch = Database::one('SELECT * FROM sample_batches WHERE work_date = ? AND COALESCE(is_manual,0) = 0', [$date]);
+        }
         if (!$batch) {
-            flash('Выборка за эту дату не сформирована.', 'error');
+            flash('Выборка не найдена.', 'error');
             $this->redirect('/inspect');
         }
 
@@ -98,11 +103,13 @@ class InspectionController extends Controller
         $errorTypes = Database::all('SELECT * FROM error_types WHERE is_active = 1 ORDER BY name');
 
         $this->view('inspect/queue', [
-            'title'      => "Проверка анкет за {$date}",
+            'title'      => !empty($batch['is_manual'])
+                ? ('Контроль: ' . ($batch['title'] ?: 'ручная выборка'))
+                : ('Проверка анкет за ' . $batch['work_date']),
             'batch'      => $batch,
             'items'      => $items,
             'errorTypes' => $errorTypes,
-            'date'       => $date,
+            'date'       => (string) $batch['work_date'],
         ]);
     }
 
@@ -124,7 +131,7 @@ class InspectionController extends Controller
 
         if (!$isCorrect && !$errorTypeId) {
             flash('Для некорректной анкеты укажите тип ошибки.', 'error');
-            $this->redirect('/inspect/queue?date=' . urlencode($this->workDateOf($inspection)));
+            $this->redirect('/inspect/queue?batch=' . (int) $inspection['batch_id']);
         }
 
         // Что было до сохранения — чтобы не слать повторное уведомление при идентичной правке.
@@ -142,7 +149,7 @@ class InspectionController extends Controller
             }
         }
 
-        $this->redirect('/inspect/queue?date=' . urlencode($this->workDateOf($inspection)));
+        $this->redirect('/inspect/queue?batch=' . (int) $inspection['batch_id']);
     }
 
     public function finish(): void
@@ -150,8 +157,10 @@ class InspectionController extends Controller
         Auth::requireRole('controller', 'admin', 'manager');
         Auth::verifyCsrf();
 
-        $date = $this->input('date');
-        $batch = Database::one('SELECT * FROM sample_batches WHERE work_date = ?', [$date]);
+        $batchId = (int) $this->input('batch', 0);
+        $batch = $batchId
+            ? Database::one('SELECT * FROM sample_batches WHERE id = ?', [$batchId])
+            : Database::one('SELECT * FROM sample_batches WHERE work_date = ? AND COALESCE(is_manual,0) = 0', [(string) $this->input('date')]);
         if (!$batch) {
             $this->redirect('/inspect');
         }
@@ -162,7 +171,7 @@ class InspectionController extends Controller
         );
         if ($pending > 0) {
             flash("Остались непроверенные анкеты: {$pending}. Завершить нельзя.", 'error');
-            $this->redirect('/inspect/queue?date=' . urlencode($date));
+            $this->redirect('/inspect/queue?batch=' . (int) $batch['id']);
         }
 
         Database::run(
@@ -173,6 +182,40 @@ class InspectionController extends Controller
 
         flash('Проверка завершена, уведомления разосланы сотрудникам.');
         $this->redirect('/inspect');
+    }
+
+    /** Экран ручного формирования выборки: фильтр анкет (период/специалист/страна) + выбор галочками. */
+    public function manualForm(): void
+    {
+        Auth::requireRole('controller', 'admin', 'manager');
+        $from = (string) $this->input('from', '');
+        $to = (string) $this->input('to', '');
+        $emp = (int) $this->input('emp', 0);
+        $country = (string) $this->input('country', '');
+        if ($from === '' && $to === '' && !$emp && $country === '') { $from = date('Y-m-d', strtotime('-14 days')); }
+        $this->view('inspect/manual', [
+            'title'     => 'Ручная выборка на контроль',
+            'cands'     => SamplingService::manualCandidates($from, $to, $emp ?: null, $country),
+            'from'      => $from, 'to' => $to, 'emp' => $emp, 'country' => $country,
+            'employees' => Database::all("SELECT u.id, u.full_name FROM users u JOIN user_roles r ON r.user_id=u.id AND r.role_slug='anketa_worker' WHERE u.is_active=1 ORDER BY u.full_name"),
+            'countries' => Database::all("SELECT ai.country_code AS code, c.name FROM assignment_items ai LEFT JOIN countries c ON c.code=ai.country_code WHERE ai.country_code IS NOT NULL AND ai.country_code<>'' GROUP BY ai.country_code, c.name ORDER BY c.name, ai.country_code"),
+            'csrf'      => Auth::csrf(),
+        ]);
+    }
+
+    /** Создать ручную выборку из выбранных анкет и открыть её очередь контроля. */
+    public function manualCreate(): void
+    {
+        Auth::requireRole('controller', 'admin', 'manager');
+        Auth::verifyCsrf();
+        $ids = array_map('intval', (array) ($_POST['pick'] ?? []));
+        [$batchId, $added] = SamplingService::createManualBatch((int) Auth::id(), (string) $this->input('title', ''), $ids);
+        if (!$batchId) {
+            flash('Не выбрано ни одной анкеты (или все уже в незавершённой выборке).', 'error');
+            $this->redirect('/inspect/manual');
+        }
+        flash("Ручная выборка сформирована: анкет на проверку — {$added}.");
+        $this->redirect('/inspect/queue?batch=' . (int) $batchId);
     }
 
     private function workDateOf(array $inspection): string

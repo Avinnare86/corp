@@ -1,4 +1,4 @@
-<h1>Проверка анкет за <?= e($date) ?></h1>
+<h1><?= e($title ?? ('Проверка анкет за ' . $date)) ?></h1>
 <p>
     <a href="/inspect">← к списку выборок</a>
     <?php if ($batch['finished_at']): ?>
@@ -66,7 +66,7 @@
 <?php if (!$batch['finished_at'] && $items): ?>
 <form method="post" action="/inspect/finish" onsubmit="return confirm('Завершить проверку и разослать уведомления сотрудникам?')">
     <?= csrf_field() ?>
-    <input type="hidden" name="date" value="<?= e($date) ?>">
+    <input type="hidden" name="batch" value="<?= (int) $batch['id'] ?>">
     <button class="btn btn-primary">Завершить проверку и уведомить сотрудников</button>
 </form>
 <?php endif; ?>
