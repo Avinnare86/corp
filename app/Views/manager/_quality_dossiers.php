@@ -2,7 +2,7 @@
 <?php if (!$rows): ?>
     <div class="muted" style="padding:8px 4px">Нет проверенных анкет за выбранный период.</div>
 <?php else: ?>
-<table class="table" style="margin:0;background:#fff">
+<table class="table tbl-cards q-card" style="margin:0;background:#fff">
     <thead>
         <tr>
             <th>Рег. номер</th><th>Страна</th><th>Дата проверки</th>
@@ -13,16 +13,16 @@
         <?php foreach ($rows as $r): ?>
             <tr>
                 <td><strong><?= e($r['reg_number']) ?></strong></td>
-                <td><?= e($r['country_code']) ?></td>
-                <td><?= e($r['checked_day']) ?></td>
-                <td>
+                <td data-label="Страна"><?= e($r['country_code']) ?></td>
+                <td data-label="Дата проверки"><?= e($r['checked_day']) ?></td>
+                <td data-label="Доработка">
                     <?php if ((int) $r['has_dorabotka'] === 1): ?>
                         <span class="tag">доработка<?= $r['comment_text'] ? ': ' . e($r['comment_text']) : '' ?></span>
                     <?php else: ?>
                         <span class="muted">—</span>
                     <?php endif; ?>
                 </td>
-                <td>
+                <td data-label="Контроль">
                     <?php if ($r['ctrl_correct'] === null): ?>
                         <span class="muted">не контролировалась</span>
                     <?php elseif ((int) $r['ctrl_correct'] === 1): ?>

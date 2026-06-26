@@ -657,3 +657,50 @@ button.btn{font-family:var(--body)}
 }
 /* Принудительно полные таблицы (выбор пользователя): широкие прокручиваются */
 body.force-desktop .panel{overflow-x:auto}
+
+/* Фильтр-панель: ряд полей с кнопкой (десктоп); на телефоне — столбик (см. медиа ниже) */
+.flt{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
+
+/* ===== Телефон: контроль анкет (ручная выборка / очередь) и отчёт о проверке ===== */
+@media(max-width:760px){
+  /* Фильтры/панели действий — в столбик, поля и кнопки во всю ширину */
+  body:not(.force-desktop) .flt{flex-direction:column;align-items:stretch;gap:10px}
+  body:not(.force-desktop) .flt label{width:100%}
+  body:not(.force-desktop) .flt input,
+  body:not(.force-desktop) .flt select,
+  body:not(.force-desktop) .flt .btn{width:100%;box-sizing:border-box;justify-content:center}
+
+  /* Карточный заголовок: первая ячейка строки — крупная, без подписи, в одну строку */
+  body:not(.force-desktop) .tbl-cards.q-card td:first-child{
+    justify-content:flex-start;font-weight:700;font-size:1rem;color:var(--ink);
+    border-bottom:1px solid var(--line);padding-bottom:7px;margin-bottom:5px;text-align:left}
+  body:not(.force-desktop) .tbl-cards.q-card td:first-child::before{content:none}
+
+  /* Итог (tfoot) тоже карточкой */
+  body:not(.force-desktop) .tbl-cards tfoot tr{display:block;border:1px solid var(--primary);border-radius:12px;
+    margin:0 0 10px;padding:8px 12px;background:var(--surface)}
+  body:not(.force-desktop) .tbl-cards tfoot td{display:flex;justify-content:space-between;gap:14px;border:0;padding:5px 0;text-align:right}
+  body:not(.force-desktop) .tbl-cards tfoot td::before{content:attr(data-label);font-weight:600;color:var(--muted);text-align:left}
+  body:not(.force-desktop) .tbl-cards tfoot td:first-child{font-weight:700;border-bottom:1px solid var(--line);padding-bottom:7px;margin-bottom:5px}
+
+  /* Раскрытие специалиста (отчёт о проверке): деталь во всю ширину карточки, без табличного отступа.
+     Только ПРЯМАЯ ячейка строки-детали (> td), чтобы не задеть вложенную карточную таблицу анкет. */
+  body:not(.force-desktop) .q-card tbody tr.qd-detail > td{display:block;padding:2px 0 0;text-align:left;background:transparent}
+  body:not(.force-desktop) .q-card tbody tr.qd-detail > td::before{content:none}
+  body:not(.force-desktop) .q-card tbody tr.qd-detail{border:0;padding:0;margin:0 0 10px;background:transparent}
+
+  /* Очередь проверки: ячейка с формой вердикта — блоком во всю ширину; форма в столбик */
+  body:not(.force-desktop) .q-queue tbody td[colspan]{display:block;padding:8px 0 0;text-align:left}
+  body:not(.force-desktop) .q-queue tbody td[colspan]::before{content:none}
+  body:not(.force-desktop) .q-queue tbody td{max-width:none!important;white-space:normal!important;overflow:visible!important}
+  body:not(.force-desktop) .q-queue .review-form{flex-direction:column;align-items:stretch;gap:9px}
+  body:not(.force-desktop) .q-queue .review-form .radio{justify-content:flex-start}
+  body:not(.force-desktop) .q-queue .review-form select,
+  body:not(.force-desktop) .q-queue .review-form .comment-input,
+  body:not(.force-desktop) .q-queue .review-form .btn{width:100%;min-width:0;box-sizing:border-box;justify-content:center}
+
+  /* Отдельная кнопка действия (Завершить проверку…) — во всю ширину, текст переносится */
+  body:not(.force-desktop) .btn-block{display:flex;width:100%;box-sizing:border-box;justify-content:center;
+    white-space:normal;text-align:center;line-height:1.25}
+  /* Кнопка-ссылка ⤓ Excel и т.п. в шапке отчёта — во всю ширину уже покрыто .flt */
+}

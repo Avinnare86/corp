@@ -125,13 +125,32 @@
     t.parentNode.insertBefore(w, t); w.appendChild(t);
   }
   function labelCards(t) {
+    if (!t.tHead || !t.tHead.rows.length) return;
     var labels = [].map.call(t.tHead.rows[0].cells, function (th) { return th.textContent.trim(); });
     [].forEach.call(t.tBodies, function (tb) {
       [].forEach.call(tb.rows, function (tr) {
-        [].forEach.call(tr.cells, function (td, i) { if (labels[i]) td.setAttribute('data-label', labels[i]); });
+        [].forEach.call(tr.cells, function (td, i) {
+          if (td.hasAttribute('data-label')) return;          // автор задал подпись вручную — не трогаем
+          if (labels[i]) td.setAttribute('data-label', labels[i]);
+        });
       });
     });
   }
+  // Классифицировать таблицы внутри root (вызывается и для AJAX-вставок). По умолчанию — весь документ.
+  function enhanceTables(root) {
+    [].forEach.call((root || document).querySelectorAll('table.table'), function (t) {
+      if (t.dataset.enhanced) return; t.dataset.enhanced = '1';
+      if (t.classList.contains('tbl-wide')) { wrapScroll(t); }          // автор: широкая → прокрутка
+      else if (t.classList.contains('tbl-cards')) { labelCards(t); }    // автор: карточки → проставить подписи
+      else if (isWide(t)) { t.classList.add('tbl-wide'); wrapScroll(t); }
+      else { t.classList.add('tbl-cards'); labelCards(t); }
+      makeSortable(t);
+    });
+    [].forEach.call((root || document).querySelectorAll('table.vgrid'), function (t) {
+      if (t.dataset.enhanced) return; t.dataset.enhanced = '1'; makeSortable(t);
+    });
+  }
+  window.enhanceTables = enhanceTables;
 
   // ---------- сортировка ----------
   function num(s) {
@@ -171,12 +190,6 @@
     applyView(getCookie('mobview'));
     var b = document.getElementById('tblViewBtn'); if (b) b.textContent = viewLabel(getCookie('mobview'));
 
-    [].forEach.call(document.querySelectorAll('table.table'), function (t) {
-      if (isWide(t)) { t.classList.add('tbl-wide'); wrapScroll(t); }
-      else { t.classList.add('tbl-cards'); labelCards(t); }
-      makeSortable(t);
-    });
-    // Грид виз и прочие .vgrid — всегда широкие (прокрутка), сортируемые.
-    [].forEach.call(document.querySelectorAll('table.vgrid'), function (t) { makeSortable(t); });
+    enhanceTables(document);
   });
 })();

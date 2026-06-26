@@ -7,7 +7,7 @@
 </p>
 
 <section class="panel">
-    <table class="table">
+    <table class="table tbl-cards q-card q-queue">
         <thead>
         <tr><th>Специалист</th><th>Рег. номер</th><th>План приема</th><th>Вердикт</th><th>Тип ошибки</th><th class="num">Снижение</th></tr>
         </thead>
@@ -20,8 +20,8 @@
                 <td><?= e($it['employee_name']) ?></td>
                 <td><strong><?= e($it['reg_number']) ?></strong> <span class="muted"><?= e($it['country_code']) ?></span></td>
                 <?php $al = arrival_label($it['arrival_code'] ?? null, $it['arrival_detail'] ?? null); ?>
-                <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($al) ?>"><?= $al !== '' ? e($al) : '<span class="muted">—</span>' ?></td>
-                <td colspan="3">
+                <td data-label="План приема" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($al) ?>"><?= $al !== '' ? e($al) : '<span class="muted">—</span>' ?></td>
+                <td colspan="3" data-label="">
                     <form method="post" action="/inspect/<?= (int) $it['id'] ?>/review" class="review-form">
                         <?= csrf_field() ?>
                         <label class="radio">
@@ -67,6 +67,6 @@
 <form method="post" action="/inspect/finish" onsubmit="return confirm('Завершить проверку и разослать уведомления сотрудникам?')">
     <?= csrf_field() ?>
     <input type="hidden" name="batch" value="<?= (int) $batch['id'] ?>">
-    <button class="btn btn-primary">Завершить проверку и уведомить сотрудников</button>
+    <button class="btn btn-primary btn-block">Завершить проверку и уведомить сотрудников</button>
 </form>
 <?php endif; ?>
