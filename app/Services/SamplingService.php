@@ -89,11 +89,12 @@ class SamplingService
         return array_map(
             fn($r) => ['d' => (string) $r['d'], 'cnt' => (int) $r['cnt']],
             Database::all(
+                // work_date приводим к строке (в PG это date, substr(checked_at) — text; иначе «text = date»).
                 "SELECT substr(ai.checked_at,1,10) AS d, COUNT(*) AS cnt
                    FROM assignment_items ai
                    JOIN users u ON u.id = ai.assigned_to AND u.role = 'employee'
                   WHERE ai.checked_at IS NOT NULL
-                    AND substr(ai.checked_at,1,10) NOT IN (SELECT work_date FROM sample_batches)
+                    AND substr(ai.checked_at,1,10) NOT IN (SELECT CAST(work_date AS VARCHAR) FROM sample_batches)
                   GROUP BY substr(ai.checked_at,1,10)
                   ORDER BY d"
             )
