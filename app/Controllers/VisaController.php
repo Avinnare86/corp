@@ -56,8 +56,9 @@ class VisaController extends Controller
         return $d;
     }
 
-    private function isVisaManager(array $me): bool
+    private function isVisaManager(?array $me): bool
     {
+        if ($me === null) { return false; }   // не аутентифицирован — не менеджер (защита от падения)
         return $me['role'] === 'admin' || (int) ($me['is_visa_manager'] ?? 0) === 1;
     }
 
@@ -404,6 +405,7 @@ class VisaController extends Controller
     /** Единая таблица за день: этап2 (авто, readonly) + проставление/акцепт этапов 1 и 3. */
     public function timesheet(): void
     {
+        Auth::requireLogin();
         $me = Auth::user();
         if (!$this->isVisaManager($me)) { $this->redirect('/'); }
         $date = (string) ($this->input('date') ?: date('Y-m-d'));
