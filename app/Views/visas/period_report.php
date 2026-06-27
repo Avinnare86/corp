@@ -12,8 +12,16 @@
                 <?php endforeach; ?>
             </select>
         </label>
+        <label>Статус
+            <select name="status">
+                <option value="all" <?= ($status ?? 'checked') === 'all' ? 'selected' : '' ?>>Все статусы</option>
+                <?php foreach ($statuses as $st => $label): ?>
+                    <option value="<?= e($st) ?>" <?= ($status ?? 'checked') === $st ? 'selected' : '' ?>><?= e($label) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
         <button class="btn btn-primary">Показать</button>
-        <a class="btn" href="/visas/report/period/export?from=<?= e($from) ?>&to=<?= e($to) ?>&country=<?= e($country) ?>">⇩ Excel</a>
+        <a class="btn" href="/visas/report/period/export?from=<?= e($from) ?>&to=<?= e($to) ?>&country=<?= e($country) ?>&status=<?= e($status ?? 'checked') ?>">⇩ Excel</a>
     </form>
 
     <div class="cards" style="margin-bottom:12px">

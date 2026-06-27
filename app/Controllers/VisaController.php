@@ -950,10 +950,10 @@ class VisaController extends Controller
     {
         Auth::requireLogin();
         if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
-        [$from, $to, $country, $data] = $this->periodData();
+        [$from, $to, $country, $status, $data] = $this->periodData();
         $this->view('visas/period_report', array_merge($data, [
             'title' => 'Визы: динамика за период',
-            'from' => $from, 'to' => $to, 'country' => $country,
+            'from' => $from, 'to' => $to, 'country' => $country, 'status' => $status,
             'statuses' => self::STATUS_LABELS,
             'countries' => array_map(fn($r) => $r['c'], Database::all("SELECT DISTINCT UPPER(TRIM(citizenship)) AS c FROM visa_rows WHERE citizenship<>'' ORDER BY c")),
         ]));
@@ -967,6 +967,9 @@ class VisaController extends Controller
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) { $from = date('Y-m-01'); }
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) { $to = date('Y-m-d'); }
         $country = mb_strtoupper(trim((string) $this->input('country', '')), 'UTF-8');
+        // Фильтр по статусу: по умолчанию «проверено» (checked); 'all' — все статусы.
+        $status = (string) $this->input('status', 'checked');
+        if ($status !== 'all' && !isset(self::STATUS_LABELS[$status])) { $status = 'checked'; }
 
         $params = [$from . ' 00:00:00', $to . ' 23:59:59'];
         $cWhere = '';
@@ -982,20 +985,21 @@ class VisaController extends Controller
             $c = $r['country'] !== '' ? $r['country'] : '—';
             foreach (['start' => $r['st_start'], 'end' => $r['st_end']] as $k => $st) {
                 if ($st === null || $st === '') { continue; }
+                if ($status !== 'all' && $st !== $status) { continue; } // фильтр по выбранному статусу
                 $matrix[$c][$st][$k] = ($matrix[$c][$st][$k] ?? 0) + 1;
             }
         }
         ksort($matrix);
         $newLoaded   = (int) Database::scalar("SELECT COUNT(*) FROM visa_rows WHERE substr(created_at,1,10) BETWEEN ? AND ?", [$from, $to]);
         $instructions = (int) Database::scalar("SELECT COUNT(*) FROM visa_opis WHERE instructed_at IS NOT NULL AND substr(instructed_at,1,10) BETWEEN ? AND ?", [$from, $to]);
-        return [$from, $to, $country, ['matrix' => $matrix, 'newLoaded' => $newLoaded, 'instructions' => $instructions]];
+        return [$from, $to, $country, $status, ['matrix' => $matrix, 'newLoaded' => $newLoaded, 'instructions' => $instructions]];
     }
 
     public function periodReportExport(): void
     {
         Auth::requireLogin();
         if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
-        [$from, $to, $country, $data] = $this->periodData();
+        [$from, $to, $country, $status, $data] = $this->periodData();
         $rows = [];
         foreach ($data['matrix'] as $c => $byStatus) {
             foreach (self::STATUS_LABELS as $st => $label) {
@@ -1007,7 +1011,7 @@ class VisaController extends Controller
         }
         $rows[] = ['—', 'Новых загружено за период', '', $data['newLoaded'], ''];
         $rows[] = ['—', 'Визовых указаний внесено за период', '', $data['instructions'], ''];
-        \App\Services\Xlsx::download("visas-dynamics-{$from}_{$to}.xlsx", [[
+        \App\Services\Xlsx::download("visas-dynamics-{$from}_{$to}-{$status}.xlsx", [[
             'name'    => 'Динамика',
             'headers' => ['Страна', 'Статус', 'На начало', 'На конец', 'Δ'],
             'rows'    => $rows,
