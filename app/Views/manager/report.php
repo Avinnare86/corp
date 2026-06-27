@@ -3,8 +3,18 @@ function pct($checked, $total){ $total=(int)$total; return $total>0 ? round((int
 ?>
 <div class="chat-head">
     <h1 style="margin:0">Отчёт по проверке</h1>
-    <a class="btn btn-gold" href="/manager/report/export">📊 Выгрузить в Excel</a>
+    <a class="btn btn-gold" href="/manager/report/export?from=<?= e($from ?? '') ?>&to=<?= e($to ?? '') ?>">📊 Выгрузить в Excel</a>
 </div>
+
+<form method="get" action="/manager/report" class="form-inline" style="margin-bottom:12px">
+    <label>С<br><input type="date" name="from" value="<?= e($from ?? '') ?>"></label>
+    <label>По<br><input type="date" name="to" value="<?= e($to ?? '') ?>"></label>
+    <button class="btn primary" type="submit">Показать</button>
+    <?php if (($from ?? '') !== '' || ($to ?? '') !== ''): ?>
+        <a class="btn" href="/manager/report">Сбросить</a>
+    <?php endif; ?>
+    <span class="muted" style="align-self:center">Фильтр — по дате поступления анкет (загрузки/назначения). Пусто — за всё время.</span>
+</form>
 
 <?php $oTotal=(int)$overall['total']; $oChecked=(int)$overall['checked']; $oUn=(int)$overall['unassigned']; ?>
 <div class="cards">

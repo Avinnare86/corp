@@ -76,12 +76,37 @@ class ManagerController extends Controller
     public function report(): void
     {
         Auth::requireRole('anketa_manager', 'admin');
+        $from = (string) $this->input('from', '');
+        $to   = (string) $this->input('to', '');
+        [$overall, $byEmployee, $byList] = $this->reportData($from, $to);
+        $this->view('manager/report', [
+            'title' => 'Отчёт по проверке',
+            'overall' => $overall,
+            'byEmployee' => $byEmployee,
+            'byList' => $byList,
+            'from' => $from,
+            'to' => $to,
+        ]);
+    }
+
+    /**
+     * Данные отчёта по проверке. Фильтр по дате — на дату поступления анкеты (created_at),
+     * чтобы все показатели (всего/проверено/остаток/%) относились к одной когорте — анкетам,
+     * загруженным/назначенным за период. Пустые from/to = за всё время.
+     * @return array{0:array,1:array,2:array} [overall, byEmployee, byList]
+     */
+    private function reportData(string $from, string $to): array
+    {
+        $dCond = ''; $dp = [];
+        if ($from !== '') { $dCond .= ' AND ai.created_at >= ?'; $dp[] = $from . ' 00:00:00'; }
+        if ($to !== '')   { $dCond .= ' AND ai.created_at <= ?'; $dp[] = $to . ' 23:59:59'; }
 
         $overall = Database::one(
             "SELECT COUNT(*) AS total,
-                    SUM(CASE WHEN checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
-                    SUM(CASE WHEN assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
-               FROM assignment_items"
+                    SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
+                    SUM(CASE WHEN ai.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
+               FROM assignment_items ai WHERE 1=1" . $dCond,
+            $dp
         );
         $byEmployee = Database::all(
             "SELECT u.full_name,
@@ -89,44 +114,32 @@ class ManagerController extends Controller
                     SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked
                FROM users u
                JOIN assignment_items ai ON ai.assigned_to = u.id
-              WHERE u.role IN ('employee','admin')
+              WHERE u.role IN ('employee','admin')" . $dCond . "
               GROUP BY u.id, u.full_name
-              ORDER BY u.full_name"
+              ORDER BY u.full_name",
+            $dp
         );
+        // Фильтр по дате — в ON, чтобы списки без анкет за период оставались в отчёте (с нулями).
         $byList = Database::all(
             "SELECT l.name,
                     COUNT(ai.id) AS total,
                     SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
                     SUM(CASE WHEN ai.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
                FROM assignment_lists l
-               LEFT JOIN assignment_items ai ON ai.list_id = l.id
-              GROUP BY l.id, l.name ORDER BY l.id DESC"
+               LEFT JOIN assignment_items ai ON ai.list_id = l.id" . $dCond . "
+              GROUP BY l.id, l.name ORDER BY l.id DESC",
+            $dp
         );
-        $this->view('manager/report', [
-            'title' => 'Отчёт по проверке',
-            'overall' => $overall,
-            'byEmployee' => $byEmployee,
-            'byList' => $byList,
-        ]);
+        return [$overall, $byEmployee, $byList];
     }
 
-    /** Выгрузка отчёта в Excel (по сотрудникам + по спискам). */
+    /** Выгрузка отчёта в Excel (по сотрудникам + по спискам), с учётом фильтра по дате. */
     public function reportExport(): void
     {
         Auth::requireRole('anketa_manager', 'admin');
-        $byEmployee = Database::all(
-            "SELECT u.full_name, COUNT(ai.id) AS assigned,
-                    SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked
-               FROM users u JOIN assignment_items ai ON ai.assigned_to = u.id
-              WHERE u.role IN ('employee','admin') GROUP BY u.id, u.full_name ORDER BY u.full_name"
-        );
-        $byList = Database::all(
-            "SELECT l.name, COUNT(ai.id) AS total,
-                    SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
-                    SUM(CASE WHEN ai.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
-               FROM assignment_lists l LEFT JOIN assignment_items ai ON ai.list_id = l.id
-              GROUP BY l.id, l.name ORDER BY l.id DESC"
-        );
+        $from = (string) $this->input('from', '');
+        $to   = (string) $this->input('to', '');
+        [, $byEmployee, $byList] = $this->reportData($from, $to);
         $empRows = [];
         foreach ($byEmployee as $e) {
             $a=(int)$e['assigned']; $c=(int)$e['checked'];
@@ -137,7 +150,8 @@ class ManagerController extends Controller
             $t=(int)$l['total']; $c=(int)$l['checked'];
             $listRows[] = [$l['name'], $t, $c, (int)$l['unassigned'], $t>0?round($c/$t*100).'%':'0%'];
         }
-        \App\Services\Xlsx::download('report-' . date('Y-m-d') . '.xlsx', [
+        $suffix = ($from !== '' || $to !== '') ? (($from ?: '…') . '_' . ($to ?: '…')) : date('Y-m-d');
+        \App\Services\Xlsx::download('report-' . $suffix . '.xlsx', [
             ['name'=>'По сотрудникам','headers'=>['Сотрудник','Назначено','Проверено','Остаток','Прогресс'],'rows'=>$empRows],
             ['name'=>'По спискам','headers'=>['Список','Всего','Проверено','Не распределено','Прогресс'],'rows'=>$listRows],
         ]);
