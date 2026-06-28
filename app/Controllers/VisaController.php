@@ -917,25 +917,37 @@ class VisaController extends Controller
     {
         Auth::requireLogin();
         if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
+        // Фильтр по дате поступления визы (created_at): пусто = весь период. Когорта согласована
+        // по всем показателям (всего/проверено/остаток/доработки/%).
+        $from = (string) $this->input('from', '');
+        $to   = (string) $this->input('to', '');
+        if ($from !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) { $from = ''; }
+        if ($to !== ''   && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to))   { $to = ''; }
+        $d = ''; $dp = [];
+        if ($from !== '') { $d .= ' AND r.created_at >= ?'; $dp[] = $from . ' 00:00:00'; }
+        if ($to !== '')   { $d .= ' AND r.created_at <= ?'; $dp[] = $to . ' 23:59:59'; }
+
         $overall = Database::one(
             "SELECT COUNT(*) AS total,
-                    SUM(CASE WHEN checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
-                    SUM(CASE WHEN assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
-               FROM visa_rows");
+                    SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
+                    SUM(CASE WHEN r.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
+               FROM visa_rows r WHERE 1=1" . $d, $dp);
         $byEmployee = Database::all(
             "SELECT u.full_name,
                     COUNT(r.id) AS assigned,
                     SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
                     COALESCE(SUM(r.rework_count),0) AS reworks
                FROM users u JOIN visa_rows r ON r.assigned_to = u.id
-              GROUP BY u.id, u.full_name ORDER BY u.full_name");
+              WHERE 1=1" . $d . "
+              GROUP BY u.id, u.full_name ORDER BY u.full_name", $dp);
+        // Фильтр по дате — в ON, чтобы партии без виз за период оставались в отчёте (с нулями).
         $byBatch = Database::all(
             "SELECT b.id, b.name,
                     COUNT(r.id) AS total,
                     SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
                     SUM(CASE WHEN r.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
-               FROM visa_batches b LEFT JOIN visa_rows r ON r.batch_id = b.id
-              GROUP BY b.id, b.name ORDER BY b.id DESC");
+               FROM visa_batches b LEFT JOIN visa_rows r ON r.batch_id = b.id" . $d . "
+              GROUP BY b.id, b.name ORDER BY b.id DESC", $dp);
         foreach ($byBatch as &$bb) {
             $cs = Database::all("SELECT DISTINCT citizenship FROM visa_rows WHERE batch_id=? AND citizenship<>'' ORDER BY citizenship", [$bb['id']]);
             $bb['country'] = implode(', ', array_map(fn($r) => $r['citizenship'], $cs));
@@ -944,6 +956,7 @@ class VisaController extends Controller
         $this->view('visas/report', [
             'title' => 'Отчёт по визам',
             'overall' => $overall, 'byEmployee' => $byEmployee, 'byBatch' => $byBatch,
+            'from' => $from, 'to' => $to,
         ]);
     }
 
@@ -994,7 +1007,25 @@ class VisaController extends Controller
         ksort($matrix);
         $newLoaded   = (int) Database::scalar("SELECT COUNT(*) FROM visa_rows WHERE substr(created_at,1,10) BETWEEN ? AND ?", [$from, $to]);
         $instructions = (int) Database::scalar("SELECT COUNT(*) FROM visa_opis WHERE instructed_at IS NOT NULL AND substr(instructed_at,1,10) BETWEEN ? AND ?", [$from, $to]);
-        return [$from, $to, $country, $status, ['matrix' => $matrix, 'newLoaded' => $newLoaded, 'instructions' => $instructions]];
+
+        // Фактически ПРОВЕРЕНО за период (по дате проверки visa_rows.checked_at) — конкретные
+        // числа, а не дельта статусов. Учитывает фильтр страны (фильтр статуса здесь не применяется).
+        $chk = "r.checked_at IS NOT NULL AND substr(r.checked_at,1,10) BETWEEN ? AND ?";
+        $chkP = [$from, $to];
+        if ($country !== '') { $chk .= " AND UPPER(TRIM(r.citizenship)) = ?"; $chkP[] = $country; }
+        $checkedTotal = (int) Database::scalar("SELECT COUNT(*) FROM visa_rows r WHERE $chk", $chkP);
+        $checkedByEmp = Database::all(
+            "SELECT COALESCE(u.full_name, '— не назначен —') AS full_name, COUNT(*) AS cnt
+               FROM visa_rows r LEFT JOIN users u ON u.id = r.assigned_to
+              WHERE $chk GROUP BY u.id, u.full_name ORDER BY cnt DESC, full_name", $chkP);
+        $checkedByDay = Database::all(
+            "SELECT substr(r.checked_at,1,10) AS d, COUNT(*) AS cnt
+               FROM visa_rows r WHERE $chk GROUP BY substr(r.checked_at,1,10) ORDER BY d", $chkP);
+
+        return [$from, $to, $country, $status, [
+            'matrix' => $matrix, 'newLoaded' => $newLoaded, 'instructions' => $instructions,
+            'checkedTotal' => $checkedTotal, 'checkedByEmp' => $checkedByEmp, 'checkedByDay' => $checkedByDay,
+        ]];
     }
 
     public function periodReportExport(): void
@@ -1002,22 +1033,44 @@ class VisaController extends Controller
         Auth::requireLogin();
         if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
         [$from, $to, $country, $status, $data] = $this->periodData();
-        $rows = [];
+        $rows = []; $tS = 0; $tE = 0;
         foreach ($data['matrix'] as $c => $byStatus) {
             foreach (self::STATUS_LABELS as $st => $label) {
                 $s = (int) ($byStatus[$st]['start'] ?? 0);
                 $e = (int) ($byStatus[$st]['end'] ?? 0);
                 if ($s === 0 && $e === 0) { continue; }
                 $rows[] = [$c, $label, $s, $e, $e - $s];
+                $tS += $s; $tE += $e;
             }
         }
+        $rows[] = ['ИТОГО', '', $tS, $tE, $tE - $tS];
         $rows[] = ['—', 'Новых загружено за период', '', $data['newLoaded'], ''];
         $rows[] = ['—', 'Визовых указаний внесено за период', '', $data['instructions'], ''];
-        \App\Services\Xlsx::download("visas-dynamics-{$from}_{$to}-{$status}.xlsx", [[
-            'name'    => 'Динамика',
-            'headers' => ['Страна', 'Статус', 'На начало', 'На конец', 'Δ'],
-            'rows'    => $rows,
-        ]]);
+        $rows[] = ['—', 'ПРОВЕРЕНО за период (по дате проверки)', '', $data['checkedTotal'], ''];
+
+        $chkRows = [];
+        foreach ($data['checkedByEmp'] as $r) { $chkRows[] = [$r['full_name'], (int) $r['cnt']]; }
+        $chkRows[] = ['ИТОГО', (int) $data['checkedTotal']];
+        $dayRows = [];
+        foreach ($data['checkedByDay'] as $r) { $dayRows[] = [$r['d'], (int) $r['cnt']]; }
+
+        \App\Services\Xlsx::download("visas-dynamics-{$from}_{$to}-{$status}.xlsx", [
+            [
+                'name'    => 'Динамика',
+                'headers' => ['Страна', 'Статус', 'На начало', 'На конец', 'Δ'],
+                'rows'    => $rows,
+            ],
+            [
+                'name'    => 'Проверено — по специалистам',
+                'headers' => ['Специалист', 'Проверено за период'],
+                'rows'    => $chkRows,
+            ],
+            [
+                'name'    => 'Проверено — по дням',
+                'headers' => ['Дата', 'Проверено'],
+                'rows'    => $dayRows,
+            ],
+        ]);
     }
 
     /** Рейтинг специалистов по визам за период (проверено; качество — по доработкам). */

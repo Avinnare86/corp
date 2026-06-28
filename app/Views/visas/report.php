@@ -1,5 +1,23 @@
 <h1>Отчёт по визам</h1>
 
+<?php
+    $today = date('Y-m-d'); $yest = date('Y-m-d', strtotime('-1 day')); $d3 = date('Y-m-d', strtotime('-2 days'));
+    $f = $from ?? ''; $t = $to ?? ''; $active = $f !== '' || $t !== '';
+    $isToday = $f === $today && $t === $today;
+    $isYest  = $f === $yest  && $t === $yest;
+    $is3     = $f === $d3    && $t === $today;
+?>
+<form method="get" action="/visas/report" class="form-inline" style="margin:8px 0 14px;align-items:flex-end">
+    <a class="btn <?= !$active ? 'btn-primary' : '' ?>" href="/visas/report">Весь период</a>
+    <a class="btn <?= $isToday ? 'btn-primary' : '' ?>" href="/visas/report?from=<?= $today ?>&to=<?= $today ?>">Сегодня</a>
+    <a class="btn <?= $isYest ? 'btn-primary' : '' ?>" href="/visas/report?from=<?= $yest ?>&to=<?= $yest ?>">Вчера</a>
+    <a class="btn <?= $is3 ? 'btn-primary' : '' ?>" href="/visas/report?from=<?= $d3 ?>&to=<?= $today ?>">3 дня</a>
+    <label style="margin-left:8px">С<br><input type="date" name="from" value="<?= e($f) ?>"></label>
+    <label>По<br><input type="date" name="to" value="<?= e($t) ?>"></label>
+    <button class="btn primary" type="submit">Показать</button>
+    <span class="muted" style="align-self:center">Фильтр — по дате поступления виз. По умолчанию — весь период.</span>
+</form>
+
 <div class="cards">
     <div class="card"><div class="card-label">Всего строк</div><div class="card-value big"><?= (int)$overall['total'] ?></div></div>
     <div class="card"><div class="card-label">Проверено</div><div class="card-value big"><?= (int)$overall['checked'] ?></div>
