@@ -90,45 +90,48 @@ class ManagerController extends Controller
     }
 
     /**
-     * Данные отчёта по проверке. Фильтр по дате — на дату поступления анкеты (created_at),
-     * чтобы все показатели (всего/проверено/остаток/%) относились к одной когорте — анкетам,
-     * загруженным/назначенным за период. Пустые from/to = за всё время.
+     * Данные отчёта по проверке. Дата (from/to) применяется ТОЛЬКО к показателю «проверено
+     * за период» (по дате проверки checked_at). «Назначено / всего / не распределено / остаток»
+     * — снимок целиком (остаток за прошлые дни тоже учитывается). Пустые from/to: проверено
+     * за период = всего проверено. checked_total — всего проверено; checked_period — за период.
      * @return array{0:array,1:array,2:array} [overall, byEmployee, byList]
      */
     private function reportData(string $from, string $to): array
     {
-        $dCond = ''; $dp = [];
-        if ($from !== '') { $dCond .= ' AND ai.created_at >= ?'; $dp[] = $from . ' 00:00:00'; }
-        if ($to !== '')   { $dCond .= ' AND ai.created_at <= ?'; $dp[] = $to . ' 23:59:59'; }
+        $pc = ''; $pp = [];   // условие периода на дату проверки (только для checked_period)
+        if ($from !== '') { $pc .= ' AND ai.checked_at >= ?'; $pp[] = $from . ' 00:00:00'; }
+        if ($to !== '')   { $pc .= ' AND ai.checked_at <= ?'; $pp[] = $to . ' 23:59:59'; }
 
         $overall = Database::one(
             "SELECT COUNT(*) AS total,
-                    SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
+                    SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked_total,
+                    SUM(CASE WHEN ai.checked_at IS NOT NULL{$pc} THEN 1 ELSE 0 END) AS checked_period,
                     SUM(CASE WHEN ai.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
-               FROM assignment_items ai WHERE 1=1" . $dCond,
-            $dp
+               FROM assignment_items ai",
+            $pp
         );
         $byEmployee = Database::all(
             "SELECT u.full_name,
                     COUNT(ai.id) AS assigned,
-                    SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked
+                    SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked_total,
+                    SUM(CASE WHEN ai.checked_at IS NOT NULL{$pc} THEN 1 ELSE 0 END) AS checked_period
                FROM users u
                JOIN assignment_items ai ON ai.assigned_to = u.id
-              WHERE u.role IN ('employee','admin')" . $dCond . "
+              WHERE u.role IN ('employee','admin')
               GROUP BY u.id, u.full_name
               ORDER BY u.full_name",
-            $dp
+            $pp
         );
-        // Фильтр по дате — в ON, чтобы списки без анкет за период оставались в отчёте (с нулями).
         $byList = Database::all(
             "SELECT l.name,
                     COUNT(ai.id) AS total,
-                    SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
+                    SUM(CASE WHEN ai.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked_total,
+                    SUM(CASE WHEN ai.checked_at IS NOT NULL{$pc} THEN 1 ELSE 0 END) AS checked_period,
                     SUM(CASE WHEN ai.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
                FROM assignment_lists l
-               LEFT JOIN assignment_items ai ON ai.list_id = l.id" . $dCond . "
+               LEFT JOIN assignment_items ai ON ai.list_id = l.id
               GROUP BY l.id, l.name ORDER BY l.id DESC",
-            $dp
+            $pp
         );
         return [$overall, $byEmployee, $byList];
     }
@@ -140,20 +143,24 @@ class ManagerController extends Controller
         $from = (string) $this->input('from', '');
         $to   = (string) $this->input('to', '');
         [, $byEmployee, $byList] = $this->reportData($from, $to);
-        $empRows = [];
+        $empRows = []; $eA=0; $eP=0; $eT=0; $eR=0;
         foreach ($byEmployee as $e) {
-            $a=(int)$e['assigned']; $c=(int)$e['checked'];
-            $empRows[] = [$e['full_name'], $a, $c, $a-$c, $a>0?round($c/$a*100).'%':'0%'];
+            $a=(int)$e['assigned']; $ct=(int)$e['checked_total']; $cp=(int)$e['checked_period']; $rem=$a-$ct;
+            $empRows[] = [$e['full_name'], $a, $cp, $ct, $rem, $a>0?round($ct/$a*100).'%':'0%'];
+            $eA+=$a; $eP+=$cp; $eT+=$ct; $eR+=$rem;
         }
-        $listRows = [];
+        $empRows[] = ['ИТОГО', $eA, $eP, $eT, $eR, $eA>0?round($eT/$eA*100).'%':'0%'];
+        $listRows = []; $lT=0; $lP=0; $lC=0; $lU=0;
         foreach ($byList as $l) {
-            $t=(int)$l['total']; $c=(int)$l['checked'];
-            $listRows[] = [$l['name'], $t, $c, (int)$l['unassigned'], $t>0?round($c/$t*100).'%':'0%'];
+            $t=(int)$l['total']; $ct=(int)$l['checked_total']; $cp=(int)$l['checked_period']; $u=(int)$l['unassigned'];
+            $listRows[] = [$l['name'], $t, $cp, $ct, $u, $t>0?round($ct/$t*100).'%':'0%'];
+            $lT+=$t; $lP+=$cp; $lC+=$ct; $lU+=$u;
         }
+        $listRows[] = ['ИТОГО', $lT, $lP, $lC, $lU, $lT>0?round($lC/$lT*100).'%':'0%'];
         $suffix = ($from !== '' || $to !== '') ? (($from ?: '…') . '_' . ($to ?: '…')) : date('Y-m-d');
         \App\Services\Xlsx::download('report-' . $suffix . '.xlsx', [
-            ['name'=>'По сотрудникам','headers'=>['Сотрудник','Назначено','Проверено','Остаток','Прогресс'],'rows'=>$empRows],
-            ['name'=>'По спискам','headers'=>['Список','Всего','Проверено','Не распределено','Прогресс'],'rows'=>$listRows],
+            ['name'=>'По сотрудникам','headers'=>['Сотрудник','Назначено','Проверено за период','Всего проверено','Остаток','Прогресс'],'rows'=>$empRows],
+            ['name'=>'По спискам','headers'=>['Список','Всего','Проверено за период','Всего проверено','Не распределено','Прогресс'],'rows'=>$listRows],
         ]);
     }
 

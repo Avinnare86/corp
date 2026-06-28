@@ -917,37 +917,38 @@ class VisaController extends Controller
     {
         Auth::requireLogin();
         if (!$this->isVisaManager(Auth::user())) { $this->redirect('/'); }
-        // Фильтр по дате поступления визы (created_at): пусто = весь период. Когорта согласована
-        // по всем показателям (всего/проверено/остаток/доработки/%).
+        // Дата (from/to) применяется ТОЛЬКО к «проверено за период» (по дате проверки checked_at).
+        // Всего/назначено/остаток/доработки — снимок целиком (остаток за прошлые дни тоже учитывается).
         $from = (string) $this->input('from', '');
         $to   = (string) $this->input('to', '');
         if ($from !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) { $from = ''; }
         if ($to !== ''   && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to))   { $to = ''; }
-        $d = ''; $dp = [];
-        if ($from !== '') { $d .= ' AND r.created_at >= ?'; $dp[] = $from . ' 00:00:00'; }
-        if ($to !== '')   { $d .= ' AND r.created_at <= ?'; $dp[] = $to . ' 23:59:59'; }
+        $pc = ''; $pp = [];
+        if ($from !== '') { $pc .= ' AND r.checked_at >= ?'; $pp[] = $from . ' 00:00:00'; }
+        if ($to !== '')   { $pc .= ' AND r.checked_at <= ?'; $pp[] = $to . ' 23:59:59'; }
 
         $overall = Database::one(
             "SELECT COUNT(*) AS total,
-                    SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
+                    SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked_total,
+                    SUM(CASE WHEN r.checked_at IS NOT NULL{$pc} THEN 1 ELSE 0 END) AS checked_period,
                     SUM(CASE WHEN r.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
-               FROM visa_rows r WHERE 1=1" . $d, $dp);
+               FROM visa_rows r", $pp);
         $byEmployee = Database::all(
             "SELECT u.full_name,
                     COUNT(r.id) AS assigned,
-                    SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
+                    SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked_total,
+                    SUM(CASE WHEN r.checked_at IS NOT NULL{$pc} THEN 1 ELSE 0 END) AS checked_period,
                     COALESCE(SUM(r.rework_count),0) AS reworks
                FROM users u JOIN visa_rows r ON r.assigned_to = u.id
-              WHERE 1=1" . $d . "
-              GROUP BY u.id, u.full_name ORDER BY u.full_name", $dp);
-        // Фильтр по дате — в ON, чтобы партии без виз за период оставались в отчёте (с нулями).
+              GROUP BY u.id, u.full_name ORDER BY u.full_name", $pp);
         $byBatch = Database::all(
             "SELECT b.id, b.name,
                     COUNT(r.id) AS total,
-                    SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked,
+                    SUM(CASE WHEN r.checked_at IS NOT NULL THEN 1 ELSE 0 END) AS checked_total,
+                    SUM(CASE WHEN r.checked_at IS NOT NULL{$pc} THEN 1 ELSE 0 END) AS checked_period,
                     SUM(CASE WHEN r.assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned
-               FROM visa_batches b LEFT JOIN visa_rows r ON r.batch_id = b.id" . $d . "
-              GROUP BY b.id, b.name ORDER BY b.id DESC", $dp);
+               FROM visa_batches b LEFT JOIN visa_rows r ON r.batch_id = b.id
+              GROUP BY b.id, b.name ORDER BY b.id DESC", $pp);
         foreach ($byBatch as &$bb) {
             $cs = Database::all("SELECT DISTINCT citizenship FROM visa_rows WHERE batch_id=? AND citizenship<>'' ORDER BY citizenship", [$bb['id']]);
             $bb['country'] = implode(', ', array_map(fn($r) => $r['citizenship'], $cs));
