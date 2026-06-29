@@ -208,9 +208,10 @@ class OrgController extends Controller
         Auth::requireLogin();
         $uid = (int) Auth::id();
         $this->view('certs/my', [
-            'title' => 'Моя электронная подпись',
-            'certs' => Database::all('SELECT * FROM user_certificates WHERE user_id = ? ORDER BY sign_type', [$uid]),
-            'csrf'  => Auth::csrf(),
+            'title'       => 'Моя электронная подпись',
+            'certs'       => Database::all('SELECT * FROM user_certificates WHERE user_id = ? ORDER BY sign_type', [$uid]),
+            'dss_enabled' => \App\Services\SignService::enabled(),
+            'csrf'        => Auth::csrf(),
         ]);
     }
 
@@ -247,6 +248,40 @@ class OrgController extends Controller
         Auth::verifyCsrf();
         Database::run('DELETE FROM user_certificates WHERE id = ? AND user_id = ?', [$id, (int) Auth::id()]);
         flash('Сертификат удалён.');
+        $this->redirect('/certs');
+    }
+
+    /** Выпустить (перевыпустить) УКЭП через централизованный сервис ЭП (sc.ined.ru). */
+    public function issueUkep(): void
+    {
+        Auth::requireLogin();
+        Auth::verifyCsrf();
+        $uid = (int) Auth::id();
+        $password = (string) $this->input('password');
+        if (mb_strlen($password) < 6) {
+            flash('Введите пароль (не короче 6 символов) для выпуска УКЭП.', 'error'); $this->redirect('/certs');
+        }
+        if (!\App\Services\SignService::enabled()) {
+            flash('Сервис электронной подписи не настроен. Обратитесь к администратору.', 'error'); $this->redirect('/certs');
+        }
+        $u = Database::one('SELECT full_name, email FROM users WHERE id = ?', [$uid]);
+        $res = \App\Services\SignService::issueCert($uid, $password, (string) ($u['full_name'] ?? ''), (string) ($u['email'] ?? ''));
+        if (!$res['ok']) {
+            flash('Не удалось выпустить УКЭП: ' . $res['error'], 'error'); $this->redirect('/certs');
+        }
+        $c  = $res['certificate'];
+        $vf = $c['not_before'] ? substr((string) $c['not_before'], 0, 10) : date('Y-m-d');
+        $vt = $c['not_after']  ? substr((string) $c['not_after'], 0, 10)  : date('Y-m-d', strtotime('+1 year'));
+        $owner = $c['common_name'] !== '' ? $c['common_name'] : (string) ($u['full_name'] ?? '');
+        $existing = Database::scalar("SELECT id FROM user_certificates WHERE user_id = ? AND sign_type = 'UKEP' AND source = 'dss'", [$uid]);
+        if ($existing) {
+            Database::run('UPDATE user_certificates SET serial=?, owner_name=?, fingerprint=?, issued_at=?, valid_from=?, valid_to=? WHERE id=?',
+                [$c['serial'], $owner, $c['fingerprint'], date('Y-m-d'), $vf, $vt, (int) $existing]);
+        } else {
+            Database::insert('INSERT INTO user_certificates (user_id, sign_type, serial, owner_name, fingerprint, source, issued_at, valid_from, valid_to) VALUES (?,?,?,?,?,?,?,?,?)',
+                [$uid, 'UKEP', $c['serial'], $owner, $c['fingerprint'], 'dss', date('Y-m-d'), $vf, $vt]);
+        }
+        flash('УКЭП выпущена через сервис: ' . $owner . ($vt ? ', действует до ' . $vt : '') . '.');
         $this->redirect('/certs');
     }
 

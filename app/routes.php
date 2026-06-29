@@ -20,6 +20,7 @@ use App\Controllers\DocumentController;
 use App\Controllers\OrgController;
 use App\Controllers\OrderController;
 use App\Controllers\VacationController;
+use App\Controllers\VacationScheduleController;
 use App\Controllers\BudgetController;
 use App\Controllers\TabelController;
 
@@ -198,6 +199,7 @@ $router->get('/docs/{id}',          [DocumentController::class, 'show']);
 // Моя ЭП — самообслуживание для всех сотрудников (ПЭП авто, загрузка УНЭП/УКЭП)
 $router->get('/certs',                       [OrgController::class, 'myCerts']);
 $router->post('/certs',                      [OrgController::class, 'storeMyCert']);
+$router->post('/certs/issue',                [OrgController::class, 'issueUkep']);
 $router->post('/certs/{id}/delete',          [OrgController::class, 'deleteMyCert']);
 
 $router->get('/admin/org',                  [OrgController::class, 'index']);
@@ -267,6 +269,20 @@ $router->get('/vacations/{id}/notice',     [VacationController::class, 'notice']
 $router->post('/vacations/{id}/send-notice', [VacationController::class, 'sendNotice']);
 $router->post('/vacations/blackout',       [VacationController::class, 'storeBlackout']);
 $router->post('/vacations/blackout/{id}/delete', [VacationController::class, 'deleteBlackout']);
+
+// --- График отпусков (документ-сущность: отдел/организация, ревизии, подпись) ---
+$router->get('/vacation-schedule',                   [VacationScheduleController::class, 'index']);
+$router->get('/vacation-schedule/my',                [VacationScheduleController::class, 'my']);
+$router->post('/vacation-schedule',                  [VacationScheduleController::class, 'create']);
+$router->get('/vacation-schedule/{id}/edit',         [VacationScheduleController::class, 'edit']);
+$router->get('/vacation-schedule/{id}/view',         [VacationScheduleController::class, 'show']);
+$router->post('/vacation-schedule/{id}/row',         [VacationScheduleController::class, 'addRow']);
+$router->post('/vacation-schedule/{id}/row/{rowId}/delete', [VacationScheduleController::class, 'deleteRow']);
+$router->post('/vacation-schedule/{id}/row-status',  [VacationScheduleController::class, 'setRowStatus']);
+$router->post('/vacation-schedule/{id}/balance',     [VacationScheduleController::class, 'saveBalance']);
+$router->post('/vacation-schedule/{id}/sign',        [VacationScheduleController::class, 'sign']);
+$router->post('/vacation-schedule/{id}/archive',     [VacationScheduleController::class, 'archive']);
+$router->post('/vacation-schedule/{id}/delete',      [VacationScheduleController::class, 'delete']);
 
 // --- Бюджет ФОТ ---
 $router->get('/budget',                  [BudgetController::class, 'index']);

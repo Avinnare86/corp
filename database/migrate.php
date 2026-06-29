@@ -338,6 +338,50 @@ $tables['vacation_blackouts'] = "CREATE TABLE IF NOT EXISTS vacation_blackouts (
     reason        VARCHAR(300) DEFAULT ''
 ) $ENGINE";
 
+// ===== График отпусков (документ-сущность: отдел/организация, ревизии, подпись) =====
+// Основной график (revision=0), далее корректировочные. После подписи — неизменяем.
+$tables['vacation_schedules'] = "CREATE TABLE IF NOT EXISTS vacation_schedules (
+    id $ID,
+    year            INT NOT NULL,               -- календарный год графика
+    department_id   INT NULL,                   -- NULL = по организации
+    revision        INT NOT NULL DEFAULT 0,     -- 0 = основной, далее корректировочные
+    status          VARCHAR(10) NOT NULL DEFAULT 'draft',  -- draft | signed
+    created_by      INT NOT NULL,
+    created_at      TIMESTAMP DEFAULT $NOW,
+    signer_id       INT NULL,
+    signer_name     VARCHAR(150) NOT NULL DEFAULT '',
+    signer_position VARCHAR(255) NOT NULL DEFAULT '',
+    sign_type       VARCHAR(10) NULL,
+    signed_at       TIMESTAMP NULL,
+    sign_hash       VARCHAR(64) NOT NULL DEFAULT '',
+    cert_serial     VARCHAR(100) NOT NULL DEFAULT '',
+    snapshot        TEXT NULL,                  -- JSON-снимок на момент подписи
+    archived_at     TIMESTAMP NULL,
+    archived_by     INT NULL
+) $ENGINE";
+// Строка-период: один сотрудник может иметь несколько частей отпуска (несколько строк).
+$tables['vacation_schedule_rows'] = "CREATE TABLE IF NOT EXISTS vacation_schedule_rows (
+    id $ID,
+    schedule_id INT NOT NULL,
+    employee_id INT NOT NULL,
+    start_date  DATE NOT NULL,
+    end_date    DATE NOT NULL,
+    days        INT NOT NULL DEFAULT 0,         -- календарные дни периода (включительно)
+    status      VARCHAR(10) NOT NULL DEFAULT 'proposal',  -- proposal (Предложение) | approved (Согласован)
+    note        VARCHAR(300) NULL
+) $ENGINE";
+// Остаток отпуска на год (вводит кадровик) — основа гейта «весь период запланирован».
+$tables['vacation_balances'] = "CREATE TABLE IF NOT EXISTS vacation_balances (
+    id $ID,
+    employee_id INT NOT NULL,
+    year        INT NOT NULL,
+    days        INT NOT NULL DEFAULT 28,        -- остаток отпуска (календарных дней) на год
+    note        VARCHAR(300) NULL,
+    updated_by  INT NULL,
+    updated_at  TIMESTAMP DEFAULT $NOW,
+    UNIQUE (employee_id, year)
+) $ENGINE";
+
 // ===== Бюджетирование ФОТ =====
 $tables['pay_sources'] = "CREATE TABLE IF NOT EXISTS pay_sources (
     id $ID,
@@ -377,6 +421,20 @@ $tables['user_certificates'] = "CREATE TABLE IF NOT EXISTS user_certificates (
     owner_name VARCHAR(200) NOT NULL,
     issued_at  DATE NOT NULL,
     valid_to   DATE NOT NULL
+) $ENGINE";
+// Криптографические подписи документов через DSS (УКЭП): открепленная .sig + реквизиты.
+// Ключ — (entity_type, entity_id); существующие штампы sign_* остаются для отображения.
+$tables['document_signatures'] = "CREATE TABLE IF NOT EXISTS document_signatures (
+    id $ID,
+    entity_type    VARCHAR(40) NOT NULL,        -- tabel | shift_grafik | stimulus_memo | document | vacation_schedule
+    entity_id      INT NOT NULL,
+    signer_id      INT NOT NULL,
+    sign_type      VARCHAR(10) NOT NULL DEFAULT 'UKEP',
+    serial         VARCHAR(100) NOT NULL DEFAULT '',
+    fingerprint    VARCHAR(120) NOT NULL DEFAULT '',
+    sig_b64        TEXT NULL,                   -- открепленная подпись CAdES (base64)
+    payload_sha256 VARCHAR(64) NOT NULL DEFAULT '',
+    signed_at      TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
 // ===== Электронный табель (полумесячный, с ревизиями и подписью) =====
@@ -989,6 +1047,22 @@ if (!columnExists('tabel_rows', 'cells')) {
 if (!columnExists('tabel_rows', 'hours')) {
     $pdo->exec($ddlFix("ALTER TABLE tabel_rows ADD COLUMN hours $MONEY NOT NULL DEFAULT 0"));
     echo "OK  колонка tabel_rows.hours добавлена\n";
+}
+// Сертификат подписи: источник (загружен файлом / выпущен через DSS), отпечаток, начало действия.
+foreach (['fingerprint' => "VARCHAR(120) NOT NULL DEFAULT ''", 'source' => "VARCHAR(10) NOT NULL DEFAULT 'manual'", 'valid_from' => 'DATE NULL'] as $col => $ddl) {
+    if (!columnExists('user_certificates', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE user_certificates ADD COLUMN $col $ddl"));
+        echo "OK  колонка user_certificates.$col добавлена\n";
+    }
+}
+// Индексы новых таблиц (подписи документов, график отпусков).
+foreach ([
+    'ix_docsig_entity'  => 'document_signatures(entity_type, entity_id)',
+    'ix_vsched_year'    => 'vacation_schedules(year, department_id, revision)',
+    'ix_vsrow_sched'    => 'vacation_schedule_rows(schedule_id)',
+    'ix_vsrow_emp'      => 'vacation_schedule_rows(employee_id)',
+] as $ix => $def) {
+    try { $pdo->exec("CREATE INDEX IF NOT EXISTS $ix ON $def"); } catch (\Throwable $e) {}
 }
 // Архив документов (Актуальные/Архив): подписанные → в архив, безвозвратное удаление только админом.
 foreach (['tabels', 'shift_grafiks', 'stimulus_memos'] as $tbl) {

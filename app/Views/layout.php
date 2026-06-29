@@ -76,6 +76,7 @@ if ($uid) {
     if ($isHrMgr || $isTimekeeper || $canSeeStaff || $can('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager')) {
         $g = [];
         if ($isTimekeeper || $isHrMgr || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacations', 'Отпуска', $vacInbox]; }
+        if ($isHrMgr || $can('director', 'deputy_director')) { $g[] = ['/vacation-schedule', 'График отпусков', 0]; }
         $canShift = \App\Controllers\ShiftController::canSee((int) $uid);
         if ($isTimekeeper || $canShift) { $g[] = ['/timesheet2', 'Электронный табель', 0]; }
         if ($canShift) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; }
@@ -208,6 +209,7 @@ if ($uid) {
             <?php endif; ?>
             <div class="np-name"><?= e($authUser['full_name'] ?? '') ?></div>
             <a href="/certs">Моя ЭП</a>
+            <a href="/vacation-schedule/my">Мой отпуск</a>
             <a href="/acting">Замещение</a>
             <a href="/password/change">Пароль</a>
             <a class="btn-logout" href="/logout">Выход</a>
@@ -238,6 +240,7 @@ if ($uid) {
                 </form>
                 <?php endif; ?>
                 <a href="/certs">Моя ЭП</a>
+                <a href="/vacation-schedule/my">Мой отпуск</a>
                 <a href="/acting">Замещение</a>
                 <a href="/password/change">Пароль</a>
                 <a class="btn-logout" href="/logout">Выход</a>

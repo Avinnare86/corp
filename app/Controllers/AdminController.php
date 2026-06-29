@@ -723,6 +723,11 @@ class AdminController extends Controller
             'visaSignerPosition' => (string) Settings::get('visa_signer_position', \App\Services\VisaDocs::DEFAULT_POSITION),
             'stimulDirectorName'     => (string) Settings::get('stimul_director_name', ''),
             'stimulDirectorPosition' => (string) Settings::get('stimul_director_position', ''),
+            'dss' => [
+                'url'     => \App\Services\SignService::baseUrl(),
+                'enabled' => (string) Settings::get('sign_dss_enabled', '1') !== '0',
+                'prefix'  => (string) Settings::get('sign_dss_user_prefix', 'uchet-'),
+            ],
             'calendar' => [
                 'curYear'   => (int) date('Y'),
                 'nextYear'  => (int) date('Y') + 1,
@@ -770,6 +775,13 @@ class AdminController extends Controller
         }
         if ($this->input('visa_prompt') !== null && trim((string) $this->input('visa_prompt')) !== '') {
             Settings::set('visa_prompt', (string) $this->input('visa_prompt'));
+        }
+        // Сервис электронной подписи (КриптоПро DSS) — только если отправлена его форма
+        if (array_key_exists('sign_dss_url', $_POST)) {
+            Settings::set('sign_dss_url', trim((string) $this->input('sign_dss_url')) ?: 'https://sc.ined.ru/api');
+            Settings::set('sign_dss_enabled', $this->input('sign_dss_enabled') ? '1' : '0');
+            $prefix = trim((string) $this->input('sign_dss_user_prefix'));
+            Settings::set('sign_dss_user_prefix', $prefix !== '' ? $prefix : 'uchet-');
         }
         // Директор-подписант служебок о стимуле — только если отправлена его форма
         if (array_key_exists('stimul_director_name', $_POST)) {

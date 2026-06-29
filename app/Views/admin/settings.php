@@ -117,6 +117,29 @@
 </section>
 
 <section class="panel">
+    <h2>Электронная подпись (сервис УКЭП)</h2>
+    <form method="post" action="/admin/settings" class="grid-form">
+        <?= csrf_field() ?>
+        <input type="hidden" name="inspection_percent" value="<?= e($inspectionPercent) ?>">
+        <input type="hidden" name="daily_norm" value="<?= e($dailyNorm) ?>">
+        <input type="hidden" name="penalty_step" value="<?= e($penaltyStep) ?>">
+        <input type="hidden" name="penalty_max_multiplier" value="<?= e($penaltyMaxMultiplier) ?>">
+        <label class="grow">URL сервиса подписи (DSS)
+            <input type="text" name="sign_dss_url" value="<?= e($dss['url']) ?>" placeholder="https://sc.ined.ru/api">
+        </label>
+        <label>Префикс ID пользователя в сервисе
+            <input type="text" name="sign_dss_user_prefix" value="<?= e($dss['prefix']) ?>" placeholder="uchet-">
+        </label>
+        <label class="check"><input type="checkbox" name="sign_dss_enabled" value="1" <?= $dss['enabled'] ? 'checked' : '' ?>> Подпись через сервис включена</label>
+        <button class="btn btn-primary">Сохранить сервис ЭП</button>
+    </form>
+    <p class="muted">Централизованный сервис КриптоПро DSS выпускает УКЭП и подписывает документы по паролю пользователя
+        (как в контуре грантов). Префикс отделяет учётные записи портала от других систем на том же сервисе
+        (например, <code>uchet-15</code>). Требуется сетевой доступ сервера портала к этому адресу. Если выключено — действует
+        прежняя подпись (ПЭП паролем / загруженный сертификат УНЭП/УКЭП).</p>
+</section>
+
+<section class="panel">
     <h2>Email-уведомления (SMTP)</h2>
     <form method="post" action="/admin/settings" class="grid-form">
         <?= csrf_field() ?>
