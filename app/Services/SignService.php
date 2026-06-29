@@ -104,6 +104,13 @@ class SignService
     /** Записать подпись в журнал document_signatures по дескриптору из {@see authAndSign}. */
     public static function recordSignature(string $entityType, int $entityId, int $userId, array $desc): void
     {
+        // Идемпотентность: не дублировать запись при повторной отправке формы
+        // (та же сущность + тот же подписант + то же содержимое). Разное содержимое
+        // (новая ревизия) и разные подписанты (многоступенчатый маршрут) — допускаются.
+        $dup = \App\Core\Database::scalar(
+            'SELECT 1 FROM document_signatures WHERE entity_type=? AND entity_id=? AND signer_id=? AND payload_sha256=? LIMIT 1',
+            [$entityType, $entityId, $userId, (string) ($desc['payload_sha'] ?? '')]);
+        if ($dup) { return; }
         \App\Core\Database::insert(
             'INSERT INTO document_signatures (entity_type, entity_id, signer_id, sign_type, serial, fingerprint, sig_b64, payload_sha256, signed_at) VALUES (?,?,?,?,?,?,?,?,?)',
             [$entityType, $entityId, $userId, $desc['sign_type'], $desc['serial'], $desc['fingerprint'] ?? '',
@@ -120,9 +127,13 @@ class SignService
         if ($type === 'PEP') {
             $owner = (string) \App\Core\Database::scalar('SELECT full_name FROM users WHERE id=?', [$userId]);
             $serial = 'PEP-' . strtoupper(bin2hex(random_bytes(6)));
-            \App\Core\Database::insert(
-                'INSERT INTO user_certificates (user_id, sign_type, serial, owner_name, source, issued_at, valid_to) VALUES (?,?,?,?,?,?,?)',
-                [$userId, 'PEP', $serial, $owner, 'manual', date('Y-m-d'), date('Y-m-d', strtotime('+5 years'))]);
+            try {
+                \App\Core\Database::insert(
+                    'INSERT INTO user_certificates (user_id, sign_type, serial, owner_name, source, issued_at, valid_to) VALUES (?,?,?,?,?,?,?)',
+                    [$userId, 'PEP', $serial, $owner, 'manual', date('Y-m-d'), date('Y-m-d', strtotime('+5 years'))]);
+            } catch (\Throwable $e) {
+                return null; // не удалось автоматически выпустить ПЭП — подпись не выполнится, ошибка показывается пользователю
+            }
             return \App\Core\Database::one('SELECT * FROM user_certificates WHERE serial=?', [$serial]);
         }
         return null;

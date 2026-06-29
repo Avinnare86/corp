@@ -110,6 +110,88 @@ class TripController extends Controller
         $this->view('trip/my', ['title' => 'Мои командировки', 'rows' => $rows, 'statuses' => TS::STATUS]);
     }
 
+    // ===== Реестр служебок по командировкам (помесячно) =====
+    /** Строки реестра за месяц (по дате начала), с учётом видимости. */
+    private function registryRows(array $me, string $month): array
+    {
+        $all = Database::all(
+            "SELECT t.*, u.full_name AS emp_name, a.full_name AS author_name, d.name AS dept_name, s.name AS source_name
+               FROM trip_requests t
+               JOIN users u ON u.id = t.employee_id
+               LEFT JOIN users a ON a.id = t.author_id
+               LEFT JOIN departments d ON d.id = t.department_id
+               LEFT JOIN pay_sources s ON s.id = t.source_id
+              WHERE substr(t.date_from,1,7) = ?
+              ORDER BY t.date_from, t.id", [$month]);
+        $rows = [];
+        foreach ($all as $t) {
+            if (!$this->canSee($me, $t)) { continue; }
+            $est = TS::estimate($t);
+            $t['plan_shown'] = $t['status'] === 'approved' ? (float) $t['plan_total'] : $est['total'];
+            $t['fact_total'] = TS::factTotal($t);
+            $rows[] = $t;
+        }
+        return $rows;
+    }
+
+    public function registry(): void
+    {
+        Auth::requireLogin();
+        $me = Auth::user();
+        if (!$this->canCreate() && !$this->seesAll()) { $this->redirect('/trips/my'); }
+        $month = (string) ($this->input('month') ?: date('Y-m'));
+        if (!preg_match('/^\d{4}-\d{2}$/', $month)) { $month = date('Y-m'); }
+        $months = array_column(Database::all("SELECT DISTINCT substr(date_from,1,7) AS m FROM trip_requests ORDER BY m DESC"), 'm');
+        if (!in_array($month, $months, true)) { array_unshift($months, $month); }
+        $this->view('trip/registry', [
+            'title'        => 'Реестр командировок — ' . $month,
+            'month'        => $month,
+            'months'       => $months,
+            'rows'         => $this->registryRows($me, $month),
+            'statuses'     => TS::STATUS,
+            'signTypes'    => self::SIGN_TYPES,
+            'isAccountant' => $this->isAccountant(),
+        ]);
+    }
+
+    /** Выгрузка реестра за месяц в Excel (подписанные + до подписи). */
+    public function registryExport(): void
+    {
+        Auth::requireLogin();
+        $me = Auth::user();
+        if (!$this->canCreate() && !$this->seesAll()) { $this->redirect('/trips/my'); }
+        $month = (string) ($this->input('month') ?: date('Y-m'));
+        if (!preg_match('/^\d{4}-\d{2}$/', $month)) { $month = date('Y-m'); }
+        $st = self::SIGN_TYPES;
+        $headers = ['№', 'Отдел', 'Командируемый', 'Город', 'Мероприятие', 'С', 'По', 'Источник',
+            'Смета план, ₽', 'Факт, ₽', 'Статус', 'Подал (автор)', 'Дата подачи', 'ЭП автора',
+            'Согласовал (директор)', 'Дата согл.', 'ЭП дир.', 'Факт внесён'];
+        $data = [];
+        foreach ($this->registryRows($me, $month) as $t) {
+            $data[] = [
+                (string) ($t['number'] ?: '—'),
+                (string) ($t['dept_name'] ?? ''),
+                (string) $t['emp_name'],
+                (string) $t['destination'],
+                (string) $t['event'],
+                (string) $t['date_from'], (string) $t['date_to'],
+                (string) ($t['source_name'] ?? ''),
+                round((float) $t['plan_shown'], 2),
+                $t['fact_total'] !== null ? round((float) $t['fact_total'], 2) : '',
+                TS::STATUS[$t['status']] ?? (string) $t['status'],
+                (string) ($t['author_name'] ?? ''),
+                $t['author_signed_at'] ? substr((string) $t['author_signed_at'], 0, 16) : '',
+                $t['author_sign_type'] ? ($st[$t['author_sign_type']] ?? $t['author_sign_type']) : '',
+                (string) ($t['director_sign_name'] ?? ''),
+                $t['director_signed_at'] ? substr((string) $t['director_signed_at'], 0, 16) : '',
+                $t['director_sign_type'] ? ($st[$t['director_sign_type']] ?? $t['director_sign_type']) : '',
+                $t['fact_at'] ? substr((string) $t['fact_at'], 0, 10) : 'ожидает',
+            ];
+        }
+        \App\Services\Xlsx::download('komandirovki-reestr-' . $month . '.xlsx',
+            [['name' => 'Командировки ' . $month, 'headers' => $headers, 'rows' => $data]]);
+    }
+
     // ===== Форма (создание/редактирование черновика) =====
     public function form(string $id = ''): void
     {

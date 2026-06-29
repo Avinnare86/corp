@@ -289,6 +289,8 @@ $router->post('/vacation-schedule/{id}/delete',      [VacationScheduleController
 // --- Командировки ---
 $router->get('/trips',                       [TripController::class, 'index']);
 $router->get('/trips/my',                    [TripController::class, 'my']);
+$router->get('/trips/registry',              [TripController::class, 'registry']);
+$router->get('/trips/registry/export',       [TripController::class, 'registryExport']);
 $router->get('/trips/form',                  [TripController::class, 'form']);
 $router->get('/trips/form/{id}',             [TripController::class, 'form']);
 $router->post('/trips',                      [TripController::class, 'store']);

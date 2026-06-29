@@ -859,41 +859,44 @@ class StimulusController extends Controller
             "SELECT m.*, d.curator_id FROM stimulus_memos m LEFT JOIN departments d ON d.id=m.department_id
               WHERE m.batch_id=? AND m.author_id=? AND m.status='draft' ORDER BY m.id", [$batchId, $uid]);
         if (!$memos) { flash('Нет черновиков пакета для подписи.', 'error'); $this->redirect('/memos/batch/' . $batchId); }
-        // ПЭП — подтверждение паролем (один раз на пакет).
+        // Подпись через единый сервис ЭП (один пароль на пакет): ПЭП по умолчанию,
+        // УНЭП/УКЭП — если выбрано; каждая подпись пишется в журнал document_signatures.
         $pass = (string) $this->input('password');
-        $hash = (string) Database::scalar('SELECT password_hash FROM users WHERE id=?', [$uid]);
-        if (!password_verify($pass, $hash)) { flash('Неверный пароль — подпись отклонена.', 'error'); $this->redirect('/memos/batch/' . $batchId); }
+        $type = strtoupper((string) ($this->input('sign_type') ?: 'PEP'));
+        if (!in_array($type, ['PEP', 'UNEP', 'UKEP'], true)) { $type = 'PEP'; }
         $roles = Auth::roles();
         $isDir = !empty($roles['director']) || Auth::isAdmin();
         $isDep = !empty($roles['deputy_director']) || Auth::isAdmin();
-        $secret = (string) Settings::get('sign_secret', 'uchet');
         $signed = 0;
         foreach ($memos as $memo) {
             $mid = (int) $memo['id'];
-            $now = date('Y-m-d H:i:s');
-            $sig = substr(hash_hmac('sha256', $mid . '|' . $uid . '|' . $now, $secret), 0, 24);
+            $payload = json_encode(['memo' => $mid, 'period' => $memo['period'], 'dept' => $memo['department_id'], 'source' => $memo['source_id']], JSON_UNESCAPED_UNICODE);
+            $d = \App\Services\SignService::authAndSign('stimulus_memo', $mid, $uid, $type, $pass, $payload);
+            if (!$d['ok']) { flash('Подпись отклонена: ' . $d['error'] . ($signed ? " (успело подписаться: {$signed})" : ''), 'error'); $this->redirect('/memos/batch/' . $batchId); }
+            $now = $d['signed_at']; $sig = $d['sign_hash']; $stype = $d['sign_type'];
             $direct = $memo['direct_tier'] ?? null;
             $num = $memo['number'] ?: self::nextNumber();
             if ($direct === 'director' && $isDir) {
                 Database::run('UPDATE stimulus_memos SET status=?, number=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=? WHERE id=?',
-                    ['approved', $num, $uid, 'PEP', $now, $sig, $mid]);
+                    ['approved', $num, $uid, $stype, $now, $sig, $mid]);
                 foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='accountant'") as $acc) {
                     NotificationService::create((int) $acc['id'], 'Стимул назначен директором', "Директор назначил стимул напрямую (№{$num}).");
                 }
             } elseif ($direct === 'deputy' && $isDep) {
                 Database::run('UPDATE stimulus_memos SET status=?, number=?, deputy_id=?, deputy_sign_type=?, deputy_signed_at=?, deputy_sign_hash=? WHERE id=?',
-                    ['deputy_signed', $num, $uid, 'PEP', $now, $sig, $mid]);
+                    ['deputy_signed', $num, $uid, $stype, $now, $sig, $mid]);
                 foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='director'") as $dir) {
                     NotificationService::create((int) $dir['id'], 'Служебка на утверждение директором', "Зам назначил стимул напрямую (№{$num}), ожидает вашего утверждения.");
                 }
             } else {
                 // Обычный маршрут: инициатор подписывает → head_signed → курирующему заму отдела.
                 Database::run('UPDATE stimulus_memos SET status=?, number=?, head_id=?, head_sign_type=?, head_signed_at=?, head_sign_hash=? WHERE id=?',
-                    ['head_signed', $num, $uid, 'PEP', $now, $sig, $mid]);
+                    ['head_signed', $num, $uid, $stype, $now, $sig, $mid]);
                 if ($memo['curator_id']) {
                     NotificationService::create((int) $memo['curator_id'], 'Служебка на утверждение', "Поступила служебка о стимуле №{$num} на ваше утверждение.");
                 }
             }
+            \App\Services\SignService::recordSignature('stimulus_memo', $mid, $uid, $d);
             $signed++;
         }
         flash("Подписано как инициатор: {$signed} служебок(и). Каждая направлена курирующему заму своего отдела.");

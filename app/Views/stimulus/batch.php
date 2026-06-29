@@ -20,7 +20,14 @@ $stClass = ['draft'=>'','head_signed'=>'st-wait','deputy_signed'=>'st-wait','app
         <p class="muted" style="margin:0 0 8px">Одна подпись применится ко всем черновикам пакета (<?= (int)$draftMine ?>) — каждая служебка уйдёт курирующему заму своего отдела.</p>
         <form method="post" action="/memos/batch/<?= (int)$batchId ?>/sign" class="form-inline" style="align-items:flex-end;gap:10px">
             <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
-            <label>Ваш пароль<input type="password" name="password" required></label>
+            <label>Вид подписи
+                <select name="sign_type">
+                    <option value="PEP">Простая ЭП</option>
+                    <option value="UNEP">УНЭП</option>
+                    <option value="UKEP">УКЭП</option>
+                </select>
+            </label>
+            <label>Ваш пароль <span class="muted" style="font-size:.8rem">(для УКЭП — пароль сервиса)</span><input type="password" name="password" required></label>
             <button class="btn btn-primary">🖋 Подписать все как инициатор</button>
         </form>
     </div>
