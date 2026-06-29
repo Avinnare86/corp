@@ -670,7 +670,10 @@ body.force-desktop .panel{overflow-x:auto}
   .flt label{width:100%}
   .flt input,
   .flt select,
-  .flt .btn{width:100%;box-sizing:border-box;justify-content:center;min-height:40px}
+  .flt .btn{width:100%;min-width:0;max-width:100%;box-sizing:border-box;justify-content:center;min-height:40px}
+  /* iOS Safari: у input[type=date] своя «родная» ширина (вылезает за экран) — сбрасываем нативный вид */
+  input[type=date],input[type=month]{-webkit-appearance:none;appearance:none;min-width:0;max-width:100%;box-sizing:border-box}
+  .form-inline input,.form-inline select{max-width:100%;box-sizing:border-box}
 
   /* Карточный заголовок: первая ячейка строки — крупная, без подписи, в одну строку */
   body:not(.force-desktop) .tbl-cards.q-card td:first-child{
@@ -701,8 +704,9 @@ body.force-desktop .panel{overflow-x:auto}
   body:not(.force-desktop) .q-queue .review-form .comment-input,
   body:not(.force-desktop) .q-queue .review-form .btn{width:100%;min-width:0;box-sizing:border-box;justify-content:center}
 
-  /* Отдельная кнопка действия (Завершить проверку…) — во всю ширину, текст переносится */
-  body:not(.force-desktop) .btn-block{display:flex;width:100%;box-sizing:border-box;justify-content:center;
+  /* Отдельная кнопка действия (Завершить проверку…, длинные кнопки) — во всю ширину, текст
+     переносится. Без гейта force-desktop: кнопка не должна вылезать ни в каком режиме. */
+  .btn-block{display:flex;width:100%;box-sizing:border-box;justify-content:center;
     white-space:normal;text-align:center;line-height:1.25}
   /* Кнопка-ссылка ⤓ Excel и т.п. в шапке отчёта — во всю ширину уже покрыто .flt */
 }

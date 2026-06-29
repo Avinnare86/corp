@@ -16,7 +16,7 @@
     <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
         <form method="post" action="/inspect/generate-all" style="margin:0">
             <?= csrf_field() ?>
-            <button type="submit" class="btn" <?= $pendingCnt ? '' : 'disabled' ?>>
+            <button type="submit" class="btn btn-block" <?= $pendingCnt ? '' : 'disabled' ?>>
                 Сформировать выборку по всем непроверенным датам<?= $pendingCnt ? ' (' . $pendingCnt . ')' : '' ?>
             </button>
         </form>
@@ -36,7 +36,7 @@
     </div>
 
     <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
-        <a class="btn" href="/inspect/manual">+ Ручная выборка анкет на контроль (вне даты)</a>
+        <a class="btn btn-block" href="/inspect/manual">+ Ручная выборка анкет на контроль (вне даты)</a>
         <p class="muted" style="margin:6px 0 0">Выбрать конкретные проверенные анкеты вручную — отрабатываются как обычная выборка (вердикт, штраф, повторная проверка).</p>
     </div>
 </section>
