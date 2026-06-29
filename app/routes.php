@@ -66,6 +66,10 @@ $router->get('/notifications',            [NotificationController::class, 'index
 $router->post('/notifications/{id}/read', [NotificationController::class, 'markRead']);
 
 // --- Менеджер проекта ---
+// Динамический коэффициент тарифа проверки анкет (менеджер анкет — окно; админ — любой день)
+$router->get('/tariff-coeff',             [\App\Controllers\TariffCoeffController::class, 'index']);
+$router->post('/tariff-coeff/save',       [\App\Controllers\TariffCoeffController::class, 'save']);
+
 $router->get('/manager',                  [ManagerController::class, 'index']);
 $router->get('/manager/report',           [ManagerController::class, 'report']);
 $router->get('/manager/report/export',    [ManagerController::class, 'reportExport']);

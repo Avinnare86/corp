@@ -107,7 +107,7 @@ class SamplingService
      * Анкеты, где ошибка УЖЕ найдена (отправлены на доработку при проверке), в выборку не попадают —
      * контроль нужен для не помеченных проблемными.
      */
-    public static function manualCandidates(string $from, string $to, ?int $empId, string $country, int $limit = 500): array
+    public static function manualCandidates(string $from, string $to, ?int $empId, string $country, bool $excludeListed = true, bool $excludeInspected = true, int $limit = 500): array
     {
         $where = "ai.checked_at IS NOT NULL AND ai.assigned_to IS NOT NULL AND u.role = 'employee'
                   AND ai.comment_id IS NULL AND NOT EXISTS(SELECT 1 FROM item_comments ic WHERE ic.item_id = ai.id)";
@@ -116,6 +116,13 @@ class SamplingService
         if ($to !== '')      { $where .= ' AND ai.checked_at <= ?'; $p[] = $to . ' 23:59:59'; }
         if ($empId)          { $where .= ' AND ai.assigned_to = ?'; $p[] = $empId; }
         if ($country !== '') { $where .= ' AND ai.country_code = ?'; $p[] = $country; }
+        // Исключить уже включённые в любой список на контроль (есть запись inspections);
+        // либо мягче — только уже проконтролированные (с вердиктом контролёра, reviewed_at).
+        if ($excludeListed) {
+            $where .= ' AND NOT EXISTS(SELECT 1 FROM inspections i WHERE i.dossier_id = ai.id)';
+        } elseif ($excludeInspected) {
+            $where .= ' AND NOT EXISTS(SELECT 1 FROM inspections i WHERE i.dossier_id = ai.id AND i.reviewed_at IS NOT NULL)';
+        }
         return Database::all(
             "SELECT ai.id, ai.reg_number, ai.country_code, substr(ai.checked_at,1,10) AS checked_day,
                     u.full_name AS employee_name,

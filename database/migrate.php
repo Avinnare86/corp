@@ -65,6 +65,14 @@ $tables['price_groups'] = "CREATE TABLE IF NOT EXISTS price_groups (
     title    VARCHAR(100) NOT NULL DEFAULT '',
     price    $MONEY NOT NULL DEFAULT 0
 ) $ENGINE";
+// Дневной повышающий коэффициент к тарифу проверки анкет (1.0–2.0): эффективная цена анкеты
+// = базовый тариф страны × коэффициент дня проверки. Ставит менеджер анкет (окно) / админ (любой день).
+$tables['tariff_day_coeff'] = "CREATE TABLE IF NOT EXISTS tariff_day_coeff (
+    work_date   DATE NOT NULL PRIMARY KEY,
+    coefficient $MONEY NOT NULL DEFAULT 1,
+    set_by      INT NULL,
+    set_at      TIMESTAMP DEFAULT $NOW
+) $ENGINE";
 
 $tables['timesheets'] = "CREATE TABLE IF NOT EXISTS timesheets (
     id $ID,
@@ -1147,6 +1155,14 @@ foreach (['fingerprint' => "VARCHAR(120) NOT NULL DEFAULT ''", 'source' => "VARC
     if (!columnExists('user_certificates', $col)) {
         $pdo->exec($ddlFix("ALTER TABLE user_certificates ADD COLUMN $col $ddl"));
         echo "OK  колонка user_certificates.$col добавлена\n";
+    }
+}
+// Погашение подписи в журнале при откате (админ снял подпись/утверждение): запись не удаляется,
+// а помечается voided_at/voided_by — для целостного аудита.
+foreach (['voided_at' => 'TIMESTAMP NULL', 'voided_by' => 'INT NULL'] as $col => $ddl) {
+    if (!columnExists('document_signatures', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE document_signatures ADD COLUMN $col $ddl"));
+        echo "OK  колонка document_signatures.$col добавлена\n";
     }
 }
 // Индексы новых таблиц (подписи документов, график отпусков, командировки).

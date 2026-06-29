@@ -3,6 +3,7 @@
 <p class="muted" style="margin-top:0">Выберите проверенные анкеты для контроля <strong>вне привязки к дате</strong>. После создания выборка отрабатывается как обычная: вердикт контролёра, штраф за ошибку, повторная проверка браковки.</p>
 
 <form method="get" action="/inspect/manual" class="panel flt" style="margin-bottom:14px">
+    <input type="hidden" name="applied" value="1">
     <label>С<br><input type="date" name="from" value="<?= e($from) ?>"></label>
     <label>По<br><input type="date" name="to" value="<?= e($to) ?>"></label>
     <label>Специалист<br>
@@ -21,7 +22,22 @@
             <?php endforeach; ?>
         </select>
     </label>
-    <button class="btn primary" type="submit">Показать</button>
+    <label class="chk" style="align-self:flex-end"><input type="checkbox" name="x_listed" value="1" <?= !empty($exclListed) ? 'checked' : '' ?>> без включённых в другие списки на контроль</label>
+    <label class="chk" style="align-self:flex-end"><input type="checkbox" name="x_inspected" value="1" <?= !empty($exclInspected) ? 'checked' : '' ?>> без уже проверенных (с вердиктом)</label>
+    <button class="btn primary" type="submit" style="align-self:flex-end">Показать</button>
+</form>
+
+<form method="post" action="/inspect/manual" class="panel flt" style="margin-bottom:14px;align-items:flex-end"
+      onsubmit="return confirm('Сформировать выборку из случайных N% анкет по текущему фильтру?')">
+    <?= csrf_field() ?>
+    <input type="hidden" name="mode" value="percent">
+    <input type="hidden" name="from" value="<?= e($from) ?>"><input type="hidden" name="to" value="<?= e($to) ?>">
+    <input type="hidden" name="emp" value="<?= (int) $emp ?>"><input type="hidden" name="country" value="<?= e($country) ?>">
+    <?php if (!empty($exclListed)): ?><input type="hidden" name="x_listed" value="1"><?php endif; ?>
+    <?php if (!empty($exclInspected)): ?><input type="hidden" name="x_inspected" value="1"><?php endif; ?>
+    <label>Процент от выборки<br><input type="number" name="pct" value="10" min="1" max="100" style="width:90px"> %</label>
+    <label class="grow">Название<br><input type="text" name="title" placeholder="напр. Случайный контроль 10%" style="width:100%;box-sizing:border-box"></label>
+    <button class="btn primary" type="submit">Сформировать N% по фильтру (<?= count($cands) ?> найдено)</button>
 </form>
 
 <form method="post" action="/inspect/manual">

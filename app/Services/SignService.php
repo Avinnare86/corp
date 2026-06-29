@@ -139,12 +139,49 @@ class SignService
         return null;
     }
 
-    /** Реквизиты последней подписи документа (для отображения штампа). */
+    /** Реквизиты последней ДЕЙСТВУЮЩЕЙ (не погашенной) подписи документа — для отображения штампа. */
     public static function lastSignature(string $entityType, int $entityId): ?array
     {
         return \App\Core\Database::one(
-            'SELECT * FROM document_signatures WHERE entity_type=? AND entity_id=? ORDER BY id DESC LIMIT 1',
+            'SELECT * FROM document_signatures WHERE entity_type=? AND entity_id=? AND voided_at IS NULL ORDER BY id DESC LIMIT 1',
             [$entityType, $entityId]);
+    }
+
+    /**
+     * Погасить (аннулировать) подписи документа при откате администратором: записи в журнале
+     * не удаляются, а помечаются voided_at/voided_by — для целостного аудита. Возвращает число
+     * погашенных подписей. Вызывать при снятии подписи/утверждения (revert).
+     */
+    public static function revoke(string $entityType, int $entityId, int $byUserId, string $reason = ''): int
+    {
+        $n = (int) \App\Core\Database::scalar(
+            'SELECT COUNT(*) FROM document_signatures WHERE entity_type=? AND entity_id=? AND voided_at IS NULL',
+            [$entityType, $entityId]);
+        if ($n > 0) {
+            \App\Core\Database::run(
+                'UPDATE document_signatures SET voided_at=?, voided_by=? WHERE entity_type=? AND entity_id=? AND voided_at IS NULL',
+                [date('Y-m-d H:i:s'), $byUserId, $entityType, $entityId]);
+            \App\Services\Audit::log('signature.revoke', 'Аннулирование подписи: ' . $entityType . ' #' . $entityId,
+                ['entity' => $entityType, 'id' => $entityId, 'count' => $n, 'reason' => $reason]);
+        }
+        return $n;
+    }
+
+    /**
+     * Погасить только ПОСЛЕДНЮЮ действующую подпись документа (для пошагового отката
+     * многоступенчатого маршрута: снять подпись текущего этапа, оставив предыдущие).
+     */
+    public static function revokeLast(string $entityType, int $entityId, int $byUserId): bool
+    {
+        $row = \App\Core\Database::one(
+            'SELECT id FROM document_signatures WHERE entity_type=? AND entity_id=? AND voided_at IS NULL ORDER BY id DESC LIMIT 1',
+            [$entityType, $entityId]);
+        if (!$row) { return false; }
+        \App\Core\Database::run('UPDATE document_signatures SET voided_at=?, voided_by=? WHERE id=?',
+            [date('Y-m-d H:i:s'), $byUserId, (int) $row['id']]);
+        \App\Services\Audit::log('signature.revoke', 'Аннулирование подписи (этап): ' . $entityType . ' #' . $entityId,
+            ['entity' => $entityType, 'id' => $entityId]);
+        return true;
     }
 
     /**

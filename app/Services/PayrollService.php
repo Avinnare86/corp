@@ -82,17 +82,20 @@ class PayrollService
             }
         } else {
             // Классика: все проверенные анкеты по тарифу страны (неизвестная = 70), свод по тарифу.
+            // Группируем по стране И ДНЮ проверки — эффективная цена = базовый тариф × дневной коэффициент.
             $countryRows = Database::all(
-                "SELECT country_code, COUNT(*) AS cnt
+                "SELECT country_code, CAST(substr(checked_at,9,2) AS INTEGER) AS day, COUNT(*) AS cnt
                    FROM assignment_items
                   WHERE assigned_to = ? AND checked_at IS NOT NULL AND substr(checked_at,1,7) = ?
-                  GROUP BY country_code",
+                  GROUP BY country_code, day",
                 [$employeeId, $period]
             );
             $byTier = []; $anketaCount = 0; $anketaSum = 0.0;
             foreach ($countryRows as $r) {
                 $cnt = (int) $r['cnt'];
-                $price = \App\Services\Tariff::priceForCountry($r['country_code']);
+                $day = max(1, min(31, (int) $r['day']));
+                $coeff = \App\Services\Tariff::dayCoeff(sprintf('%s-%02d', $period, $day));
+                $price = round(\App\Services\Tariff::priceForCountry($r['country_code']) * $coeff, 2);
                 $anketaCount += $cnt;
                 $key = (string) $price;
                 if (!isset($byTier[$key])) { $byTier[$key] = ['price' => $price, 'count' => 0, 'subtotal' => 0.0]; }
@@ -571,11 +574,14 @@ class PayrollService
     {
         $sum = 0.0;
         $rows = Database::all(
-            "SELECT country_code, COUNT(*) cnt FROM assignment_items
+            "SELECT country_code, CAST(substr(checked_at,9,2) AS INTEGER) AS day, COUNT(*) cnt FROM assignment_items
               WHERE assigned_to=? AND checked_at IS NOT NULL AND substr(checked_at,1,7)=?
                 AND CAST(substr(checked_at,9,2) AS INTEGER) BETWEEN ? AND ?
-              GROUP BY country_code", [$employeeId, $period, $dayFrom, $dayTo]);
-        foreach ($rows as $r) { $sum += (int)$r['cnt'] * \App\Services\Tariff::priceForCountry($r['country_code']); }
+              GROUP BY country_code, day", [$employeeId, $period, $dayFrom, $dayTo]);
+        foreach ($rows as $r) {
+            $coeff = \App\Services\Tariff::dayCoeff(sprintf('%s-%02d', $period, max(1, min(31, (int) $r['day']))));
+            $sum += (int) $r['cnt'] * \App\Services\Tariff::priceForCountry($r['country_code']) * $coeff;
+        }
         $sum += self::opsSum($employeeId, $period, $dayFrom, $dayTo);
         return round($sum, 2);
     }
@@ -604,11 +610,14 @@ class PayrollService
         } else {
             $anketa = 0.0;
             $rows = Database::all(
-                "SELECT country_code, COUNT(*) cnt FROM assignment_items
+                "SELECT country_code, CAST(substr(checked_at,9,2) AS INTEGER) AS day, COUNT(*) cnt FROM assignment_items
                   WHERE assigned_to=? AND checked_at IS NOT NULL AND substr(checked_at,1,7)=?
                     AND CAST(substr(checked_at,9,2) AS INTEGER) BETWEEN ? AND ?
-                  GROUP BY country_code", [$employeeId, $period, $dayFrom, $dayTo]);
-            foreach ($rows as $r) { $anketa += (int) $r['cnt'] * \App\Services\Tariff::priceForCountry($r['country_code']); }
+                  GROUP BY country_code, day", [$employeeId, $period, $dayFrom, $dayTo]);
+            foreach ($rows as $r) {
+                $coeff = \App\Services\Tariff::dayCoeff(sprintf('%s-%02d', $period, max(1, min(31, (int) $r['day']))));
+                $anketa += (int) $r['cnt'] * \App\Services\Tariff::priceForCountry($r['country_code']) * $coeff;
+            }
         }
         $ops = self::opsSum($employeeId, $period, $dayFrom, $dayTo);
         return ['anketa' => round($anketa, 2), 'ops' => round($ops, 2), 'total' => round($anketa + $ops, 2)];

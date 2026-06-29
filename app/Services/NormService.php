@@ -65,7 +65,8 @@ class NormService
             $day = (int) $r['day']; if ($day < 1) { $day = 1; } if ($day > 31) { $day = 31; }
             $byDay[$day]++;
             if (!$hasNorm || $i < $covered) { continue; } // покрыто окладом
-            $price = $priceMap[mb_strtoupper((string) $r['country_code'], 'UTF-8')] ?? $defaultPrice;
+            $base = $priceMap[mb_strtoupper((string) $r['country_code'], 'UTF-8')] ?? $defaultPrice;
+            $price = round($base * \App\Services\Tariff::dayCoeff(sprintf('%s-%02d', $period, $day)), 2); // × дневной коэффициент тарифа
             $aboveSum += $price; $aboveCount++;
             if ($day <= 25) { $aboveTo25 += $price; }
             $aboveItems[] = ['day' => $day, 'price' => $price];

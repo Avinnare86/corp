@@ -51,10 +51,10 @@ class BudgetController extends Controller
             $fact = 0.0;
             foreach ($emps as $e) {
                 $byCountry = Database::all(
-                    "SELECT country_code, COUNT(*) cnt FROM assignment_items
-                      WHERE assigned_to=? AND checked_at IS NOT NULL AND substr(checked_at,1,4)=? GROUP BY country_code",
+                    "SELECT country_code, substr(checked_at,1,10) AS d, COUNT(*) cnt FROM assignment_items
+                      WHERE assigned_to=? AND checked_at IS NOT NULL AND substr(checked_at,1,4)=? GROUP BY country_code, d",
                     [$e['id'], (string) $year]);
-                foreach ($byCountry as $c) { $fact += (int) $c['cnt'] * Tariff::priceForCountry($c['country_code']); }
+                foreach ($byCountry as $c) { $fact += (int) $c['cnt'] * Tariff::priceForCountry($c['country_code']) * Tariff::dayCoeff((string) $c['d']); }
                 $fact += (float) Database::scalar(
                     "SELECT COALESCE(SUM(pw.quantity*o.unit_price),0) FROM piecework pw JOIN operations o ON o.id=pw.operation_id
                       WHERE pw.employee_id=? AND substr(pw.work_date,1,4)=?", [$e['id'], (string) $year]);

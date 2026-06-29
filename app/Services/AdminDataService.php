@@ -2,6 +2,7 @@
 namespace App\Services;
 
 use App\Core\Database;
+use App\Core\Auth;
 use App\Controllers\VisaController;
 use App\Controllers\TabelController;
 
@@ -26,7 +27,11 @@ class AdminDataService
             'assignment_list' => 'Загрузки анкет (списки)',
             'visa_opis'       => 'Описи / визовые указания',
             'tabel'           => 'Табеля (эл. табель)',
+            'shift_grafik'    => 'Графики сменности (2/2)',
             'memo'            => 'Служебки о стимуле',
+            'trip'            => 'Командировки (заявки)',
+            'vacation_schedule' => 'Графики отпусков',
+            'order'           => 'Поручения',
             'document'        => 'Документы СЭД',
             'user'            => 'Сотрудники',
         ];
@@ -193,6 +198,82 @@ class AdminDataService
                     ];
                 }, $rows);
 
+            case 'shift_grafik':
+                $w = $q !== '' ? 'WHERE LOWER(g.period) LIKE ?' : '';
+                $p = $q !== '' ? [$like] : [];
+                $rows = Database::all(
+                    "SELECT g.id, g.period, g.revision, g.signer_name, d.name AS dept, g.archived_at
+                       FROM shift_grafiks g LEFT JOIN departments d ON d.id=g.department_id $w ORDER BY g.id DESC LIMIT 200", $p);
+                return array_map(fn($r) => [
+                    'id' => (int) $r['id'],
+                    'title' => $r['period'] . ' · рев.' . (int) $r['revision'],
+                    'sub' => ($r['dept'] ?: '—') . ' · ' . ($r['signer_name'] ?: ''),
+                    'status' => $r['archived_at'] ? 'В архиве' : 'Подписан',
+                    'can_delete' => true, 'can_revert' => false,
+                    'revert_hint' => 'график сменности — снимок на момент подписи; для отмены удалите ревизию',
+                ], $rows);
+
+            case 'trip':
+                $w = $q !== '' ? 'WHERE LOWER(t.number) LIKE ? OR LOWER(t.destination) LIKE ?' : '';
+                $p = $q !== '' ? [$like, $like] : [];
+                $rows = Database::all(
+                    "SELECT t.id, t.number, t.destination, t.status, t.fact_at, u.full_name AS emp
+                       FROM trip_requests t LEFT JOIN users u ON u.id=t.employee_id $w ORDER BY t.id DESC LIMIT 200", $p);
+                $tl = \App\Services\TripService::STATUS;
+                return array_map(function ($r) use ($tl) {
+                    $st = (string) $r['status'];
+                    $hint = !empty($r['fact_at']) ? 'снять факт → план' : ($st === 'approved' ? 'отменить утверждение (вернуть бюджет)' : ($st === 'on_approval' ? 'отозвать подачу → черновик' : ''));
+                    return [
+                        'id' => (int) $r['id'],
+                        'title' => ($r['number'] ?: '#' . $r['id']) . ' · ' . $r['destination'],
+                        'sub' => (string) ($r['emp'] ?? ''),
+                        'status' => ($tl[$st] ?? $st) . (!empty($r['fact_at']) ? ' · факт' : ''),
+                        'can_delete' => true,
+                        'can_revert' => !empty($r['fact_at']) || in_array($st, ['approved', 'on_approval'], true),
+                        'revert_hint' => $hint,
+                    ];
+                }, $rows);
+
+            case 'vacation_schedule':
+                $w = $q !== '' ? 'WHERE CAST(s.year AS CHAR) LIKE ?' : '';
+                if (Database::driver() !== 'mysql') { $w = $q !== '' ? "WHERE CAST(s.year AS TEXT) LIKE ?" : ''; }
+                $p = $q !== '' ? [$like] : [];
+                $rows = Database::all(
+                    "SELECT s.id, s.year, s.revision, s.status, d.name AS dept, s.archived_at
+                       FROM vacation_schedules s LEFT JOIN departments d ON d.id=s.department_id $w ORDER BY s.id DESC LIMIT 200", $p);
+                return array_map(function ($r) {
+                    $signed = $r['status'] === 'signed';
+                    return [
+                        'id' => (int) $r['id'],
+                        'title' => $r['year'] . ' · ' . ((int) $r['revision'] === 0 ? 'основной' : 'корр.' . (int) $r['revision']),
+                        'sub' => ($r['dept'] ?: 'организация') . ($r['archived_at'] ? ' · архив' : ''),
+                        'status' => $signed ? 'Подписан' : 'Черновик',
+                        'can_delete' => true,
+                        'can_revert' => $signed,
+                        'revert_hint' => $signed ? 'снять подпись → черновик (погасить в журнале)' : '',
+                    ];
+                }, $rows);
+
+            case 'order':
+                $w = $q !== '' ? 'WHERE LOWER(o.title) LIKE ?' : '';
+                $p = $q !== '' ? [$like] : [];
+                $rows = Database::all(
+                    "SELECT o.id, o.title, o.status, u.full_name AS assignee
+                       FROM orders o LEFT JOIN users u ON u.id=o.assignee_id $w ORDER BY o.id DESC LIMIT 200", $p);
+                $ol = ['new' => 'Новое', 'work' => 'В работе', 'review' => 'На проверке', 'done' => 'Выполнено', 'canceled' => 'Отменено'];
+                return array_map(function ($r) use ($ol) {
+                    $st = (string) $r['status'];
+                    return [
+                        'id' => (int) $r['id'],
+                        'title' => '#' . (int) $r['id'] . ' · ' . mb_substr((string) $r['title'], 0, 60),
+                        'sub' => (string) ($r['assignee'] ?? ''),
+                        'status' => $ol[$st] ?? $st,
+                        'can_delete' => true,
+                        'can_revert' => $st !== 'new',
+                        'revert_hint' => 'откат статуса на шаг назад',
+                    ];
+                }, $rows);
+
             case 'user':
                 $w = $q !== '' ? 'WHERE LOWER(full_name) LIKE ? OR LOWER(login) LIKE ?' : '';
                 $p = $q !== '' ? [$like, $like] : [];
@@ -286,6 +367,7 @@ class AdminDataService
                 $month = substr((string) $t['period'], 0, 7);
                 $pdo->beginTransaction();
                 Database::run('DELETE FROM tabel_rows WHERE tabel_id=?', [$id]);
+                self::runSafe('DELETE FROM document_signatures WHERE entity_type=? AND entity_id=?', ['tabel', $id]);
                 Database::run('DELETE FROM tabels WHERE id=?', [$id]);
                 $pdo->commit();
                 if ($wasSigned) { TabelController::syncMonth($month); }
@@ -295,9 +377,12 @@ class AdminDataService
                 if (!Database::scalar('SELECT 1 FROM stimulus_memos WHERE id=?', [$id])) { return self::err('Служебка не найдена.'); }
                 $pdo->beginTransaction();
                 Database::run('DELETE FROM stimulus_memo_lines WHERE memo_id=?', [$id]);
+                self::runSafe('DELETE FROM stimulus_overrides WHERE memo_line_id IN (SELECT id FROM stimulus_memo_lines WHERE memo_id=?)', [$id]);
+                self::runSafe('DELETE FROM stimulus_stamps WHERE memo_id=?', [$id]);
+                self::runSafe('DELETE FROM document_signatures WHERE entity_type=? AND entity_id=?', ['stimulus_memo', $id]);
                 Database::run('DELETE FROM stimulus_memos WHERE id=?', [$id]);
                 $pdo->commit();
-                return self::ok('Служебка о стимуле удалена (строки выплат сняты — ЗП пересчитается).');
+                return self::ok('Служебка о стимуле удалена (строки выплат, штампы и подписи сняты — ЗП пересчитается).');
 
             case 'document':
                 if (!Database::scalar('SELECT 1 FROM documents WHERE id=?', [$id])) { return self::err('Документ не найден.'); }
@@ -308,9 +393,49 @@ class AdminDataService
                 self::runSafe('DELETE FROM doc_files WHERE document_id=?', [$id]);
                 self::runSafe('DELETE FROM doc_history WHERE document_id=?', [$id]);
                 self::runSafe('DELETE FROM doc_number_reservations WHERE doc_id=?', [$id]); // освободить бронь
+                self::runSafe('DELETE FROM document_signatures WHERE entity_type=? AND entity_id=?', ['document', $id]);
                 Database::run('DELETE FROM documents WHERE id=?', [$id]);
                 $pdo->commit();
                 return self::ok('Документ СЭД удалён (маршрут, файлы-метаданные, история и поручения по нему сняты; файлы на диске не удаляются).');
+
+            case 'shift_grafik':
+                if (!Database::scalar('SELECT 1 FROM shift_grafiks WHERE id=?', [$id])) { return self::err('График сменности не найден.'); }
+                $pdo->beginTransaction();
+                self::runSafe('DELETE FROM document_signatures WHERE entity_type=? AND entity_id=?', ['shift_grafik', $id]);
+                Database::run('DELETE FROM shift_grafiks WHERE id=?', [$id]);
+                $pdo->commit();
+                return self::ok('График сменности (ревизия) удалён. Актуальной становится предыдущая ревизия, если есть.');
+
+            case 'trip':
+                if (!Database::scalar('SELECT 1 FROM trip_requests WHERE id=?', [$id])) { return self::err('Заявка на командировку не найдена.'); }
+                $pdo->beginTransaction();
+                Database::run('DELETE FROM trip_segments WHERE trip_id=?', [$id]);
+                Database::run('DELETE FROM trip_extra_expenses WHERE trip_id=?', [$id]);
+                Database::run('DELETE FROM trip_attachments WHERE trip_id=?', [$id]);
+                self::runSafe('DELETE FROM document_signatures WHERE entity_type=? AND entity_id=?', ['trip_request', $id]);
+                Database::run('DELETE FROM trip_requests WHERE id=?', [$id]);
+                $pdo->commit();
+                return self::ok('Заявка на командировку удалена (сегменты, доп.расходы, вложения и подписи сняты; бюджет освобождён).');
+
+            case 'vacation_schedule':
+                if (!Database::scalar('SELECT 1 FROM vacation_schedules WHERE id=?', [$id])) { return self::err('График отпусков не найден.'); }
+                $pdo->beginTransaction();
+                Database::run('DELETE FROM vacation_schedule_rows WHERE schedule_id=?', [$id]);
+                self::runSafe('DELETE FROM document_signatures WHERE entity_type=? AND entity_id=?', ['vacation_schedule', $id]);
+                Database::run('DELETE FROM vacation_schedules WHERE id=?', [$id]);
+                $pdo->commit();
+                return self::ok('График отпусков удалён (периоды и подписи сняты).');
+
+            case 'order':
+                if (!Database::scalar('SELECT 1 FROM orders WHERE id=?', [$id])) { return self::err('Поручение не найдено.'); }
+                $pdo->beginTransaction();
+                self::runSafe('DELETE FROM order_events WHERE order_id=?', [$id]);
+                self::runSafe('DELETE FROM order_reports WHERE order_id=?', [$id]);
+                self::runSafe('DELETE FROM order_coexecutors WHERE order_id=?', [$id]);
+                self::runSafe('DELETE FROM order_due_log WHERE order_id=?', [$id]);
+                Database::run('DELETE FROM orders WHERE id=?', [$id]);
+                $pdo->commit();
+                return self::ok('Поручение удалено (события, отчёты, соисполнители сняты).');
 
             case 'user':
                 return self::deleteUser($id, $adminId);
@@ -420,14 +545,53 @@ class AdminDataService
                 if ($t['status'] !== 'signed') { return self::err('Табель не подписан — откатывать нечего.'); }
                 Database::run('UPDATE tabels SET status=?, signer_id=NULL, sign_type=NULL, signed_at=NULL, sign_hash=NULL, cert_serial=NULL WHERE id=?',
                     ['draft', $id]);
+                \App\Services\SignService::revokeLast('tabel', $id, (int) Auth::id());
                 TabelController::syncMonth(substr((string) $t['period'], 0, 7));
-                return self::ok('Подпись снята — табель снова черновик. Месячный табель пересчитан.');
+                return self::ok('Подпись снята — табель снова черновик. Месячный табель пересчитан, подпись погашена в журнале.');
 
             case 'memo':
                 return self::revertMemo($id);
 
             case 'document':
                 return self::revertDocument($id);
+
+            case 'trip':
+                $t = Database::one('SELECT * FROM trip_requests WHERE id=?', [$id]);
+                if (!$t) { return self::err('Заявка на командировку не найдена.'); }
+                if (!empty($t['fact_at'])) {
+                    Database::run('UPDATE trip_requests SET fact_per_diem=NULL, fact_lodging=NULL, fact_travel=NULL, fact_other=NULL, fact_at=NULL, fact_by=NULL WHERE id=?', [$id]);
+                    return self::ok('Факт снят — в бюджете командировок снова учитывается план.');
+                }
+                if ($t['status'] === 'approved') {
+                    Database::run("UPDATE trip_requests SET status='revision', director_id=NULL, director_sign_name='', director_sign_position='', director_sign_type=NULL, director_signed_at=NULL, director_sign_hash=NULL, director_cert=NULL WHERE id=?", [$id]);
+                    \App\Services\SignService::revokeLast('trip_request', $id, (int) Auth::id());
+                    return self::ok('Утверждение отменено — заявка на доработке, бюджет освобождён, подпись директора погашена.');
+                }
+                if ($t['status'] === 'on_approval') {
+                    Database::run("UPDATE trip_requests SET status='draft', submitted_at=NULL, author_sign_type=NULL, author_signed_at=NULL, author_sign_hash=NULL, author_cert=NULL WHERE id=?", [$id]);
+                    \App\Services\SignService::revokeLast('trip_request', $id, (int) Auth::id());
+                    return self::ok('Подача отозвана — заявка снова черновик, подпись автора погашена.');
+                }
+                return self::err('Заявка в черновике/на доработке — откатывать нечего.');
+
+            case 'vacation_schedule':
+                $s = Database::one('SELECT * FROM vacation_schedules WHERE id=?', [$id]);
+                if (!$s) { return self::err('График отпусков не найден.'); }
+                if ($s['status'] !== 'signed') { return self::err('График не подписан — откатывать нечего.'); }
+                Database::run("UPDATE vacation_schedules SET status='draft', signer_id=NULL, signer_name='', signer_position='', sign_type=NULL, signed_at=NULL, sign_hash='', cert_serial='', snapshot=NULL WHERE id=?", [$id]);
+                \App\Services\SignService::revoke('vacation_schedule', $id, (int) Auth::id());
+                return self::ok('Подпись графика отпусков снята — снова черновик (подпись погашена в журнале).');
+
+            case 'order':
+                $o = Database::one('SELECT * FROM orders WHERE id=?', [$id]);
+                if (!$o) { return self::err('Поручение не найдено.'); }
+                $map = ['done' => 'review', 'review' => 'work', 'work' => 'new', 'canceled' => 'new'];
+                $st = (string) $o['status'];
+                if (!isset($map[$st])) { return self::err('Поручение в статусе «Новое» — откатывать нечего.'); }
+                $new = $map[$st];
+                Database::run('UPDATE orders SET status=?' . ($st === 'done' ? ', done_at=NULL' : '') . ' WHERE id=?', [$new, $id]);
+                \App\Services\OrderService::event($id, 'reverted', 'статус: ' . $st . ' → ' . $new . ' (откат админом)');
+                return self::ok('Поручение откатано на шаг назад: ' . $st . ' → ' . $new . '.');
 
             case 'user':
                 $u = Database::one('SELECT id, is_active FROM users WHERE id=?', [$id]);
@@ -438,7 +602,8 @@ class AdminDataService
 
             case 'visa_batch':
             case 'assignment_list':
-                return self::err('У загрузки нет статуса для отката — используйте удаление.');
+            case 'shift_grafik':
+                return self::err('У этой записи нет статуса для отката — используйте удаление (для графика сменности — удалить ревизию).');
         }
         return self::err('Неизвестная сущность.');
     }
@@ -481,6 +646,10 @@ class AdminDataService
         $m = Database::one('SELECT * FROM stimulus_memos WHERE id=?', [$id]);
         if (!$m) { return self::err('Служебка не найдена.'); }
         $kind = $m['kind'] ?? 'staff';
+        // Снять последнюю действующую подпись в журнале для откатываемого этапа.
+        if (in_array($m['status'], ['approved', 'deputy_signed', 'head_signed'], true)) {
+            \App\Services\SignService::revokeLast('stimulus_memo', $id, (int) Auth::id());
+        }
         switch ($m['status']) {
             case 'approved':
                 if ($kind === 'mgmt') {
@@ -520,6 +689,8 @@ class AdminDataService
             if ($last) {
                 Database::run("UPDATE doc_approvers SET status='pending', comment=NULL, decided_at=NULL, on_behalf_of=NULL, sign_type=NULL, sign_hash=NULL WHERE id=?", [(int) $last['id']]);
                 Database::run("UPDATE documents SET status='on_approval', current_step=? WHERE id=?", [(int) $last['step_no'], $id]);
+                // если откатываемый этап был «подписание» — погасить последнюю подпись в журнале
+                if (($last['stage_type'] ?? '') === 'sign') { \App\Services\SignService::revokeLast('document', $id, (int) Auth::id()); }
             } else {
                 Database::run("UPDATE documents SET status='on_approval' WHERE id=?", [$id]);
             }

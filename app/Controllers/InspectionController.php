@@ -192,11 +192,17 @@ class InspectionController extends Controller
         $to = (string) $this->input('to', '');
         $emp = (int) $this->input('emp', 0);
         $country = (string) $this->input('country', '');
-        if ($from === '' && $to === '' && !$emp && $country === '') { $from = date('Y-m-d', strtotime('-14 days')); }
+        $applied = $this->input('applied') !== null;
+        // Чекбоксы: при отправке формы (applied) — по их наличию; на первом заходе — оба включены.
+        $exclListed = $applied ? ($this->input('x_listed') !== null) : true;
+        $exclInspected = $applied ? ($this->input('x_inspected') !== null) : true;
+        if (!$applied && $from === '' && $to === '' && !$emp && $country === '') { $from = date('Y-m-d', strtotime('-14 days')); }
+        $cands = SamplingService::manualCandidates($from, $to, $emp ?: null, $country, $exclListed, $exclInspected);
         $this->view('inspect/manual', [
             'title'     => 'Ручная выборка на контроль',
-            'cands'     => SamplingService::manualCandidates($from, $to, $emp ?: null, $country),
+            'cands'     => $cands,
             'from'      => $from, 'to' => $to, 'emp' => $emp, 'country' => $country,
+            'exclListed' => $exclListed, 'exclInspected' => $exclInspected,
             'employees' => Database::all("SELECT u.id, u.full_name FROM users u JOIN user_roles r ON r.user_id=u.id AND r.role_slug='anketa_worker' WHERE u.is_active=1 ORDER BY u.full_name"),
             'countries' => Database::all("SELECT ai.country_code AS code, c.name FROM assignment_items ai LEFT JOIN countries c ON c.code=ai.country_code WHERE ai.country_code IS NOT NULL AND ai.country_code<>'' GROUP BY ai.country_code, c.name ORDER BY c.name, ai.country_code"),
             'csrf'      => Auth::csrf(),
@@ -208,8 +214,23 @@ class InspectionController extends Controller
     {
         Auth::requireRole('controller', 'admin', 'manager');
         Auth::verifyCsrf();
-        $ids = array_map('intval', (array) ($_POST['pick'] ?? []));
-        [$batchId, $added] = SamplingService::createManualBatch((int) Auth::id(), (string) $this->input('title', ''), $ids);
+        $title = (string) $this->input('title', '');
+        if ($this->input('mode') === 'percent') {
+            // Случайные N% от отфильтрованных кандидатов (по текущему фильтру).
+            $pct = max(1, min(100, (int) $this->input('pct', 10)));
+            $cands = SamplingService::manualCandidates(
+                (string) $this->input('from', ''), (string) $this->input('to', ''),
+                (int) $this->input('emp', 0) ?: null, (string) $this->input('country', ''),
+                $this->input('x_listed') !== null, $this->input('x_inspected') !== null, 5000);
+            $total = count($cands);
+            shuffle($cands);
+            $ids = array_map(fn($c) => (int) $c['id'], array_slice($cands, 0, (int) ceil($total * $pct / 100)));
+            if ($title === '') { $title = $pct . '% от ' . $total . ' (по фильтру)'; }
+            if (!$ids) { flash('По текущему фильтру нет анкет для выборки.', 'error'); $this->redirect('/inspect/manual'); }
+        } else {
+            $ids = array_map('intval', (array) ($_POST['pick'] ?? []));
+        }
+        [$batchId, $added] = SamplingService::createManualBatch((int) Auth::id(), $title, $ids);
         if (!$batchId) {
             flash('Не выбрано ни одной анкеты (или все выбранные уже проходили контроль).', 'error');
             $this->redirect('/inspect/manual');
