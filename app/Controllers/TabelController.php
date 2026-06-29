@@ -432,6 +432,16 @@ class TabelController extends Controller
             if ($ex) { Database::run('UPDATE timesheets SET worked_days=?, norm_days=? WHERE id=?', [$tot, $norm, $ex]); }
             else { Database::insert('INSERT INTO timesheets (employee_id, period, norm_days, worked_days) VALUES (?,?,?,?)', [$empId, $month, $norm, $tot]); }
         }
+        // Если табель сотрудника за месяц удалён/откатан и больше не покрыт — обнуляем его
+        // отработанные дни (иначе остаётся старое значение и завышает пропорциональную ЗП).
+        $covered = array_map('intval', array_keys($byEmp));
+        if ($covered) {
+            $ph = implode(',', array_fill(0, count($covered), '?'));
+            Database::run("UPDATE timesheets SET worked_days=0 WHERE period=? AND employee_id NOT IN ($ph)",
+                array_merge([$month], $covered));
+        } else {
+            Database::run('UPDATE timesheets SET worked_days=0 WHERE period=?', [$month]);
+        }
     }
 
     /** Просмотр подписанного табеля: лист А4 со штампом ЭП (печать → PDF). */

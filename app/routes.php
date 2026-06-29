@@ -21,6 +21,7 @@ use App\Controllers\OrgController;
 use App\Controllers\OrderController;
 use App\Controllers\VacationController;
 use App\Controllers\VacationScheduleController;
+use App\Controllers\VacationCampaignController;
 use App\Controllers\TripController;
 use App\Controllers\TripFinanceController;
 use App\Controllers\BudgetController;
@@ -289,6 +290,31 @@ $router->post('/vacation-schedule/{id}/balance',     [VacationScheduleController
 $router->post('/vacation-schedule/{id}/sign',        [VacationScheduleController::class, 'sign']);
 $router->post('/vacation-schedule/{id}/archive',     [VacationScheduleController::class, 'archive']);
 $router->post('/vacation-schedule/{id}/delete',      [VacationScheduleController::class, 'delete']);
+
+// --- Кампания по отпускам (этапы: остатки → запреты → самозапись → подписание) ---
+$router->get('/vacation-campaign',                         [VacationCampaignController::class, 'index']);
+$router->post('/vacation-campaign/open',                   [VacationCampaignController::class, 'open']);
+$router->post('/vacation-campaign/approve-balances',       [VacationCampaignController::class, 'approveBalances']);
+$router->post('/vacation-campaign/advance',                [VacationCampaignController::class, 'advance']);
+$router->get('/vacation-campaign/balances',                [VacationCampaignController::class, 'balances']);
+$router->post('/vacation-campaign/save-balances',          [VacationCampaignController::class, 'saveBalances']);
+$router->get('/vacation-campaign/rules',                   [VacationCampaignController::class, 'rules']);
+$router->post('/vacation-campaign/save-dept-limits',       [VacationCampaignController::class, 'saveDeptLimits']);
+$router->post('/vacation-campaign/groups',                 [VacationCampaignController::class, 'storeGroup']);
+$router->post('/vacation-campaign/groups/{id}/delete',     [VacationCampaignController::class, 'deleteGroup']);
+$router->post('/vacation-campaign/groups/{id}/members',    [VacationCampaignController::class, 'addGroupMember']);
+$router->post('/vacation-campaign/groups/{id}/members/{empId}/remove', [VacationCampaignController::class, 'removeGroupMember']);
+$router->get('/vacation-campaign/blackouts',               [VacationCampaignController::class, 'blackouts']);
+$router->post('/vacation-campaign/blackouts',              [VacationCampaignController::class, 'addBlackout']);
+$router->post('/vacation-campaign/blackouts/{id}/delete',  [VacationCampaignController::class, 'deleteBlackout']);
+$router->get('/vacation-campaign/booking',                 [VacationCampaignController::class, 'myBooking']);
+$router->post('/vacation-campaign/picks',                  [VacationCampaignController::class, 'addPick']);
+$router->post('/vacation-campaign/picks/{id}/delete',      [VacationCampaignController::class, 'deletePick']);
+$router->get('/vacation-campaign/map',                     [VacationCampaignController::class, 'map']);
+$router->get('/vacation-campaign/memo/{deptId}',           [VacationCampaignController::class, 'memo']);
+$router->post('/vacation-campaign/memo/{deptId}/sign',     [VacationCampaignController::class, 'signMemo']);
+$router->post('/vacation-campaign/memo/{deptId}/reject',   [VacationCampaignController::class, 'rejectMemo']);
+$router->post('/vacation-campaign/memo/{deptId}/form-schedule', [VacationCampaignController::class, 'formSchedule']);
 
 // --- Командировки ---
 $router->get('/trips',                       [TripController::class, 'index']);

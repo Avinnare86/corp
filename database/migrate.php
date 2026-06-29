@@ -390,6 +390,62 @@ $tables['vacation_balances'] = "CREATE TABLE IF NOT EXISTS vacation_balances (
     UNIQUE (employee_id, year)
 ) $ENGINE";
 
+// ===== Кампания по отпускам (этапы: остатки → запретные периоды → самозапись → подписание) =====
+// Кампания года: общий этап сбора предложений. Питает документ vacation_schedules (формируют кадры).
+$tables['vacation_campaigns'] = "CREATE TABLE IF NOT EXISTS vacation_campaigns (
+    id $ID,
+    year                INT NOT NULL UNIQUE,
+    stage               VARCHAR(16) NOT NULL DEFAULT 'balances', -- balances|blackouts|booking|signing|closed
+    opened_by           INT NULL,
+    opened_at           TIMESTAMP DEFAULT $NOW,
+    balances_approved_at TIMESTAMP NULL,
+    balances_approved_by INT NULL,
+    note                VARCHAR(300) NULL
+) $ENGINE";
+// Самозапись сотрудника: предложенные периоды отпуска (несколько частей).
+$tables['vacation_picks'] = "CREATE TABLE IF NOT EXISTS vacation_picks (
+    id $ID,
+    year        INT NOT NULL,
+    employee_id INT NOT NULL,
+    start_date  DATE NOT NULL,
+    end_date    DATE NOT NULL,
+    days        INT NOT NULL DEFAULT 0,
+    note        VARCHAR(300) NULL,
+    created_by  INT NULL,
+    created_at  TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+// Лимит одновременно отдыхающих по отделу (для контроля наложения).
+$tables['vacation_dept_limits'] = "CREATE TABLE IF NOT EXISTS vacation_dept_limits (
+    department_id    INT NOT NULL PRIMARY KEY,
+    max_simultaneous INT NOT NULL DEFAULT 1
+) $ENGINE";
+// Группы непересечения: «не более N из набора одновременно в отпуске» (N=1 — только один).
+$tables['vacation_overlap_groups'] = "CREATE TABLE IF NOT EXISTS vacation_overlap_groups (
+    id $ID,
+    name             VARCHAR(150) NOT NULL,
+    max_simultaneous INT NOT NULL DEFAULT 1,
+    is_active        INT NOT NULL DEFAULT 1
+) $ENGINE";
+$tables['vacation_overlap_group_members'] = "CREATE TABLE IF NOT EXISTS vacation_overlap_group_members (
+    id $ID,
+    group_id    INT NOT NULL,
+    employee_id INT NOT NULL,
+    UNIQUE (group_id, employee_id)
+) $ENGINE";
+// Служебка отдела на отпуск: начальник → зам → директор (ЭП), затем кадры формируют график.
+$tables['vacation_memos'] = "CREATE TABLE IF NOT EXISTS vacation_memos (
+    id $ID,
+    year            INT NOT NULL,
+    department_id   INT NOT NULL,
+    status          VARCHAR(16) NOT NULL DEFAULT 'draft', -- draft|head_signed|deputy_signed|approved|rejected
+    head_id         INT NULL, head_signed_at TIMESTAMP NULL, head_sign_type VARCHAR(10) NULL, head_sign_hash VARCHAR(64) NULL,
+    deputy_id       INT NULL, deputy_signed_at TIMESTAMP NULL, deputy_sign_type VARCHAR(10) NULL, deputy_sign_hash VARCHAR(64) NULL,
+    director_id     INT NULL, director_signed_at TIMESTAMP NULL, director_sign_type VARCHAR(10) NULL, director_sign_hash VARCHAR(64) NULL,
+    reject_reason   VARCHAR(500) NULL,
+    created_at      TIMESTAMP DEFAULT $NOW,
+    UNIQUE (year, department_id)
+) $ENGINE";
+
 // ===== Командировки (служебка-заявка → согласование директором → факт; бюджет по отделам и источникам) =====
 // Бюджет командировок: отдел × источник × год (аналогично dept_budgets, но отдельный пул).
 $tables['trip_budgets'] = "CREATE TABLE IF NOT EXISTS trip_budgets (
@@ -1176,6 +1232,10 @@ foreach ([
     'ix_trip_seg'       => 'trip_segments(trip_id)',
     'ix_trip_extra'     => 'trip_extra_expenses(trip_id)',
     'ix_trip_att'       => 'trip_attachments(trip_id)',
+    'ix_vpick_year'     => 'vacation_picks(year, employee_id)',
+    'ix_vogm_group'     => 'vacation_overlap_group_members(group_id)',
+    'ix_vogm_emp'       => 'vacation_overlap_group_members(employee_id)',
+    'ix_vmemo_year'     => 'vacation_memos(year, department_id)',
 ] as $ix => $def) {
     try { $pdo->exec("CREATE INDEX IF NOT EXISTS $ix ON $def"); } catch (\Throwable $e) {}
 }

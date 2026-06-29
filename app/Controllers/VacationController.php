@@ -22,9 +22,18 @@ class VacationController extends Controller
         'replaced'      => 'Заменён',
     ];
 
+    /**
+     * Кто утверждает заявки на отпуск (после согласования начальником отдела) — кадры.
+     * Прежняя проверка опиралась на легаси-колонку users.role IN ('admin','manager'), где
+     * 'manager' — это менеджер проекта «анкеты», а не кадры: заявки уходили не тем людям,
+     * а кадровики/замы с мультиролями не получали их вовсе. Теперь — по каталогу ролей.
+     */
     private function isApprover(array $me): bool
     {
-        return in_array($me['role'], ['admin', 'manager'], true);
+        if (($me['role'] ?? '') === 'admin') { return true; }
+        return (bool) Database::scalar(
+            "SELECT 1 FROM user_roles WHERE user_id = ? AND role_slug IN ('admin','hr_manager','hr') LIMIT 1",
+            [(int) $me['id']]);
     }
 
     private function headDeptId(int $uid): ?int
@@ -43,7 +52,9 @@ class VacationController extends Controller
                 "SELECT COUNT(*) FROM vacation_requests v JOIN users u ON u.id = v.employee_id
                   WHERE v.status='on_head' AND u.department_id = ?", [$head]);
         }
-        if ($me && in_array($me['role'], ['admin', 'manager'], true)) {
+        $isApprover = $me && (($me['role'] ?? '') === 'admin' || Database::scalar(
+            "SELECT 1 FROM user_roles WHERE user_id = ? AND role_slug IN ('admin','hr_manager','hr') LIMIT 1", [$uid]));
+        if ($isApprover) {
             $n += (int) Database::scalar("SELECT COUNT(*) FROM vacation_requests WHERE status='on_approve'");
         }
         return $n;
@@ -277,10 +288,16 @@ class VacationController extends Controller
         $this->redirect('/vacations');
     }
 
+    /** Уведомить утверждающих заявку (кадры + админ) — по каталогу ролей, а не легаси-флагу. */
     private function notifyApprovers(string $text): void
     {
-        foreach (Database::all("SELECT id FROM users WHERE role IN ('admin','manager') AND is_active=1") as $u) {
-            NotificationService::create((int) $u['id'], 'Отпуска: на утверждение', $text);
+        $rows = Database::all(
+            "SELECT DISTINCT u.id FROM users u
+               LEFT JOIN user_roles ur ON ur.user_id = u.id
+              WHERE u.is_active = 1
+                AND (u.role = 'admin' OR ur.role_slug IN ('admin','hr_manager','hr'))");
+        foreach ($rows as $u) {
+            NotificationService::create((int) $u['id'], 'Отпуск: заявка на утверждение', $text);
         }
     }
 }

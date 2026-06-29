@@ -107,8 +107,11 @@ class SignService
         // Идемпотентность: не дублировать запись при повторной отправке формы
         // (та же сущность + тот же подписант + то же содержимое). Разное содержимое
         // (новая ревизия) и разные подписанты (многоступенчатый маршрут) — допускаются.
+        // Учитываем только ДЕЙСТВУЮЩИЕ подписи (voided_at IS NULL): после возврата на
+        // доработку (revoke гасит подпись) повторная подпись тем же содержимым создаёт
+        // новую действующую запись, а не блокируется погашенной.
         $dup = \App\Core\Database::scalar(
-            'SELECT 1 FROM document_signatures WHERE entity_type=? AND entity_id=? AND signer_id=? AND payload_sha256=? LIMIT 1',
+            'SELECT 1 FROM document_signatures WHERE entity_type=? AND entity_id=? AND signer_id=? AND payload_sha256=? AND voided_at IS NULL LIMIT 1',
             [$entityType, $entityId, $userId, (string) ($desc['payload_sha'] ?? '')]);
         if ($dup) { return; }
         \App\Core\Database::insert(
