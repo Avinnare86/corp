@@ -664,11 +664,13 @@ body.force-desktop .panel{overflow-x:auto}
 /* ===== Телефон: контроль анкет (ручная выборка / очередь) и отчёт о проверке ===== */
 @media(max-width:760px){
   /* Фильтры/панели действий — в столбик, поля и кнопки во всю ширину */
-  body:not(.force-desktop) .flt{flex-direction:column;align-items:stretch;gap:10px}
-  body:not(.force-desktop) .flt label{width:100%}
-  body:not(.force-desktop) .flt input,
-  body:not(.force-desktop) .flt select,
-  body:not(.force-desktop) .flt .btn{width:100%;box-sizing:border-box;justify-content:center}
+  /* Фильтр-панель стакается на узком экране ВСЕГДА (даже в режиме «полные таблицы»):
+     это форма, а не таблица. Иначе поля заворачиваются неровным рядом. */
+  .flt{flex-direction:column;align-items:stretch;gap:10px}
+  .flt label{width:100%}
+  .flt input,
+  .flt select,
+  .flt .btn{width:100%;box-sizing:border-box;justify-content:center;min-height:40px}
 
   /* Карточный заголовок: первая ячейка строки — крупная, без подписи, в одну строку */
   body:not(.force-desktop) .tbl-cards.q-card td:first-child{

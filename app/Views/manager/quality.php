@@ -31,6 +31,21 @@
     страна — <strong><?= $country !== '' ? e(($countryName ?: $country)) : 'все' ?></strong>.
 </p>
 
+<?php
+// Список на контроль: ведём на экран выбора (/inspect/manual) с теми же фильтрами. Период → диапазон дат.
+$cFrom = ($from ?? '') !== '' ? $from : ($period !== '' ? $period . '-01' : '');
+$cTo   = ($to ?? '') !== '' ? $to : ($period !== '' ? date('Y-m-t', strtotime($period . '-01')) : '');
+$canControl = \App\Core\Auth::effectiveHas('controller', 'admin', 'manager');
+$ctlUrl = fn($emp) => '/inspect/manual?from=' . urlencode($cFrom) . '&to=' . urlencode($cTo)
+    . '&country=' . urlencode($country) . ($emp ? '&emp=' . (int) $emp : '');
+?>
+<?php if ($canControl): ?>
+<p style="margin:0 0 16px">
+    <a class="btn primary" href="<?= e($ctlUrl(0)) ?>">📋 Сформировать список на контроль</a>
+    <span class="muted" style="font-size:.85rem">по текущему фильтру; анкеты с найденными ошибками (доработка) и уже проверенные в выборку не попадают.</span>
+</p>
+<?php endif; ?>
+
 <table class="table tbl-cards q-card">
     <thead>
         <tr>
@@ -53,7 +68,7 @@
         <?php endif; ?>
         <?php foreach ($rows as $r): ?>
             <tr class="qd-row" data-uid="<?= (int) $r['uid'] ?>" style="cursor:pointer" title="Показать проверенные анкеты">
-                <td><span class="qd-arrow" style="display:inline-block;width:1em;color:#6b7280">▸</span><?= e($r['full_name']) ?></td>
+                <td><span class="qd-arrow" style="display:inline-block;width:1em;color:#6b7280">▸</span><?= e($r['full_name']) ?><?php if ($canControl): ?> <a class="btn btn-mini" style="margin-left:6px;font-weight:400" href="<?= e($ctlUrl((int) $r['uid'])) ?>" onclick="event.stopPropagation()" title="Сформировать список на контроль по этому специалисту">на&nbsp;контроль</a><?php endif; ?></td>
                 <td style="text-align:right" data-label="Проверено"><?= (int) $r['checked'] ?></td>
                 <td style="text-align:right" data-label="Ошибок (проверка)"><?= (int) $r['check_err'] ?></td>
                 <td style="text-align:right" data-label="% ошибок (пров.)"><?= number_format((float) $r['check_pct'], 1, ',', ' ') ?>%</td>

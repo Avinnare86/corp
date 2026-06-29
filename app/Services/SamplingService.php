@@ -104,10 +104,13 @@ class SamplingService
     /**
      * Кандидаты для РУЧНОЙ выборки контроля: проверенные анкеты по фильтрам (период/специалист/страна),
      * с пометкой, контролировалась ли анкета ранее. Для экрана выбора контролёром.
+     * Анкеты, где ошибка УЖЕ найдена (отправлены на доработку при проверке), в выборку не попадают —
+     * контроль нужен для не помеченных проблемными.
      */
     public static function manualCandidates(string $from, string $to, ?int $empId, string $country, int $limit = 500): array
     {
-        $where = "ai.checked_at IS NOT NULL AND ai.assigned_to IS NOT NULL AND u.role = 'employee'";
+        $where = "ai.checked_at IS NOT NULL AND ai.assigned_to IS NOT NULL AND u.role = 'employee'
+                  AND ai.comment_id IS NULL AND NOT EXISTS(SELECT 1 FROM item_comments ic WHERE ic.item_id = ai.id)";
         $p = [];
         if ($from !== '')    { $where .= ' AND ai.checked_at >= ?'; $p[] = $from . ' 00:00:00'; }
         if ($to !== '')      { $where .= ' AND ai.checked_at <= ?'; $p[] = $to . ' 23:59:59'; }
