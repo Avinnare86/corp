@@ -21,6 +21,8 @@ use App\Controllers\OrgController;
 use App\Controllers\OrderController;
 use App\Controllers\VacationController;
 use App\Controllers\VacationScheduleController;
+use App\Controllers\TripController;
+use App\Controllers\TripFinanceController;
 use App\Controllers\BudgetController;
 use App\Controllers\TabelController;
 
@@ -283,6 +285,35 @@ $router->post('/vacation-schedule/{id}/balance',     [VacationScheduleController
 $router->post('/vacation-schedule/{id}/sign',        [VacationScheduleController::class, 'sign']);
 $router->post('/vacation-schedule/{id}/archive',     [VacationScheduleController::class, 'archive']);
 $router->post('/vacation-schedule/{id}/delete',      [VacationScheduleController::class, 'delete']);
+
+// --- Командировки ---
+$router->get('/trips',                       [TripController::class, 'index']);
+$router->get('/trips/my',                    [TripController::class, 'my']);
+$router->get('/trips/form',                  [TripController::class, 'form']);
+$router->get('/trips/form/{id}',             [TripController::class, 'form']);
+$router->post('/trips',                      [TripController::class, 'store']);
+$router->get('/trips/{id}',                  [TripController::class, 'show']);
+$router->get('/trips/{id}/order',            [TripController::class, 'order']);
+$router->post('/trips/{id}/segment',         [TripController::class, 'addSegment']);
+$router->post('/trips/{id}/segment/{segId}/delete', [TripController::class, 'deleteSegment']);
+$router->post('/trips/{id}/extra',           [TripController::class, 'addExtra']);
+$router->post('/trips/{id}/extra/{exId}/delete',    [TripController::class, 'deleteExtra']);
+$router->post('/trips/{id}/upload',          [TripController::class, 'upload']);
+$router->post('/trips/{id}/attachment/{attId}/delete', [TripController::class, 'deleteAttachment']);
+$router->get('/trips/{id}/attachment/{attId}',      [TripController::class, 'downloadAttachment']);
+$router->post('/trips/{id}/submit',          [TripController::class, 'submit']);
+$router->post('/trips/{id}/approve',         [TripController::class, 'approve']);
+$router->post('/trips/{id}/reject',          [TripController::class, 'reject']);
+$router->post('/trips/{id}/fact',            [TripController::class, 'fact']);
+$router->post('/trips/{id}/archive',         [TripController::class, 'archive']);
+$router->post('/trips/{id}/delete',          [TripController::class, 'delete']);
+
+// --- Финансовые настройки командировок (менеджер финансов) ---
+$router->get('/trip-finance',                [TripFinanceController::class, 'index']);
+$router->post('/trip-finance/budget',        [TripFinanceController::class, 'saveBudget']);
+$router->post('/trip-finance/per-diem',      [TripFinanceController::class, 'savePerDiem']);
+$router->post('/trip-finance/kind',          [TripFinanceController::class, 'storeKind']);
+$router->post('/trip-finance/kind/{id}/delete', [TripFinanceController::class, 'deleteKind']);
 
 // --- Бюджет ФОТ ---
 $router->get('/budget',                  [BudgetController::class, 'index']);

@@ -382,6 +382,100 @@ $tables['vacation_balances'] = "CREATE TABLE IF NOT EXISTS vacation_balances (
     UNIQUE (employee_id, year)
 ) $ENGINE";
 
+// ===== Командировки (служебка-заявка → согласование директором → факт; бюджет по отделам и источникам) =====
+// Бюджет командировок: отдел × источник × год (аналогично dept_budgets, но отдельный пул).
+$tables['trip_budgets'] = "CREATE TABLE IF NOT EXISTS trip_budgets (
+    id $ID,
+    department_id INT NOT NULL,
+    year      INT NOT NULL,
+    source_id INT NOT NULL,
+    amount    $MONEY NOT NULL DEFAULT 0,
+    UNIQUE (department_id, year, source_id)
+) $ENGINE";
+// Ставки суточных: источник × место пребывания (РФ/зарубеж). Задаёт менеджер финансов.
+$tables['per_diem_rates'] = "CREATE TABLE IF NOT EXISTS per_diem_rates (
+    id $ID,
+    source_id INT NOT NULL,
+    location  VARCHAR(10) NOT NULL,           -- rf | abroad
+    amount    $MONEY NOT NULL DEFAULT 0,
+    UNIQUE (source_id, location)
+) $ENGINE";
+// Справочник дополнительных расходов (оргвзнос/иное), расширяемый.
+$tables['trip_expense_kinds'] = "CREATE TABLE IF NOT EXISTS trip_expense_kinds (
+    id $ID,
+    name      VARCHAR(150) NOT NULL,
+    is_active INT NOT NULL DEFAULT 1
+) $ENGINE";
+// Заявка на командировку = служебная записка (статусы: draft|on_approval|approved|rejected|revision).
+$tables['trip_requests'] = "CREATE TABLE IF NOT EXISTS trip_requests (
+    id $ID,
+    number          VARCHAR(30) NULL,
+    department_id   INT NOT NULL,
+    author_id       INT NOT NULL,            -- составитель (начальник/зам)
+    employee_id     INT NOT NULL,            -- командируемый
+    source_id       INT NOT NULL,            -- источник финансирования
+    destination     VARCHAR(200) NOT NULL DEFAULT '',  -- город/место назначения
+    event           VARCHAR(300) NOT NULL DEFAULT '',   -- мероприятие
+    purpose         TEXT NULL,               -- цель / задание
+    date_from       DATE NOT NULL,
+    date_to         DATE NOT NULL,
+    lodging_sum     $MONEY NOT NULL DEFAULT 0,   -- проживание (план)
+    travel_sum      $MONEY NOT NULL DEFAULT 0,   -- проезд/билеты (план)
+    status          VARCHAR(16) NOT NULL DEFAULT 'draft',
+    created_by      INT NOT NULL,
+    created_at      TIMESTAMP DEFAULT $NOW,
+    submitted_at    TIMESTAMP NULL,
+    author_sign_type   VARCHAR(10) NULL,
+    author_signed_at   TIMESTAMP NULL,
+    author_sign_hash   VARCHAR(64) NULL,
+    author_cert        VARCHAR(100) NULL,
+    director_id        INT NULL,
+    director_sign_name     VARCHAR(150) NOT NULL DEFAULT '',
+    director_sign_position VARCHAR(255) NOT NULL DEFAULT '',
+    director_sign_type VARCHAR(10) NULL,
+    director_signed_at TIMESTAMP NULL,
+    director_sign_hash VARCHAR(64) NULL,
+    director_cert      VARCHAR(100) NULL,
+    reject_reason      VARCHAR(500) NULL,
+    plan_total      $MONEY NOT NULL DEFAULT 0,   -- снимок плановой сметы на момент утверждения
+    fact_per_diem   $MONEY NULL,
+    fact_lodging    $MONEY NULL,
+    fact_travel     $MONEY NULL,
+    fact_other      $MONEY NULL,
+    fact_at         TIMESTAMP NULL,
+    fact_by         INT NULL,
+    archived_at     TIMESTAMP NULL,
+    archived_by     INT NULL
+) $ENGINE";
+// Сегменты пребывания (диапазоны дат РФ/зарубеж) — для суточных.
+$tables['trip_segments'] = "CREATE TABLE IF NOT EXISTS trip_segments (
+    id $ID,
+    trip_id    INT NOT NULL,
+    start_date DATE NOT NULL,
+    end_date   DATE NOT NULL,
+    location   VARCHAR(10) NOT NULL DEFAULT 'rf'   -- rf | abroad
+) $ENGINE";
+// Дополнительные расходы заявки (оргвзнос/иное), план.
+$tables['trip_extra_expenses'] = "CREATE TABLE IF NOT EXISTS trip_extra_expenses (
+    id $ID,
+    trip_id INT NOT NULL,
+    kind_id INT NOT NULL,
+    amount  $MONEY NOT NULL DEFAULT 0,
+    note    VARCHAR(300) NULL
+) $ENGINE";
+// Вложения-подтверждения (проживание/проезд/иное) — по образцу doc_files.
+$tables['trip_attachments'] = "CREATE TABLE IF NOT EXISTS trip_attachments (
+    id $ID,
+    trip_id     INT NOT NULL,
+    kind        VARCHAR(16) NOT NULL DEFAULT 'other',   -- accommodation | travel | other
+    orig_name   VARCHAR(255) NOT NULL,
+    stored_name VARCHAR(255) NOT NULL,
+    size_bytes  INT NOT NULL DEFAULT 0,
+    mime        VARCHAR(120) NOT NULL DEFAULT '',
+    uploaded_by INT NULL,
+    uploaded_at TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
 // ===== Бюджетирование ФОТ =====
 $tables['pay_sources'] = "CREATE TABLE IF NOT EXISTS pay_sources (
     id $ID,
@@ -1055,14 +1149,26 @@ foreach (['fingerprint' => "VARCHAR(120) NOT NULL DEFAULT ''", 'source' => "VARC
         echo "OK  колонка user_certificates.$col добавлена\n";
     }
 }
-// Индексы новых таблиц (подписи документов, график отпусков).
+// Индексы новых таблиц (подписи документов, график отпусков, командировки).
 foreach ([
     'ix_docsig_entity'  => 'document_signatures(entity_type, entity_id)',
     'ix_vsched_year'    => 'vacation_schedules(year, department_id, revision)',
     'ix_vsrow_sched'    => 'vacation_schedule_rows(schedule_id)',
     'ix_vsrow_emp'      => 'vacation_schedule_rows(employee_id)',
+    'ix_trip_dept'      => 'trip_requests(department_id, source_id, status)',
+    'ix_trip_emp'       => 'trip_requests(employee_id)',
+    'ix_trip_seg'       => 'trip_segments(trip_id)',
+    'ix_trip_extra'     => 'trip_extra_expenses(trip_id)',
+    'ix_trip_att'       => 'trip_attachments(trip_id)',
 ] as $ix => $def) {
     try { $pdo->exec("CREATE INDEX IF NOT EXISTS $ix ON $def"); } catch (\Throwable $e) {}
+}
+// Сид справочника доп.расходов командировок (оргвзнос/иное), если пусто.
+if ((int) \App\Core\Database::scalar('SELECT COUNT(*) FROM trip_expense_kinds') === 0) {
+    foreach (['Оргвзнос', 'Иное'] as $nm) {
+        \App\Core\Database::insert('INSERT INTO trip_expense_kinds (name, is_active) VALUES (?,1)', [$nm]);
+    }
+    echo "OK  справочник доп.расходов командировок засеян (Оргвзнос, Иное)\n";
 }
 // Архив документов (Актуальные/Архив): подписанные → в архив, безвозвратное удаление только админом.
 foreach (['tabels', 'shift_grafiks', 'stimulus_memos'] as $tbl) {

@@ -100,10 +100,15 @@ if ($uid) {
         if ($can('dept_head', 'deputy_director', 'director')) { $g[] = ['/memos/reasons', 'Основания (справочник)', 0]; }
         $menu['Стимул'] = $g;
     }
+    // Командировки — авторы заявок (начальник/зам/директор) + бухгалтерия видят список и факт
+    if ($can('dept_head', 'deputy_director', 'director', 'accountant')) {
+        $menu['Командировки'] = [['/trips', 'Заявки на командировку', 0]];
+    }
     // Финансы — только менеджер проекта финансы
     if ($isFinMgr) {
         $menu['Финансы'] = [
             ['/budget', 'Бюджет ФОТ', 0],
+            ['/trip-finance', 'Командировки: бюджет и суточные', 0],
             ['/admin/grounds', 'Основания стимула', 0],
             ['/admin/pricing', 'Тарифы', 0],
             ['/admin/extras', 'Доплаты', 0],
@@ -210,6 +215,7 @@ if ($uid) {
             <div class="np-name"><?= e($authUser['full_name'] ?? '') ?></div>
             <a href="/certs">Моя ЭП</a>
             <a href="/vacation-schedule/my">Мой отпуск</a>
+            <a href="/trips/my">Мои командировки</a>
             <a href="/acting">Замещение</a>
             <a href="/password/change">Пароль</a>
             <a class="btn-logout" href="/logout">Выход</a>
@@ -241,6 +247,7 @@ if ($uid) {
                 <?php endif; ?>
                 <a href="/certs">Моя ЭП</a>
                 <a href="/vacation-schedule/my">Мой отпуск</a>
+                <a href="/trips/my">Мои командировки</a>
                 <a href="/acting">Замещение</a>
                 <a href="/password/change">Пароль</a>
                 <a class="btn-logout" href="/logout">Выход</a>
