@@ -389,41 +389,15 @@ class TabelController extends Controller
         $type = strtoupper((string) $this->input('sign_type'));
         if (!isset(self::SIGN_TYPES[$type])) { flash('Выберите вид подписи.', 'error'); $this->redirect('/timesheet2/' . $id . '/edit'); }
 
-        // подтверждение личности паролем учётной записи
-        $pwd = (string) $this->input('password');
-        $hash = Database::scalar('SELECT password_hash FROM users WHERE id = ?', [$me['id']]);
-        if (!$pwd || !password_verify($pwd, (string) $hash)) {
-            flash('Неверный пароль — подпись не выполнена.', 'error');
-            $this->redirect('/timesheet2/' . $id . '/edit');
-        }
-
-        // сертификат
-        if ($type === 'PEP') {
-            $cert = Database::one("SELECT * FROM user_certificates WHERE user_id=? AND sign_type='PEP' AND valid_to>=? LIMIT 1", [$me['id'], date('Y-m-d')]);
-            if (!$cert) {
-                $serial = 'PEP-' . strtoupper(bin2hex(random_bytes(6)));
-                Database::insert('INSERT INTO user_certificates (user_id, sign_type, serial, owner_name, issued_at, valid_to) VALUES (?,?,?,?,?,?)',
-                    [$me['id'], 'PEP', $serial, $me['full_name'], date('Y-m-d'), date('Y-m-d', strtotime('+5 years'))]);
-                $cert = Database::one('SELECT * FROM user_certificates WHERE serial = ?', [$serial]);
-            }
-        } else {
-            $cert = Database::one('SELECT * FROM user_certificates WHERE user_id=? AND sign_type=? AND valid_to>=? LIMIT 1', [$me['id'], $type, date('Y-m-d')]);
-            if (!$cert) {
-                flash(self::SIGN_TYPES[$type] . ': сертификат не зарегистрирован. Обратитесь к администратору (Оргструктура → Сертификаты ЭП).', 'error');
-                $this->redirect('/timesheet2/' . $id . '/edit');
-            }
-        }
-
-        // криптографический отпечаток содержимого (вкл. ячейки сменного табеля)
+        // Подпись через единый сервис ЭП: УКЭП → реальная (sc.ined.ru) с .sig в журнале;
+        // ПЭП/УНЭП → пароль учётной записи + штамп (прежнее поведение). Подписывается содержимое табеля.
         $rows = Database::all('SELECT employee_id, day_marks, cells, days, hours FROM tabel_rows WHERE tabel_id = ? ORDER BY employee_id', [$id]);
-        $secret = Settings::get('sign_secret');
-        if (!$secret) { $secret = bin2hex(random_bytes(16)); Settings::set('sign_secret', $secret); }
-        $now = date('Y-m-d H:i:s');
-        $payload = json_encode([$t['period'], $t['department_id'], $t['revision'], $rows, $me['id'], $cert['serial'], $now]);
-        $signHash = hash_hmac('sha256', $payload, $secret);
+        $payload = json_encode([$t['period'], $t['department_id'], $t['revision'], $rows], JSON_UNESCAPED_UNICODE);
+        $res = \App\Services\SignService::signDocument('tabel', (int) $id, (int) $me['id'], $type, (string) $this->input('password'), $payload);
+        if (!$res['ok']) { flash($res['error'], 'error'); $this->redirect('/timesheet2/' . $id . '/edit'); }
 
         Database::run('UPDATE tabels SET status=?, signer_id=?, sign_type=?, signed_at=?, sign_hash=?, cert_serial=? WHERE id=?',
-            ['signed', $me['id'], $type, $now, $signHash, $cert['serial'], $id]);
+            ['signed', $me['id'], $res['sign_type'], $res['signed_at'], $res['sign_hash'], $res['serial'], $id]);
 
         // синхронизация месячного табеля: последняя ПОДПИСАННАЯ ревизия каждой половины
         self::syncMonth(substr($t['period'], 0, 7));

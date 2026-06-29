@@ -1085,17 +1085,22 @@ class StimulusController extends Controller
         $uid = (int) Auth::id();
         $roles = Auth::effectiveRoles();   // роли с учётом режима И.о.; подпись/пароль — всегда физического $uid
 
-        // подтверждение пароля (ПЭП)
+        // Подпись через единый сервис ЭП: ПЭП по умолчанию; УНЭП/УКЭП — если выбрано в форме
+        // (УКЭП при включённом сервисе → реальная подпись sc.ined.ru с .sig в журнале document_signatures).
         $pass = (string) $this->input('password');
-        $hash = (string) Database::scalar('SELECT password_hash FROM users WHERE id=?', [$uid]);
-        if (!password_verify($pass, $hash)) { flash('Неверный пароль — подпись отклонена.', 'error'); $this->redirect('/memos/' . (int)$id); }
-        $now = date('Y-m-d H:i:s');
-        $sig = self::makeSig((int) $id, $uid, $now);   // полный отпечаток (без сокращения)
-        // Подпись «от имени директора»: ставит ТОЛЬКО админ. Дату задаёт админ; на штампе — настроенный директор,
-        // а не админ (физический подписант сохраняется в director_id для аудита).
+        $type = strtoupper((string) ($this->input('sign_type') ?: 'PEP'));
+        if (!in_array($type, ['PEP', 'UNEP', 'UKEP'], true)) { $type = 'PEP'; }
+        $sPayload = json_encode(['memo' => (int) $id, 'period' => $memo['period'], 'dept' => $memo['department_id'], 'source' => $memo['source_id']], JSON_UNESCAPED_UNICODE);
+        $desc = \App\Services\SignService::authAndSign('stimulus_memo', (int) $id, $uid, $type, $pass, $sPayload);
+        if (!$desc['ok']) { flash($desc['error'], 'error'); $this->redirect('/memos/' . (int)$id); }
+        $now = $desc['signed_at'];
+        $sig = $desc['sign_hash'];        // отпечаток для штампа (заменяет makeSig)
+        $signType = $desc['sign_type'];
+        $record = function () use ($id, $uid, $desc) { \App\Services\SignService::recordSignature('stimulus_memo', (int) $id, $uid, $desc); };
+        // Подпись «от имени директора»: ставит ТОЛЬКО админ; для УКЭП дата всегда фактическая (реальную подпись нельзя задним числом).
         $onBehalf = Auth::isAdmin();
-        $dirAt    = $onBehalf ? $this->signAtInput($now) : $now;
-        $dirSig   = self::makeSig((int) $id, $uid, $dirAt);
+        $dirAt    = ($onBehalf && $signType !== 'UKEP') ? $this->signAtInput($now) : $now;
+        $dirSig   = ($dirAt === $now) ? $sig : self::makeSig((int) $id, $uid, $dirAt);
         [$dirName, $dirPos] = $onBehalf ? self::directorSigner() : ['', ''];
 
         // Повторный контроль бюджета источника при УТВЕРЖДЕНИИ (деньги могли «съесть» параллельно).
@@ -1117,7 +1122,8 @@ class StimulusController extends Controller
             if (in_array($memo['status'], ['draft','revision'], true) && (!empty($roles['director']) || Auth::isAdmin())) {
                 $num = $memo['number'] ?: self::nextNumber();
                 Database::run('UPDATE stimulus_memos SET status=?, number=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=?, director_sign_name=?, director_sign_position=? WHERE id=?',
-                    ['approved', $num, $uid, 'PEP', $dirAt, $dirSig, $dirName, $dirPos, $id]);
+                    ['approved', $num, $uid, $signType, $dirAt, $dirSig, $dirName, $dirPos, $id]);
+                $record();
                 foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='accountant'") as $acc) {
                     NotificationService::create((int)$acc['id'], 'Стимул руководителям утверждён', "Директор утвердил стимулирующие выплаты замам/гл. бухгалтеру (№{$num}).");
                 }
@@ -1135,7 +1141,8 @@ class StimulusController extends Controller
                 if ($apprErr) { flash($apprErr, 'error'); $this->redirect('/memos/' . (int)$id); }
                 $num = $memo['number'] ?: self::nextNumber();
                 Database::run('UPDATE stimulus_memos SET status=?, number=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=?, director_sign_name=?, director_sign_position=? WHERE id=?',
-                    ['approved', $num, $uid, 'PEP', $dirAt, $dirSig, $dirName, $dirPos, $id]);
+                    ['approved', $num, $uid, $signType, $dirAt, $dirSig, $dirName, $dirPos, $id]);
+                $record();
                 foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='accountant'") as $acc) {
                     NotificationService::create((int) $acc['id'], 'Стимул назначен директором', "Директор назначил стимул напрямую (№{$num}).");
                 }
@@ -1147,7 +1154,8 @@ class StimulusController extends Controller
             if ($memo['status'] === 'draft' && Auth::actsAsUser((int)$memo['author_id']) && (!empty($roles['deputy_director']) || Auth::isAdmin())) {
                 $num = $memo['number'] ?: self::nextNumber();
                 Database::run('UPDATE stimulus_memos SET status=?, number=?, deputy_id=?, deputy_sign_type=?, deputy_signed_at=?, deputy_sign_hash=? WHERE id=?',
-                    ['deputy_signed', $num, $uid, 'PEP', $now, $sig, $id]);
+                    ['deputy_signed', $num, $uid, $signType, $now, $sig, $id]);
+                $record();
                 foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='director'") as $dir) {
                     NotificationService::create((int) $dir['id'], 'Служебка на утверждение директором', "Зам назначил стимул напрямую (№{$num}), ожидает вашего утверждения.");
                 }
@@ -1155,7 +1163,8 @@ class StimulusController extends Controller
             } elseif ($memo['status'] === 'deputy_signed' && (!empty($roles['director']) || Auth::isAdmin())) {
                 if ($apprErr) { flash($apprErr, 'error'); $this->redirect('/memos/' . (int)$id); }
                 Database::run('UPDATE stimulus_memos SET status=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=?, director_sign_name=?, director_sign_position=? WHERE id=?',
-                    ['approved', $uid, 'PEP', $dirAt, $dirSig, $dirName, $dirPos, $id]);
+                    ['approved', $uid, $signType, $dirAt, $dirSig, $dirName, $dirPos, $id]);
+                $record();
                 NotificationService::create((int)$memo['author_id'], 'Служебка утверждена', "Ваша прямая служебка о стимуле №{$memo['number']} утверждена директором.");
                 flash('Стимул утверждён директором.');
             } else { flash('Сейчас вы не можете подписать эту служебку.', 'error'); }
@@ -1166,7 +1175,8 @@ class StimulusController extends Controller
             // начальник подписал → присвоить номер, отправить заму
             $num = $memo['number'] ?: self::nextNumber();
             Database::run('UPDATE stimulus_memos SET status=?, number=?, head_id=?, head_sign_type=?, head_signed_at=?, head_sign_hash=? WHERE id=?',
-                ['head_signed', $num, $uid, 'PEP', $now, $sig, $id]);
+                ['head_signed', $num, $uid, $signType, $now, $sig, $id]);
+            $record();
             // уведомить куратора
             if ($memo['curator_id']) {
                 NotificationService::create((int)$memo['curator_id'], 'Служебка на утверждение', "Поступила служебка о стимуле №{$num} на ваше утверждение.");
@@ -1174,7 +1184,8 @@ class StimulusController extends Controller
             flash("Служебка подписана и направлена курирующему заму (№{$num}).");
         } elseif ($memo['status'] === 'head_signed' && (!empty($roles['deputy_director']) && Auth::actsAsUser((int)$memo['curator_id']) || Auth::isAdmin())) {
             Database::run('UPDATE stimulus_memos SET status=?, deputy_id=?, deputy_sign_type=?, deputy_signed_at=?, deputy_sign_hash=? WHERE id=?',
-                ['deputy_signed', $uid, 'PEP', $now, $sig, $id]);
+                ['deputy_signed', $uid, $signType, $now, $sig, $id]);
+            $record();
             // директору на утверждение + бухгалтерия уже видит
             foreach (Database::all("SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role_slug='director'") as $dir) {
                 NotificationService::create((int)$dir['id'], 'Служебка на утверждение директором', "Служебка о стимуле №{$memo['number']} утверждена замом, ожидает вашего решения.");
@@ -1183,7 +1194,8 @@ class StimulusController extends Controller
         } elseif ($memo['status'] === 'deputy_signed' && (!empty($roles['director']) || Auth::isAdmin())) {
             if ($apprErr) { flash($apprErr, 'error'); $this->redirect('/memos/' . (int)$id); }
             Database::run('UPDATE stimulus_memos SET status=?, director_id=?, director_sign_type=?, director_signed_at=?, director_sign_hash=?, director_sign_name=?, director_sign_position=? WHERE id=?',
-                ['approved', $uid, 'PEP', $dirAt, $dirSig, $dirName, $dirPos, $id]);
+                ['approved', $uid, $signType, $dirAt, $dirSig, $dirName, $dirPos, $id]);
+            $record();
             NotificationService::create((int)$memo['author_id'], 'Служебка утверждена', "Ваша служебка о стимуле №{$memo['number']} утверждена директором.");
             flash('Служебка утверждена директором.');
         } else {

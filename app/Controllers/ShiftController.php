@@ -494,41 +494,23 @@ class ShiftController extends Controller
         $type = strtoupper((string) $this->input('sign_type'));
         if (!isset(\App\Controllers\TabelController::SIGN_TYPES[$type])) { flash('Выберите вид подписи.', 'error'); $this->redirect($back); }
 
-        // подтверждение личности паролем учётной записи
-        $pwd = (string) $this->input('password');
-        $hash = Database::scalar('SELECT password_hash FROM users WHERE id=?', [$me['id']]);
-        if (!$pwd || !password_verify($pwd, (string) $hash)) { flash('Неверный пароль — подпись не выполнена.', 'error'); $this->redirect($back); }
-
-        // сертификат: ПЭП выпускается системой автоматически, УНЭП/УКЭП — должен быть зарегистрирован
-        if ($type === 'PEP') {
-            $cert = Database::one("SELECT * FROM user_certificates WHERE user_id=? AND sign_type='PEP' AND valid_to>=? LIMIT 1", [$me['id'], date('Y-m-d')]);
-            if (!$cert) {
-                $serial = 'PEP-' . strtoupper(bin2hex(random_bytes(6)));
-                Database::insert('INSERT INTO user_certificates (user_id, sign_type, serial, owner_name, issued_at, valid_to) VALUES (?,?,?,?,?,?)',
-                    [$me['id'], 'PEP', $serial, $me['full_name'], date('Y-m-d'), date('Y-m-d', strtotime('+5 years'))]);
-                $cert = Database::one('SELECT * FROM user_certificates WHERE serial=?', [$serial]);
-            }
-        } else {
-            $cert = Database::one('SELECT * FROM user_certificates WHERE user_id=? AND sign_type=? AND valid_to>=? LIMIT 1', [$me['id'], $type, date('Y-m-d')]);
-            if (!$cert) { flash(\App\Controllers\TabelController::SIGN_TYPES[$type] . ': сертификат не зарегистрирован (Оргструктура → Сертификаты ЭП).', 'error'); $this->redirect($back); }
-        }
-
         $lastDay = (int) date('t', strtotime("$month-01"));
         $rows = $this->buildGrafik($deptId, $month);
         if (!$rows) { flash('В отделе нет сотрудников на графике 2/2 — нечего подписывать.', 'error'); $this->redirect($back); }
         $digest = self::grafikDigest($rows);
         $snapshot = json_encode(['rows' => $rows, 'lastDay' => $lastDay, 'digest' => $digest], JSON_UNESCAPED_UNICODE);
-
         $rev = (int) Database::scalar('SELECT COALESCE(MAX(revision),-1)+1 FROM shift_grafiks WHERE department_id=? AND period=?', [$deptId, $month]);
-        $secret = \App\Services\Settings::get('sign_secret');
-        if (!$secret) { $secret = bin2hex(random_bytes(16)); \App\Services\Settings::set('sign_secret', $secret); }
-        $now = date('Y-m-d H:i:s');
-        $payload = json_encode([$deptId, $month, $rev, $digest, $me['id'], $cert['serial'], $now]);
-        $signHash = hash_hmac('sha256', $payload, $secret);
 
-        Database::insert(
+        // Подпись через единый сервис ЭП (УКЭП → реальная sc.ined.ru с .sig; ПЭП/УНЭП → пароль учётной записи).
+        // id графика появляется после INSERT, поэтому authAndSign() → INSERT → recordSignature().
+        $payload = json_encode([$deptId, $month, $rev, $digest], JSON_UNESCAPED_UNICODE);
+        $sig = \App\Services\SignService::authAndSign('shift_grafik', 0, (int) $me['id'], $type, (string) $this->input('password'), $payload);
+        if (!$sig['ok']) { flash($sig['error'], 'error'); $this->redirect($back); }
+
+        $gid = Database::insert(
             'INSERT INTO shift_grafiks (department_id, period, revision, created_by, signer_id, signer_name, signer_position, sign_type, signed_at, sign_hash, cert_serial, snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-            [$deptId, $month, $rev, $me['id'], $me['id'], $me['full_name'], $me['position'] ?? '', $type, $now, $signHash, $cert['serial'], $snapshot]);
+            [$deptId, $month, $rev, $me['id'], $me['id'], $me['full_name'], $me['position'] ?? '', $sig['sign_type'], $sig['signed_at'], $sig['sign_hash'], $sig['serial'], $snapshot]);
+        \App\Services\SignService::recordSignature('shift_grafik', (int) $gid, (int) $me['id'], $sig);
 
         flash($rev > 0
             ? "График пересоставлен и подписан заново — корректировка №{$rev} (" . \App\Controllers\TabelController::SIGN_TYPES[$type] . ')'

@@ -49,6 +49,25 @@ class SignService
      */
     public static function signDocument(string $entityType, int $entityId, int $userId, string $signType, string $password, string $payload): array
     {
+        $d = self::authAndSign($entityType, $entityId, $userId, $signType, $password, $payload);
+        if (!$d['ok']) { return ['ok' => false, 'error' => $d['error']]; }
+        self::recordSignature($entityType, $entityId, $userId, $d);
+        return ['ok' => true, 'sign_type' => $d['sign_type'], 'serial' => $d['serial'],
+                'fingerprint' => $d['fingerprint'], 'sign_hash' => $d['sign_hash'], 'signed_at' => $d['signed_at']];
+    }
+
+    /**
+     * Аутентифицировать подписанта и сформировать дескриптор подписи БЕЗ записи в журнал.
+     * Нужно тем потокам, где id документа появляется только после INSERT (например, график
+     * сменности): сначала authAndSign(), затем INSERT документа, затем recordSignature() с id.
+     *
+     * УКЭП при включённом сервисе → реальная .sig по паролю DSS; ПЭП/УНЭП (или УКЭП без
+     * сервиса) → пароль учётной записи + HMAC-штамп (прежнее поведение).
+     *
+     * @return array{ok:bool, sign_type:string, serial:string, fingerprint:string, sign_hash:string, payload_sha:string, signed_at:string, sig_b64:?string, error?:string}
+     */
+    public static function authAndSign(string $entityType, int $entityId, int $userId, string $signType, string $password, string $payload): array
+    {
         $signType = strtoupper($signType);
         $now = date('Y-m-d H:i:s');
         $shaPayload = hash('sha256', $payload);
@@ -56,18 +75,13 @@ class SignService
         // ---- УКЭП через сервис: реальная криптоподпись по паролю DSS ----
         if ($signType === 'UKEP' && self::enabled()) {
             $res = self::signBytes($userId, $password, $payload, $entityType . '-' . $entityId . '.txt');
-            if (!$res['ok']) {
-                return ['ok' => false, 'error' => $res['error']];
-            }
+            if (!$res['ok']) { return ['ok' => false, 'error' => $res['error']]; }
             $cert = \App\Core\Database::one(
                 "SELECT serial, fingerprint FROM user_certificates WHERE user_id=? AND sign_type='UKEP' AND source='dss' AND valid_to>=? ORDER BY id DESC LIMIT 1",
                 [$userId, date('Y-m-d')]);
-            $serial = (string) ($cert['serial'] ?? '');
-            $fingerprint = (string) ($cert['fingerprint'] ?? '');
-            \App\Core\Database::insert(
-                'INSERT INTO document_signatures (entity_type, entity_id, signer_id, sign_type, serial, fingerprint, sig_b64, payload_sha256, signed_at) VALUES (?,?,?,?,?,?,?,?,?)',
-                [$entityType, $entityId, $userId, 'UKEP', $serial, $fingerprint, $res['sign'], $shaPayload, $now]);
-            return ['ok' => true, 'sign_type' => 'UKEP', 'serial' => $serial, 'fingerprint' => $fingerprint, 'sign_hash' => $shaPayload, 'signed_at' => $now];
+            return ['ok' => true, 'sign_type' => 'UKEP', 'serial' => (string) ($cert['serial'] ?? ''),
+                    'fingerprint' => (string) ($cert['fingerprint'] ?? ''), 'sign_hash' => $shaPayload,
+                    'payload_sha' => $shaPayload, 'signed_at' => $now, 'sig_b64' => $res['sign']];
         }
 
         // ---- ПЭП / УНЭП (или УКЭП без сервиса): пароль учётной записи + HMAC-штамп ----
@@ -82,10 +96,18 @@ class SignService
         $secret = (string) Settings::get('sign_secret');
         if ($secret === '') { $secret = bin2hex(random_bytes(16)); Settings::set('sign_secret', $secret); }
         $signHash = hash_hmac('sha256', $payload . '|' . $userId . '|' . $cert['serial'] . '|' . $now, $secret);
+        return ['ok' => true, 'sign_type' => $signType, 'serial' => (string) $cert['serial'],
+                'fingerprint' => (string) ($cert['fingerprint'] ?? ''), 'sign_hash' => $signHash,
+                'payload_sha' => $shaPayload, 'signed_at' => $now, 'sig_b64' => null];
+    }
+
+    /** Записать подпись в журнал document_signatures по дескриптору из {@see authAndSign}. */
+    public static function recordSignature(string $entityType, int $entityId, int $userId, array $desc): void
+    {
         \App\Core\Database::insert(
             'INSERT INTO document_signatures (entity_type, entity_id, signer_id, sign_type, serial, fingerprint, sig_b64, payload_sha256, signed_at) VALUES (?,?,?,?,?,?,?,?,?)',
-            [$entityType, $entityId, $userId, $signType, $cert['serial'], (string) ($cert['fingerprint'] ?? ''), null, $shaPayload, $now]);
-        return ['ok' => true, 'sign_type' => $signType, 'serial' => (string) $cert['serial'], 'fingerprint' => (string) ($cert['fingerprint'] ?? ''), 'sign_hash' => $signHash, 'signed_at' => $now];
+            [$entityType, $entityId, $userId, $desc['sign_type'], $desc['serial'], $desc['fingerprint'] ?? '',
+             $desc['sig_b64'] ?? null, $desc['payload_sha'] ?? '', $desc['signed_at']]);
     }
 
     /** Получить активный сертификат вида $type; ПЭП — автo-выпуск при первом подписании. */

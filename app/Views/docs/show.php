@@ -277,8 +277,15 @@ foreach ($route as $r) { $stages[(int)$r['step_no']][] = $r; }
                     <textarea name="comment" rows="2" placeholder="обязателен при отклонении"></textarea>
                 </label>
                 <?php if ($myTurn['stage_type'] === 'sign'): ?>
+                <label style="max-width:320px">Вид подписи
+                    <select name="sign_type">
+                        <option value="PEP">Простая ЭП (по паролю)</option>
+                        <option value="UNEP">УНЭП</option>
+                        <option value="UKEP">УКЭП</option>
+                    </select>
+                </label>
                 <label style="max-width:320px">Пароль (подтверждение ЭП)
-                    <input type="password" name="password" autocomplete="off" placeholder="ваш пароль входа">
+                    <input type="password" name="password" autocomplete="off" placeholder="пароль учётной записи (для УКЭП — пароль сервиса)">
                 </label>
                 <?php endif; ?>
                 <div class="form-inline">

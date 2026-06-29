@@ -497,16 +497,17 @@ class DocumentController extends Controller
             flash('Для «согласовано с замечаниями» укажите замечания в комментарии.', 'error');
             $this->redirect('/docs/' . $id);
         }
-        // Этап «Подписание» — подтверждение паролем (простая ЭП) + отпечаток для штампа.
+        // Этап «Подписание» — ЭП через единый сервис: ПЭП по умолчанию, УНЭП/УКЭП — если выбрано
+        // (УКЭП при включённом сервисе → реальная подпись sc.ined.ru, запись в журнал document_signatures).
         $signType = null; $signHash = null;
         if ($step['stage_type'] === 'sign') {
-            $pwd = (string) $this->input('password');
-            $pwHash = (string) Database::scalar('SELECT password_hash FROM users WHERE id=?', [$uid]);
-            if ($pwd === '' || !password_verify($pwd, $pwHash)) {
-                flash('Подпись не выполнена: неверный пароль.', 'error'); $this->redirect('/docs/' . $id);
-            }
-            $signType = 'PEP';
-            $signHash = substr(hash_hmac('sha256', $id . '|' . $uid . '|' . $now, (string) Settings::get('sign_secret', 'uchet')), 0, 24);
+            $type = strtoupper((string) ($this->input('sign_type') ?: 'PEP'));
+            if (!in_array($type, ['PEP', 'UNEP', 'UKEP'], true)) { $type = 'PEP'; }
+            $payload = json_encode([(int) $id, (int) $step['id'], self::currentVersion((int) $id), 'sign'], JSON_UNESCAPED_UNICODE);
+            $res = \App\Services\SignService::signDocument('document', (int) $id, (int) $uid, $type, (string) $this->input('password'), $payload);
+            if (!$res['ok']) { flash('Подпись не выполнена: ' . $res['error'], 'error'); $this->redirect('/docs/' . $id); }
+            $signType = $res['sign_type'];
+            $signHash = substr($res['sign_hash'], 0, 24);
         }
         $okStatus = $step['stage_type'] === 'ack' ? 'acked' : 'approved';
         if ($withRemarks) { $comment = '[С замечаниями] ' . $comment; }

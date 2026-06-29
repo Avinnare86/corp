@@ -99,10 +99,17 @@ if ($isMgmt) {
         <?php endif; ?>
 
         <?php if ($canHeadSign || $canDeputySign || $canDirectorSign || !empty($canMgmtSign) || !empty($canDirectSign)): ?>
-        <h3 class="sub">Подписать (ЭП — подтверждение паролем)</h3>
+        <h3 class="sub">Подписать (ЭП)</h3>
         <form method="post" action="/memos/<?= (int)$memo['id'] ?>/sign">
             <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
-            <label>Ваш пароль<input type="password" name="password" required></label>
+            <label>Вид подписи
+                <select name="sign_type">
+                    <option value="PEP">Простая ЭП (по паролю)</option>
+                    <option value="UNEP">УНЭП</option>
+                    <option value="UKEP">УКЭП</option>
+                </select>
+            </label>
+            <label>Ваш пароль <span class="muted" style="font-size:.8rem">(для УКЭП — пароль сервиса)</span><input type="password" name="password" required></label>
             <?php if (!empty($dirOnBehalf)): ?>
             <label style="display:block;margin-top:8px">Дата и время подписи (от имени директора)
                 <input type="datetime-local" name="sign_at" value="<?= date('Y-m-d\TH:i') ?>">
