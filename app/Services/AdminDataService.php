@@ -34,6 +34,7 @@ class AdminDataService
             'vacation_memo'   => 'Служебки на отпуск (по отделам)',
             'vacation_campaign' => 'Кампании по отпускам',
             'vacation_request' => 'Заявки на отпуск',
+            'vacation_change_request' => 'Заявки на изменение графика',
             'order'           => 'Поручения',
             'document'        => 'Документы СЭД',
             'nomenclature_case' => 'Дела номенклатуры',
@@ -306,6 +307,23 @@ class AdminDataService
                     return ['id' => (int) $r['id'], 'title' => $r['full_name'] . ' · ' . date('d.m.Y', strtotime($r['start_date'])) . '–' . date('d.m.Y', strtotime($r['end_date'])),
                         'sub' => 'отпуск ' . $r['year'], 'status' => \App\Controllers\VacationController::STATUS[$st] ?? $st,
                         'can_delete' => true, 'can_revert' => $term, 'revert_hint' => 'вернуть заявку на шаг назад по маршруту'];
+                }, $rows);
+
+            case 'vacation_change_request':
+                $rows = Database::all(
+                    "SELECT r.*, u.full_name FROM vacation_change_requests r JOIN users u ON u.id=r.employee_id ORDER BY r.id DESC LIMIT 200");
+                $vcrKind = ['add' => 'добавить период', 'remove' => 'убрать период', 'carry_next_year' => 'перенос на след. год'];
+                $vcrStatus = ['pending' => 'На рассмотрении', 'approved' => 'Одобрена', 'rejected' => 'Отклонена'];
+                return array_map(function ($r) use ($vcrKind, $vcrStatus) {
+                    $period = $r['kind'] === 'carry_next_year'
+                        ? ((int) $r['days'] . ' дн.')
+                        : (date('d.m.Y', strtotime($r['start_date'])) . '–' . date('d.m.Y', strtotime($r['end_date'])));
+                    return ['id' => (int) $r['id'],
+                        'title' => $r['full_name'] . ' · ' . ($vcrKind[$r['kind']] ?? $r['kind']) . ' · ' . $period,
+                        'sub' => 'отпуск ' . $r['year'],
+                        'status' => $vcrStatus[$r['status']] ?? $r['status'],
+                        'can_delete' => true, 'can_revert' => $r['status'] === 'approved',
+                        'revert_hint' => 'отменить одобрение — вернуть заявку в «на рассмотрении» и отменить её эффект (снять запись/перенос)'];
                 }, $rows);
 
             case 'nomenclature_case':
@@ -640,6 +658,14 @@ class AdminDataService
                 Database::run('DELETE FROM vacation_requests WHERE id=?', [$id]);
                 return self::ok('Заявка на отпуск удалена. Если код «О» уже попал в сформированный табель — он не пересчитывается автоматически.');
 
+            case 'vacation_change_request':
+                $vcr = Database::one('SELECT * FROM vacation_change_requests WHERE id=?', [$id]);
+                if (!$vcr) { return self::err('Заявка не найдена.'); }
+                Database::run('DELETE FROM vacation_change_requests WHERE id=?', [$id]);
+                return self::ok('Заявка удалена' . ($vcr['status'] === 'approved'
+                    ? ' (это только запись о заявке — применённая правка графика/переноса дней сохраняется; чтобы отменить её эффект, используйте «Откатить» до удаления)'
+                    : '') . '.');
+
             case 'nomenclature_case':
                 if (!Database::scalar('SELECT 1 FROM nomenclature_cases WHERE id=?', [$id])) { return self::err('Дело не найдено.'); }
                 $pdo->beginTransaction();
@@ -942,6 +968,30 @@ class AdminDataService
                     return self::ok('Отклонение снято — заявка снова у руководителя.');
                 }
                 return self::err('Заявка в начальном статусе — откатывать нечего.');
+
+            case 'vacation_change_request':
+                $vcr = Database::one('SELECT * FROM vacation_change_requests WHERE id=?', [$id]);
+                if (!$vcr) { return self::err('Заявка не найдена.'); }
+                if ($vcr['status'] !== 'approved') { return self::err('Заявка не одобрена — откатывать нечего.'); }
+                $year = (int) $vcr['year'];
+                $empId = (int) $vcr['employee_id'];
+                $empDept = (int) (Database::scalar('SELECT department_id FROM users WHERE id=?', [$empId]) ?: 0);
+                if ($vcr['kind'] === 'add') {
+                    if ($vcr['pick_id']) {
+                        \App\Services\VacationScheduleService::syncRowForPick($year, $empDept, $empId, (string) $vcr['start_date'], (string) $vcr['end_date'], (int) $vcr['days'], 'remove');
+                        Database::run('DELETE FROM vacation_picks WHERE id=?', [(int) $vcr['pick_id']]);
+                    }
+                } elseif ($vcr['kind'] === 'remove') {
+                    $newPickId = Database::insert(
+                        'INSERT INTO vacation_picks (year, employee_id, start_date, end_date, days, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)',
+                        [$year, $empId, $vcr['start_date'], $vcr['end_date'], (int) $vcr['days'], 'откат заявки #' . $id, (int) Auth::id(), date('Y-m-d H:i:s')]);
+                    \App\Services\VacationScheduleService::syncRowForPick($year, $empDept, $empId, (string) $vcr['start_date'], (string) $vcr['end_date'], (int) $vcr['days'], 'add');
+                    Database::run('UPDATE vacation_change_requests SET pick_id=? WHERE id=?', [$newPickId, $id]);
+                } elseif ($vcr['kind'] === 'carry_next_year') {
+                    \App\Services\VacationScheduleService::addCarriedOut($empId, $year, -(int) $vcr['days']);
+                }
+                Database::run("UPDATE vacation_change_requests SET status='pending', decided_by=NULL, decided_at=NULL WHERE id=?", [$id]);
+                return self::ok('Одобрение заявки отменено — эффект правки снят, заявка снова «на рассмотрении».');
 
             case 'nomenclature_case':
                 $nc = Database::one('SELECT * FROM nomenclature_cases WHERE id=?', [$id]);

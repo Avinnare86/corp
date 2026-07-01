@@ -9,7 +9,7 @@ $unread = $uid ? NotificationService::unreadCount((int) $uid) : 0;
 $chatUnread = $uid ? ChatController::unreadCount((int) $uid) : 0;
 $docsInbox = $uid ? \App\Controllers\DocumentController::inboxCount((int) $uid) : 0;
 $ordersInbox = $uid ? \App\Controllers\OrderController::inboxCount((int) $uid) : 0;
-$vacInbox = $uid ? \App\Controllers\VacationController::inboxCount((int) $uid) : 0;
+$vacInbox = $uid ? \App\Controllers\VacationCampaignController::changeRequestsInboxCount((int) $uid) : 0;
 // ---- меню по НАБОРУ ролей; группы-проекты управляют видимостью разделов ----
 $can = fn(string ...$s) => Auth::effectiveHas(...$s);  // меню учитывает режим И.о. (роли замещаемого)
 $isAdmin = $role === 'admin';
@@ -75,9 +75,8 @@ if ($uid) {
     $canSeeStaff = $isHrMgr || $can('director');
     if ($isHrMgr || $isTimekeeper || $canSeeStaff || $can('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager')) {
         $g = [];
-        if ($isTimekeeper || $isHrMgr || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacations', 'Отпуска', $vacInbox]; }
         if ($isHrMgr || $can('director', 'deputy_director')) { $g[] = ['/vacation-schedule', 'График отпусков', 0]; }
-        if ($isHrMgr || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacation-campaign', 'Кампания отпусков', 0]; }
+        if ($isHrMgr || $isTimekeeper || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacation-campaign', 'Кампания отпусков', $vacInbox]; }
         $canShift = \App\Controllers\ShiftController::canSee((int) $uid);
         if ($isTimekeeper || $canShift) { $g[] = ['/timesheet2', 'Электронный табель', 0]; }
         if ($canShift) { $g[] = ['/shifts', 'Сменный график (2/2)', 0]; }

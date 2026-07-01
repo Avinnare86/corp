@@ -8,7 +8,7 @@ use App\Controllers\VisaController;
 use App\Controllers\OrderController;
 use App\Controllers\DocumentController;
 use App\Controllers\StimulusController;
-use App\Controllers\VacationController;
+use App\Controllers\VacationCampaignController;
 use App\Controllers\AppealController;
 use App\Controllers\ChatController;
 
@@ -82,10 +82,11 @@ class DashboardService
             $cards[] = self::card('memos', '💸', 'Служебки о стимуле', StimulusController::inboxCount($uid), '/memos', 'ждут моего действия');
         }
 
-        // --- Отпуска ---
-        if (Auth::role() === 'employee' || Auth::has('dept_head', 'hr', 'hr_manager', 'director')) {
-            $my = $scalar("SELECT COUNT(*) FROM vacation_requests WHERE employee_id = ? AND status IN ('on_head','on_approve')", [$uid]);
-            $cards[] = self::card('vacations', '🏖', 'Отпуска', VacationController::inboxCount($uid) + $my, '/vacations', 'мои заявки и согласования');
+        // --- Отпуска (кампания): мои заявки на изменение графика + те, что жду решить сам ---
+        if (Auth::role() === 'employee' || Auth::has('dept_head', 'deputy_director', 'hr', 'hr_manager', 'director')) {
+            $my = $scalar("SELECT COUNT(*) FROM vacation_change_requests WHERE employee_id = ? AND status = 'pending'", [$uid]);
+            $n = VacationCampaignController::changeRequestsInboxCount($uid) + (int) $my;
+            $cards[] = self::card('vacations', '🏖', 'Отпуска', $n, '/vacation-campaign/booking', 'заявки на изменение графика');
         }
 
         // --- Табели ---

@@ -5,6 +5,29 @@
 </form>
 
 <section class="panel">
+    <h2 style="margin-top:0">Старт-месяц расчёта</h2>
+    <p class="muted" style="margin-top:0">Для первого года внедрения системы (если она включена в работу не с января) укажите, с какого
+        месяца ведётся полный расчёт. За месяцы ДО этого месяца оклад/стимул в план не проецируются — вместо этого ниже в матрице
+        вводится фактически потраченная сумма (по окладу и по стимулу отдельно, по источникам).</p>
+    <form method="post" action="/budget/start-month" class="form-inline">
+        <?= csrf_field() ?>
+        <input type="hidden" name="year" value="<?= (int) $year ?>">
+        <label>Расчёт ведётся с месяца
+            <select name="start_month">
+                <?php for ($m = 1; $m <= 12; $m++): ?>
+                    <option value="<?= $m ?>" <?= $m === $startMonth ? 'selected' : '' ?>><?= e(sprintf('%02d', $m)) ?></option>
+                <?php endfor; ?>
+            </select>
+        </label>
+        <button class="btn btn-mini btn-primary">Сохранить</button>
+    </form>
+    <?php if ($startMonth > 1): ?>
+        <p class="tag warn" style="margin-top:8px">Расчёт на <?= (int) $year ?> год ведётся с <?= e(sprintf('%02d', $startMonth)) ?> —
+            за январь–<?= e(sprintf('%02d', $startMonth - 1)) ?> ниже нужно ввести факт по окладу и стимулу.</p>
+    <?php endif; ?>
+</section>
+
+<section class="panel">
     <h2>Бюджеты по отделам и источникам</h2>
     <form method="post" action="/budget/save">
         <?= csrf_field() ?>
@@ -12,17 +35,29 @@
         <table class="table">
             <thead><tr><th>Отдел</th>
                 <?php foreach ($sources as $s): ?><th class="num"><?= e($s['name']) ?><?= $s['detail'] ? '<br><span class="muted" style="font-size:.7rem;text-transform:none">'.e(mb_strimwidth($s['detail'],0,30,'…')).'</span>' : '' ?></th><?php endforeach; ?>
-                <th class="num">Итого бюджет</th><th class="num">План окладов ×12</th><th class="num">Факт сдельных</th><th class="num">База для премий</th></tr></thead>
+                <th class="num">Итого бюджет</th><th class="num">План окладов</th><th class="num">Факт сдельных</th><th class="num">База для премий</th></tr></thead>
             <tbody>
             <?php foreach ($rows as $r): ?>
                 <tr>
                     <td><strong><?= e($r['dept']['name']) ?></strong> <span class="muted">(<?= (int)$r['people'] ?> чел.)</span></td>
                     <?php foreach ($sources as $s): $si = $r['srcInfo'][$s['id']] ?? null; ?>
-                        <td class="num"><input type="number" step="0.01" name="amount[<?= (int)$r['dept']['id'] ?>][<?= (int)$s['id'] ?>]"
-                            value="<?= e($r['bySource'][$s['id']] ?? 0) ?>" style="max-width:120px;text-align:right">
+                        <td class="num">
+                            <input type="number" step="0.01" name="amount[<?= (int)$r['dept']['id'] ?>][<?= (int)$s['id'] ?>]"
+                                value="<?= e($r['bySource'][$s['id']] ?? 0) ?>" style="max-width:120px;text-align:right">
+                            <?php if ($startMonth > 1): ?>
+                            <div style="margin-top:4px">
+                                <input type="number" step="0.01" name="actual_oklad_before[<?= (int)$r['dept']['id'] ?>][<?= (int)$s['id'] ?>]"
+                                    value="<?= e($r['actualOklad'][$s['id']] ?? 0) ?>" placeholder="факт оклад до старта" title="Факт использования по окладу до старта расчёта"
+                                    style="max-width:120px;text-align:right;font-size:.78rem">
+                                <input type="number" step="0.01" name="actual_stimul_before[<?= (int)$r['dept']['id'] ?>][<?= (int)$s['id'] ?>]"
+                                    value="<?= e($r['actualStimul'][$s['id']] ?? 0) ?>" placeholder="факт стимул до старта" title="Факт использования по стимулу до старта расчёта"
+                                    style="max-width:120px;text-align:right;font-size:.78rem;margin-top:2px">
+                            </div>
+                            <?php endif; ?>
                             <?php if ($si && ($si['budget'] > 0 || $si['committed'] > 0)): ?>
                             <div class="muted" style="font-size:.72rem;white-space:nowrap;margin-top:3px">занято <?= money($si['committed']) ?> · ост. <span style="color:<?= $si['available'] < 0 ? 'var(--bad)' : 'var(--ok)' ?>"><?= money($si['available']) ?></span></div>
-                            <?php endif; ?></td>
+                            <?php endif; ?>
+                        </td>
                     <?php endforeach; ?>
                     <td class="num"><strong><?= money($r['budget']) ?></strong></td>
                     <td class="num minus">−<?= money($r['plan']) ?></td>
@@ -41,8 +76,8 @@
         </table>
         <button class="btn btn-primary" style="margin-top:10px">Сохранить бюджеты</button>
     </form>
-    <p class="muted">База для премий = бюджет года − плановая окладная часть (оклады×ставка + надбавки + фикс-доплаты, ×12 мес.)
-        − фактически начисленные сдельные (анкеты по тарифам + операции) с начала года.</p>
+    <p class="muted">База для премий = бюджет года − плановая окладная часть (оклады×ставка + надбавки + фикс-доплаты за месяцы
+        расчёта + факт до старта, см. выше) − фактически начисленные сдельные (анкеты по тарифам + операции) с начала года.</p>
 </section>
 
 <section class="panel">

@@ -38,6 +38,22 @@ class VacationCampaignController extends Controller
         return array_map('intval', Org::branchDeptIds((int) Auth::id()));
     }
 
+    /** Бейдж в меню: сколько заявок на изменение графика ждут решения этого пользователя. */
+    public static function changeRequestsInboxCount(int $uid): int
+    {
+        $roles = Auth::roles($uid);
+        $isPriv = !empty($roles['admin']) || !empty($roles['hr_manager']) || !empty($roles['hr']) || !empty($roles['director']);
+        if ($isPriv) {
+            return (int) Database::scalar("SELECT COUNT(*) FROM vacation_change_requests WHERE status='pending'");
+        }
+        $deptIds = array_map('intval', Org::branchDeptIds($uid));
+        if (!$deptIds) { return 0; }
+        $in = implode(',', array_fill(0, count($deptIds), '?'));
+        return (int) Database::scalar(
+            "SELECT COUNT(*) FROM vacation_change_requests r JOIN users u ON u.id=r.employee_id
+              WHERE r.status='pending' AND u.department_id IN ($in)", $deptIds);
+    }
+
     // ===== Дашборд кампании =====
     public function index(): void
     {
@@ -268,10 +284,14 @@ class VacationCampaignController extends Controller
         Auth::requireLogin();
         $year = $this->year();
         $uid = (int) Auth::id();
+        $camp = VC::current($year);
+        $stage = $camp ? (string) $camp['stage'] : '';
         $this->view('vacation_campaign/booking', [
-            'title' => 'Моя запись на отпуск ' . $year, 'year' => $year, 'camp' => VC::current($year),
-            'picks' => VC::picksOf($uid, $year), 'balance' => VS::balanceOf($uid, $year),
-            'planned' => VC::plannedDays($uid, $year), 'csrf' => Auth::csrf(),
+            'title' => 'Моя запись на отпуск ' . $year, 'year' => $year, 'camp' => $camp, 'stage' => $stage,
+            'picks' => VC::picksOf($uid, $year), 'balance' => VS::balanceBreakdown($uid, $year),
+            'planned' => VC::plannedDays($uid, $year), 'carriedOut' => VS::carriedOut($uid, $year),
+            'myRequests' => Database::all('SELECT * FROM vacation_change_requests WHERE year=? AND employee_id=? ORDER BY created_at DESC', [$year, $uid]),
+            'csrf' => Auth::csrf(),
         ]);
     }
 
@@ -280,14 +300,19 @@ class VacationCampaignController extends Controller
         Auth::requireLogin(); Auth::verifyCsrf();
         $year = $this->year();
         $uid = (int) Auth::id();
-        if (VC::stageOf($year) !== 'booking') { flash('Самозапись сейчас закрыта (этап кампании).', 'error'); $this->redirect('/vacation-campaign/booking?year=' . $year); }
+        $back = '/vacation-campaign/booking?year=' . $year;
+        if (!VC::yearIsOpen($year)) { flash('Кампания на ' . $year . ' год не открыта — предложения по отпускам вводить нельзя.', 'error'); $this->redirect($back); }
+        if (VC::stageOf($year) !== 'booking') {
+            flash('Прямая самозапись закрыта (этап кампании прошёл). Подайте заявку на изменение графика — она пойдёт на утверждение начальнику отдела.', 'error');
+            $this->redirect($back);
+        }
         $start = (string) $this->input('start_date'); $end = (string) $this->input('end_date');
         $issues = VC::validatePick($uid, $year, $start, $end);
-        if ($issues) { flash('Нельзя записать: ' . implode('; ', $issues) . '.', 'error'); $this->redirect('/vacation-campaign/booking?year=' . $year); }
+        if ($issues) { flash('Нельзя записать: ' . implode('; ', $issues) . '.', 'error'); $this->redirect($back); }
         Database::insert('INSERT INTO vacation_picks (year, employee_id, start_date, end_date, days, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)',
             [$year, $uid, $start, $end, VS::calDays($start, $end), trim((string) $this->input('note')), $uid, date('Y-m-d H:i:s')]);
         flash('Период записан: ' . date('d.m.Y', strtotime($start)) . ' — ' . date('d.m.Y', strtotime($end)) . '.');
-        $this->redirect('/vacation-campaign/booking?year=' . $year);
+        $this->redirect($back);
     }
 
     public function deletePick(string $id): void
@@ -295,12 +320,139 @@ class VacationCampaignController extends Controller
         Auth::requireLogin(); Auth::verifyCsrf();
         $year = $this->year();
         $uid = (int) Auth::id();
+        $back = '/vacation-campaign/booking?year=' . $year;
         $p = Database::one('SELECT * FROM vacation_picks WHERE id=?', [(int) $id]);
-        if ($p && ((int) $p['employee_id'] === $uid || Auth::effectiveHas('admin', 'hr_manager'))) {
-            Database::run('DELETE FROM vacation_picks WHERE id=?', [(int) $id]);
-            flash('Период удалён.');
+        if (!$p) { $this->redirect($back); }
+        $isPriv = Auth::effectiveHas('admin', 'hr_manager');
+        if (!$isPriv && (int) $p['employee_id'] !== $uid) { $this->redirect($back); }
+        // Прямое удаление — только пока идёт самозапись; позже (правки после кампании) — только
+        // заявкой (kind=remove) с утверждением начальника, либо напрямую кадрами/админом.
+        if (!$isPriv && VC::stageOf($year) !== 'booking') {
+            flash('Удалить период напрямую можно только на этапе самозаписи. Подайте заявку на изменение графика.', 'error');
+            $this->redirect($back);
         }
-        $this->redirect('/vacation-campaign/booking?year=' . $year);
+        Database::run('DELETE FROM vacation_picks WHERE id=?', [(int) $id]);
+        flash('Период удалён.');
+        $this->redirect($back);
+    }
+
+    /**
+     * Заявка на правку графика ПОСЛЕ самозаписи: добавить период / убрать период / перенести
+     * неиспользованные дни на следующий год. Утверждает начальник отдела сотрудника (1 шаг).
+     */
+    public function storeChangeRequest(): void
+    {
+        Auth::requireLogin(); Auth::verifyCsrf();
+        $year = $this->year();
+        $uid = (int) Auth::id();
+        $back = '/vacation-campaign/booking?year=' . $year;
+        if (!VC::yearIsOpen($year)) { flash('Кампания на ' . $year . ' год не открыта.', 'error'); $this->redirect($back); }
+        $kind = (string) $this->input('kind');
+        $note = trim((string) $this->input('note'));
+        $now = date('Y-m-d H:i:s');
+
+        if ($kind === 'add') {
+            $start = (string) $this->input('start_date'); $end = (string) $this->input('end_date');
+            $issues = VC::validatePick($uid, $year, $start, $end);
+            if ($issues) { flash('Нельзя подать заявку: ' . implode('; ', $issues) . '.', 'error'); $this->redirect($back); }
+            Database::insert(
+                'INSERT INTO vacation_change_requests (year, employee_id, kind, start_date, end_date, days, note, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [$year, $uid, 'add', $start, $end, VS::calDays($start, $end), $note, 'pending', $uid, $now]);
+        } elseif ($kind === 'remove') {
+            $p = Database::one('SELECT * FROM vacation_picks WHERE id=? AND year=? AND employee_id=?', [(int) $this->input('pick_id'), $year, $uid]);
+            if (!$p) { flash('Период не найден.', 'error'); $this->redirect($back); }
+            Database::insert(
+                'INSERT INTO vacation_change_requests (year, employee_id, kind, pick_id, start_date, end_date, days, note, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                [$year, $uid, 'remove', (int) $p['id'], $p['start_date'], $p['end_date'], (int) $p['days'], $note, 'pending', $uid, $now]);
+        } elseif ($kind === 'carry_next_year') {
+            $days = (int) $this->input('days');
+            if ($days <= 0) { flash('Укажите количество дней для переноса.', 'error'); $this->redirect($back); }
+            $free = VS::balanceOf($uid, $year) - VC::plannedDays($uid, $year) - VS::carriedOut($uid, $year);
+            if ($days > $free) { flash('Нельзя перенести больше нераспределённого остатка (' . max(0, $free) . ' дн.).', 'error'); $this->redirect($back); }
+            Database::insert(
+                'INSERT INTO vacation_change_requests (year, employee_id, kind, days, note, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)',
+                [$year, $uid, 'carry_next_year', $days, $note, 'pending', $uid, $now]);
+        } else {
+            flash('Неизвестный тип заявки.', 'error'); $this->redirect($back);
+        }
+
+        $deptId = (int) (Database::scalar('SELECT department_id FROM users WHERE id=?', [$uid]) ?: 0);
+        $headId = $deptId ? (int) (Database::scalar('SELECT head_id FROM departments WHERE id=?', [$deptId]) ?: 0) : 0;
+        if ($headId && $headId !== $uid) {
+            NotificationService::create($headId, 'Отпуска: заявка на изменение графика',
+                (string) Database::scalar('SELECT full_name FROM users WHERE id=?', [$uid]) . ' подал(а) заявку на изменение графика отпусков ' . $year . ' года.');
+        }
+        flash('Заявка подана — ожидает решения начальника отдела.');
+        $this->redirect($back);
+    }
+
+    /** Очередь заявок на правку графика — руководителю (свои отделы/ветка) или кадрам/admin (все). */
+    public function changeRequestsQueue(): void
+    {
+        Auth::requireLogin();
+        if (!$this->isHead()) { flash('Раздел доступен руководителям и кадрам.', 'error'); $this->redirect('/vacation-campaign'); }
+        $year = $this->year();
+        $deptIds = $this->myDepts();
+        $rows = $deptIds ? Database::all(
+            "SELECT r.*, u.full_name, u.department_id, d.name AS dept_name FROM vacation_change_requests r
+               JOIN users u ON u.id=r.employee_id LEFT JOIN departments d ON d.id=u.department_id
+              WHERE r.year=? AND u.department_id IN (" . implode(',', array_fill(0, count($deptIds), '?')) . ")
+              ORDER BY CASE WHEN r.status='pending' THEN 0 ELSE 1 END, r.created_at DESC",
+            array_merge([$year], $deptIds)) : [];
+        $this->view('vacation_campaign/change_requests', [
+            'title' => 'Заявки на изменение графика ' . $year, 'year' => $year, 'rows' => $rows, 'csrf' => Auth::csrf(),
+        ]);
+    }
+
+    /** Решение по заявке на правку графика: approve — применить (пересобрать pick/строку графика/перенос), reject — отклонить. */
+    public function decideChangeRequest(string $id): void
+    {
+        Auth::requireLogin(); Auth::verifyCsrf();
+        $r = Database::one('SELECT * FROM vacation_change_requests WHERE id=?', [(int) $id]);
+        if (!$r) { $this->redirect('/vacation-campaign/change-requests'); }
+        $year = (int) $r['year'];
+        $back = '/vacation-campaign/change-requests?year=' . $year;
+        $empId = (int) $r['employee_id'];
+        $empDept = (int) (Database::scalar('SELECT department_id FROM users WHERE id=?', [$empId]) ?: 0);
+        $isPriv = Auth::effectiveHas('admin', 'hr_manager');
+        if (!$isPriv && (!$empDept || !in_array($empDept, $this->myDepts(), true))) {
+            flash('Заявка вне вашей зоны ответственности.', 'error'); $this->redirect($back);
+        }
+        if ($r['status'] !== 'pending') { flash('Заявка уже рассмотрена.', 'error'); $this->redirect($back); }
+
+        $uid = (int) Auth::id();
+        if ((string) $this->input('act') === 'reject') {
+            Database::run('UPDATE vacation_change_requests SET status=?, decided_by=?, decided_at=?, reject_reason=? WHERE id=?',
+                ['rejected', $uid, date('Y-m-d H:i:s'), trim((string) $this->input('reason')), (int) $id]);
+            NotificationService::create($empId, 'Отпуска: заявка отклонена', 'Ваша заявка на изменение графика отпусков ' . $year . ' отклонена.');
+            flash('Заявка отклонена.');
+            $this->redirect($back);
+        }
+
+        // approve — повторная (авторитетная) проверка + применение эффекта
+        if ($r['kind'] === 'add') {
+            $issues = VC::validatePick($empId, $year, (string) $r['start_date'], (string) $r['end_date']);
+            if ($issues) { flash('Нельзя одобрить: ' . implode('; ', $issues) . '.', 'error'); $this->redirect($back); }
+            $pickId = Database::insert(
+                'INSERT INTO vacation_picks (year, employee_id, start_date, end_date, days, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)',
+                [$year, $empId, $r['start_date'], $r['end_date'], (int) $r['days'], 'заявка на правку #' . $id, $uid, date('Y-m-d H:i:s')]);
+            VS::syncRowForPick($year, $empDept, $empId, (string) $r['start_date'], (string) $r['end_date'], (int) $r['days'], 'add');
+            Database::run('UPDATE vacation_change_requests SET pick_id=? WHERE id=?', [$pickId, (int) $id]);
+        } elseif ($r['kind'] === 'remove') {
+            $p = Database::one('SELECT * FROM vacation_picks WHERE id=?', [(int) $r['pick_id']]);
+            if ($p) {
+                VS::syncRowForPick($year, $empDept, $empId, (string) $p['start_date'], (string) $p['end_date'], (int) $p['days'], 'remove');
+                Database::run('DELETE FROM vacation_picks WHERE id=?', [(int) $r['pick_id']]);
+            }
+        } elseif ($r['kind'] === 'carry_next_year') {
+            VS::addCarriedOut($empId, $year, (int) $r['days']);
+        }
+        Database::run('UPDATE vacation_change_requests SET status=?, decided_by=?, decided_at=? WHERE id=?',
+            ['approved', $uid, date('Y-m-d H:i:s'), (int) $id]);
+        NotificationService::create($empId, 'Отпуска: заявка одобрена', 'Ваша заявка на изменение графика отпусков ' . $year . ' одобрена.');
+        Audit::log('vacation_campaign.change_request_approved', 'Одобрена заявка на правку графика #' . $id . ' (' . $r['kind'] . ')');
+        flash('Заявка одобрена.');
+        $this->redirect($back);
     }
 
     // ===== Карта отпусков =====
@@ -477,7 +629,10 @@ class VacationCampaignController extends Controller
         $this->redirect('/vacation-schedule/' . $sid . '/edit');
     }
 
-    /** Полнота заполнения отдела: у всех остаток распределён + ≥1 часть ≥10 раб. дней. */
+    /**
+     * Полнота заполнения отдела: у всех остаток либо распределён по датам, либо явно перенесён
+     * на следующий год (carried_out) — дни не должны «теряться» молча; + ≥1 часть ≥10 раб. дней.
+     */
     private function deptCompleteness(int $year, int $dept): array
     {
         $issues = [];
@@ -488,7 +643,11 @@ class VacationCampaignController extends Controller
             if ($bal <= 0) { continue; }
             $picks = VC::picksOf($eid, $year);
             $planned = array_sum(array_map(fn($p) => (int) $p['days'], $picks));
-            if ($planned < $bal) { $issues[] = $e['full_name'] . ' — распределено ' . $planned . ' из ' . $bal . ' дн.'; continue; }
+            $carried = VS::carriedOut($eid, $year);
+            if ($planned + $carried < $bal) {
+                $issues[] = $e['full_name'] . ' — распределено ' . $planned . ($carried ? ' + перенесено ' . $carried : '') . ' из ' . $bal . ' дн.';
+                continue;
+            }
             $longest = 0;
             foreach ($picks as $p) { $wd = VS::workingDaysBetween($p['start_date'], $p['end_date']); if ($wd > $longest) { $longest = $wd; } }
             if ($longest < VS::MIN_LONG_PART_WD) { $issues[] = $e['full_name'] . ' — нет части ≥ ' . VS::MIN_LONG_PART_WD . ' раб. дней'; }

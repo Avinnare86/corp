@@ -75,6 +75,7 @@ $memoStatus = [
             <?php if ($isHead): ?>
                 <a class="btn btn-mini" href="/vacation-campaign/blackouts">Запретные периоды</a>
                 <a class="btn btn-mini" href="/vacation-campaign/map?year=<?= (int) $year ?>">Карта отпусков</a>
+                <a class="btn btn-mini" href="/vacation-campaign/change-requests?year=<?= (int) $year ?>">Заявки на изменение графика</a>
             <?php endif; ?>
             <a class="btn btn-mini btn-primary" href="/vacation-campaign/booking?year=<?= (int) $year ?>">Моя запись на отпуск</a>
         </div>

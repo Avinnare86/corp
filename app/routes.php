@@ -19,7 +19,6 @@ use App\Controllers\AuditController;
 use App\Controllers\DocumentController;
 use App\Controllers\OrgController;
 use App\Controllers\OrderController;
-use App\Controllers\VacationController;
 use App\Controllers\VacationScheduleController;
 use App\Controllers\VacationCampaignController;
 use App\Controllers\TripController;
@@ -268,15 +267,6 @@ $router->post('/orders',             [OrderController::class, 'store']);
 $router->post('/orders/{id}/action', [OrderController::class, 'action']);
 $router->get('/orders/{id}',         [OrderController::class, 'show']);
 
-// --- График отпусков ---
-$router->get('/vacations',                 [VacationController::class, 'index']);
-$router->post('/vacations',                [VacationController::class, 'store']);
-$router->post('/vacations/{id}/decide',    [VacationController::class, 'decide']);
-$router->get('/vacations/{id}/notice',     [VacationController::class, 'notice']);
-$router->post('/vacations/{id}/send-notice', [VacationController::class, 'sendNotice']);
-$router->post('/vacations/blackout',       [VacationController::class, 'storeBlackout']);
-$router->post('/vacations/blackout/{id}/delete', [VacationController::class, 'deleteBlackout']);
-
 // --- График отпусков (документ-сущность: отдел/организация, ревизии, подпись) ---
 $router->get('/vacation-schedule',                   [VacationScheduleController::class, 'index']);
 $router->get('/vacation-schedule/my',                [VacationScheduleController::class, 'my']);
@@ -315,6 +305,9 @@ $router->get('/vacation-campaign/memo/{deptId}',           [VacationCampaignCont
 $router->post('/vacation-campaign/memo/{deptId}/sign',     [VacationCampaignController::class, 'signMemo']);
 $router->post('/vacation-campaign/memo/{deptId}/reject',   [VacationCampaignController::class, 'rejectMemo']);
 $router->post('/vacation-campaign/memo/{deptId}/form-schedule', [VacationCampaignController::class, 'formSchedule']);
+$router->post('/vacation-campaign/change-requests',              [VacationCampaignController::class, 'storeChangeRequest']);
+$router->get('/vacation-campaign/change-requests',                [VacationCampaignController::class, 'changeRequestsQueue']);
+$router->post('/vacation-campaign/change-requests/{id}/decide',  [VacationCampaignController::class, 'decideChangeRequest']);
 
 // --- Командировки ---
 $router->get('/trips',                       [TripController::class, 'index']);
@@ -350,6 +343,7 @@ $router->post('/trip-finance/kind/{id}/delete', [TripFinanceController::class, '
 // --- Бюджет ФОТ ---
 $router->get('/budget',                  [BudgetController::class, 'index']);
 $router->post('/budget/save',            [BudgetController::class, 'save']);
+$router->post('/budget/start-month',     [BudgetController::class, 'saveStartMonth']);
 $router->post('/budget/source',          [BudgetController::class, 'storeSource']);
 $router->post('/budget/source/{id}/delete', [BudgetController::class, 'deleteSource']);
 

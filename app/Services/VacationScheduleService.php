@@ -53,7 +53,7 @@ class VacationScheduleService
         return Database::all('SELECT id, full_name, position, department_id FROM users WHERE is_active = 1 AND department_id = ? ORDER BY full_name', [$deptId]);
     }
 
-    /** Остатки отпуска по году для набора сотрудников: id => дни. */
+    /** Остатки отпуска по году для набора сотрудников (год + перенос с прошлого года): id => дни. */
     public static function balances(int $year, array $empIds): array
     {
         $map = [];
@@ -63,14 +63,29 @@ class VacationScheduleService
         $rows = Database::all("SELECT employee_id, days FROM vacation_balances WHERE year = ? AND employee_id IN ($in)",
             array_merge([$year], array_map('intval', $empIds)));
         foreach ($rows as $r) { $map[(int) $r['employee_id']] = (int) $r['days']; }
+        $carry = Database::all("SELECT employee_id, carried_out FROM vacation_balances WHERE year = ? AND employee_id IN ($in) AND carried_out > 0",
+            array_merge([$year - 1], array_map('intval', $empIds)));
+        foreach ($carry as $r) { $map[(int) $r['employee_id']] += (int) $r['carried_out']; }
         return $map;
     }
 
-    /** Остаток конкретного сотрудника на год. */
+    /**
+     * Остаток конкретного сотрудника на год: свежий лимит года Y + дни, явно перенесённые
+     * с года Y-1 (vacation_balances.carried_out — переносимые дни НЕ входят в лимит нового
+     * года, а прибавляются к нему как отдельный, уже «оплаченный» пул).
+     */
     public static function balanceOf(int $employeeId, int $year): int
     {
+        return self::balanceBreakdown($employeeId, $year)['total'];
+    }
+
+    /** Разбивка остатка: свежий лимит года / перенесённые с прошлого года / итого. */
+    public static function balanceBreakdown(int $employeeId, int $year): array
+    {
         $d = Database::scalar('SELECT days FROM vacation_balances WHERE employee_id = ? AND year = ?', [$employeeId, $year]);
-        return $d === false ? self::DEFAULT_BALANCE : (int) $d;
+        $fresh = $d === false ? self::DEFAULT_BALANCE : (int) $d;
+        $carriedIn = (int) (Database::scalar('SELECT carried_out FROM vacation_balances WHERE employee_id = ? AND year = ?', [$employeeId, $year - 1]) ?: 0);
+        return ['fresh' => $fresh, 'carried_in' => $carriedIn, 'total' => $fresh + $carriedIn];
     }
 
     public static function setBalance(int $employeeId, int $year, int $days, string $note, int $uid): void
@@ -83,6 +98,46 @@ class VacationScheduleService
             Database::insert('INSERT INTO vacation_balances (employee_id, year, days, note, updated_by, updated_at) VALUES (?,?,?,?,?,?)',
                 [$employeeId, $year, $days, $note, $uid, date('Y-m-d H:i:s')]);
         }
+    }
+
+    /** Сколько дней года Y уже явно перенесено на год Y+1 (declared carry-out). */
+    public static function carriedOut(int $employeeId, int $year): int
+    {
+        return (int) (Database::scalar('SELECT carried_out FROM vacation_balances WHERE employee_id = ? AND year = ?', [$employeeId, $year]) ?: 0);
+    }
+
+    /** Увеличить перенос года Y на $delta дней (может быть отрицательным — при откате заявки). Создаёт строку остатка, если её ещё нет. */
+    public static function addCarriedOut(int $employeeId, int $year, int $delta): void
+    {
+        $row = Database::one('SELECT id, carried_out FROM vacation_balances WHERE employee_id = ? AND year = ?', [$employeeId, $year]);
+        if ($row) {
+            $new = max(0, (int) $row['carried_out'] + $delta);
+            Database::run('UPDATE vacation_balances SET carried_out = ? WHERE id = ?', [$new, (int) $row['id']]);
+        } else {
+            Database::insert('INSERT INTO vacation_balances (employee_id, year, days, carried_out) VALUES (?,?,?,?)',
+                [$employeeId, $year, self::DEFAULT_BALANCE, max(0, $delta)]);
+        }
+    }
+
+    /**
+     * Отразить одобренную правку (vacation_change_requests) в актуальной (неархивной) ревизии
+     * графика отдела, если она уже сформирована — без пересчёта подписи/hash документа (правки
+     * применяются к его текущим строкам; исторический snapshot на момент подписи не трогаем).
+     * $mode: 'add' — вставить строку; 'remove' — удалить строку по сотруднику/датам.
+     * Возвращает id новой строки (при 'add') или null.
+     */
+    public static function syncRowForPick(int $year, ?int $deptId, int $empId, string $start, string $end, int $days, string $mode): ?int
+    {
+        if (!$deptId) { return null; }
+        $sched = self::current($year, $deptId);
+        if (!$sched) { return null; }
+        if ($mode === 'add') {
+            return (int) Database::insert('INSERT INTO vacation_schedule_rows (schedule_id, employee_id, start_date, end_date, days, status) VALUES (?,?,?,?,?,?)',
+                [(int) $sched['id'], $empId, $start, $end, $days, self::ROW_APPROVED]);
+        }
+        Database::run('DELETE FROM vacation_schedule_rows WHERE schedule_id=? AND employee_id=? AND start_date=? AND end_date=?',
+            [(int) $sched['id'], $empId, $start, $end]);
+        return null;
     }
 
     /** Строки графика (с ФИО), упорядоченные по сотруднику и дате. */

@@ -1524,10 +1524,40 @@ $extra['acting_assignments'] = "CREATE TABLE IF NOT EXISTS acting_assignments (
     created_at  TIMESTAMP DEFAULT $NOW
 ) $ENGINE";
 
+// Заявки на правку графика отпусков ПОСЛЕ кампании (добавить период / убрать период / перенести
+// неиспользованные дни на следующий год). Одношаговое утверждение — начальник отдела сотрудника
+// (тот же, кто подписывает служебку кампании), см. VacationCampaignController::decideChangeRequest.
+$extra['vacation_change_requests'] = "CREATE TABLE IF NOT EXISTS vacation_change_requests (
+    id            $ID,
+    year          INT NOT NULL,
+    employee_id   INT NOT NULL,
+    kind          VARCHAR(20) NOT NULL,  -- add | remove | carry_next_year
+    start_date    DATE NULL,             -- для add
+    end_date      DATE NULL,             -- для add
+    days          INT NULL,              -- для add (кэш) и carry_next_year (кол-во переносимых дней)
+    pick_id       INT NULL,              -- для remove: какой vacation_picks удалить
+    note          VARCHAR(300) NULL,
+    status        VARCHAR(10) NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+    decided_by    INT NULL,
+    decided_at    TIMESTAMP NULL,
+    reject_reason VARCHAR(500) NULL,
+    created_by    INT NULL,
+    created_at    TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
+// Год, с которого реально ведётся расчёт бюджета ФОТ (для первого года внедрения системы —
+// если она включена в эксплуатацию в середине года). Без строки = 1 (с начала года, как раньше).
+$extra['budget_year_settings'] = "CREATE TABLE IF NOT EXISTS budget_year_settings (
+    year        INT NOT NULL PRIMARY KEY,
+    start_month INT NOT NULL DEFAULT 1
+) $ENGINE";
+
 foreach ($extra as $name => $sql) {
     $pdo->exec($ddlFix($sql));
     echo "OK  таблица {$name}\n";
 }
+try { $pdo->exec('CREATE INDEX IF NOT EXISTS ix_vcr_year_emp ON vacation_change_requests(year, employee_id)'); } catch (\Throwable $e) {}
+try { $pdo->exec('CREATE INDEX IF NOT EXISTS ix_vcr_status ON vacation_change_requests(status)'); } catch (\Throwable $e) {}
 
 // Разовый перенос старых СЭД-замещений (users.deputy_*) в acting_assignments (единый источник).
 if (\App\Core\Database::scalar("SELECT sval FROM settings WHERE skey='acting_migrated_deputies'") === false) {
@@ -1790,6 +1820,24 @@ if ((int) \App\Core\Database::scalar('SELECT COUNT(*) FROM nomenclature_cases') 
             ->execute([$idx, $title, $term, $years, $yy]);
     }
     echo "OK  номенклатура дел (" . count($cases) . " дел)\n";
+}
+
+// Явный перенос неиспользованных дней отпуска на следующий год (не входит в лимит нового года —
+// balanceOf() года Y+1 прибавляет carried_out года Y). Устанавливается при одобрении заявки
+// kind='carry_next_year' в vacation_change_requests.
+if (!columnExists('vacation_balances', 'carried_out')) {
+    $pdo->exec('ALTER TABLE vacation_balances ADD COLUMN carried_out INT NOT NULL DEFAULT 0');
+    echo "OK  колонка vacation_balances.carried_out добавлена\n";
+}
+
+// Факт использования бюджета ФОТ по окладу/стимулу ДО месяца начала расчёта (budget_year_settings,
+// первый год внедрения системы) — вводится по той же строке (department_id, year, source_id), что и
+// годовой бюджет, чтобы не размывать точные данные бухгалтерии пропорцией (StimulusBudgetService).
+foreach (['actual_oklad_before' => $MONEY . ' NOT NULL DEFAULT 0', 'actual_stimul_before' => $MONEY . ' NOT NULL DEFAULT 0'] as $col => $ddl) {
+    if (!columnExists('dept_budgets', $col)) {
+        $pdo->exec($ddlFix("ALTER TABLE dept_budgets ADD COLUMN $col $ddl"));
+        echo "OK  колонка dept_budgets.$col добавлена\n";
+    }
 }
 
 echo "Схема готова (драйвер: {$driver}).\n";

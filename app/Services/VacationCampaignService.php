@@ -40,6 +40,16 @@ class VacationCampaignService
         return $c ? (string) $c['stage'] : '';
     }
 
+    /**
+     * Год «открыт» — кампания на него заведена (на любом этапе, включая уже закрытую —
+     * закрытая кампания по-прежнему разрешает правки графика, см. VacationCampaignController).
+     * Пока года нет — НИКАКИЕ предложения по отпускам (самозапись, правки, перенос) вводить нельзя.
+     */
+    public static function yearIsOpen(int $year): bool
+    {
+        return self::current($year) !== null;
+    }
+
     /** Открыть кампанию года (этап «остатки»). */
     public static function open(int $year, int $by): array
     {

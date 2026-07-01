@@ -516,12 +516,17 @@ class PayrollService
         return max(0.0, min(1.0, self::employmentWorkingDays($period, $hire, $fire) / $cal));
     }
 
-    /** Годовой фактор занятости (сумма помесячных долей за год, 0..12). Полный год без дат = 12. */
-    public static function employmentYearFactor(int $year, ?string $hire, ?string $fire): float
+    /**
+     * Фактор занятости за месяцы [$fromMonth..12] года (сумма помесячных долей, 0..(13-$fromMonth)).
+     * Полный год без дат приёма/увольнения = (13-$fromMonth). $fromMonth=1 (по умолчанию) — весь год,
+     * как раньше; >1 используется бюджетом ФОТ, когда расчёт ведётся не с начала года (см. BFP-2).
+     */
+    public static function employmentYearFactor(int $year, ?string $hire, ?string $fire, int $fromMonth = 1): float
     {
-        if (($hire === null || $hire === '') && ($fire === null || $fire === '')) { return 12.0; }
+        $fromMonth = max(1, min(12, $fromMonth));
+        if (($hire === null || $hire === '') && ($fire === null || $fire === '')) { return (float) (13 - $fromMonth); }
         $f = 0.0;
-        for ($m = 1; $m <= 12; $m++) { $f += self::employmentProrate(sprintf('%04d-%02d', $year, $m), $hire, $fire); }
+        for ($m = $fromMonth; $m <= 12; $m++) { $f += self::employmentProrate(sprintf('%04d-%02d', $year, $m), $hire, $fire); }
         return round($f, 4);
     }
 
