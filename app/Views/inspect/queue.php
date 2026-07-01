@@ -9,7 +9,7 @@
 <section class="panel">
     <table class="table tbl-cards q-card q-queue">
         <thead>
-        <tr><th>Специалист</th><th>Рег. номер</th><th>План приема</th><th>Вердикт</th><th>Тип ошибки</th><th class="num">Снижение</th></tr>
+        <tr><th>Специалист</th><th>Рег. номер</th><th>План приема</th><th>Как отработано</th><th>Вердикт</th><th>Тип ошибки</th><th class="num">Снижение</th></tr>
         </thead>
         <tbody>
         <?php foreach ($items as $it):
@@ -21,6 +21,18 @@
                 <td><strong><?= e($it['reg_number']) ?></strong> <span class="muted"><?= e($it['country_code']) ?></span></td>
                 <?php $al = arrival_label($it['arrival_code'] ?? null, $it['arrival_detail'] ?? null); ?>
                 <td data-label="План приема" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($al) ?>"><?= $al !== '' ? e($al) : '<span class="muted">—</span>' ?></td>
+                <td data-label="Как отработано" style="max-width:220px">
+                    <?php if (!empty($it['dorabotka'])): ?>
+                        <span class="tag" style="background:#fff4e5;color:#93590c">доработка</span>
+                        <ul style="margin:4px 0 0;padding-left:16px;font-size:.8rem">
+                            <?php foreach (explode('; ', (string) $it['dorabotka']) as $reason): ?>
+                                <li><?= e($reason) ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php else: ?>
+                        <span class="tag ok">без замечаний</span>
+                    <?php endif; ?>
+                </td>
                 <td colspan="3" data-label="">
                     <form method="post" action="/inspect/<?= (int) $it['id'] ?>/review" class="review-form">
                         <?= csrf_field() ?>
@@ -57,7 +69,7 @@
             </tr>
         <?php endforeach; ?>
         <?php if (!$items): ?>
-            <tr><td colspan="6" class="muted">В выборке нет анкет.</td></tr>
+            <tr><td colspan="7" class="muted">В выборке нет анкет.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>
