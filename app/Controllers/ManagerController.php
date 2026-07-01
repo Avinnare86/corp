@@ -332,7 +332,12 @@ class ManagerController extends Controller
               ORDER BY u.full_name, ai.checked_at DESC", $params);
     }
 
-    /** Раскрытие специалиста в отчёте о проверке: его проверенные анкеты (с доработкой и вердиктом контроля). Partial. */
+    /**
+     * Раскрытие специалиста в отчёте о проверке: его проверенные анкеты (с доработкой и вердиктом контроля). Partial.
+     * Каждая строка — своя запись assignment_items с СОБСТВЕННЫМ комментарием специалиста и СВОИМ контролем
+     * (перепроверка после брака — отдельная строка recheck=1, комментарий/контроль исходной строки не подменяется).
+     * Для наглядности помечаем «Первичная»/«Повтор» и даём ссылку на исходного специалиста/дату при повторе.
+     */
     public function qualityDossiers(): void
     {
         Auth::requireRole('anketa_manager', 'controller', 'director', 'deputy_director', 'admin');
@@ -352,9 +357,14 @@ class ManagerController extends Controller
         $rows = Database::all(
             "SELECT ai.reg_number, ai.country_code, substr(ai.checked_at,1,10) AS checked_day, ai.comment_text,
                     CASE WHEN ai.comment_id IS NOT NULL OR EXISTS(SELECT 1 FROM item_comments ic WHERE ic.item_id=ai.id) THEN 1 ELSE 0 END AS has_dorabotka,
+                    COALESCE(ai.recheck,0) AS is_recheck,
+                    su.full_name AS src_name, substr(src.checked_at,1,10) AS src_checked_day,
+                    CASE WHEN EXISTS(SELECT 1 FROM assignment_items rc WHERE rc.source_item_id = ai.id) THEN 1 ELSE 0 END AS spawned_recheck,
                     (SELECT i.is_correct FROM inspections i WHERE i.dossier_id=ai.id AND i.is_correct IS NOT NULL ORDER BY i.id DESC LIMIT 1) AS ctrl_correct,
                     (SELECT et.name FROM inspections i LEFT JOIN error_types et ON et.id=i.error_type_id WHERE i.dossier_id=ai.id AND i.is_correct=0 ORDER BY i.id DESC LIMIT 1) AS ctrl_error
                FROM assignment_items ai
+               LEFT JOIN assignment_items src ON src.id = ai.source_item_id
+               LEFT JOIN users su ON su.id = src.assigned_to
               WHERE $where
               ORDER BY ai.checked_at DESC
               LIMIT 1000", $p);

@@ -5,21 +5,31 @@
 <table class="table tbl-cards q-card" style="margin:0;background:#fff">
     <thead>
         <tr>
-            <th>Рег. номер</th><th>Страна</th><th>Дата проверки</th>
+            <th>Рег. номер</th><th>Страна</th><th>Дата проверки</th><th>Вид</th>
             <th>Доработка (при проверке)</th><th>Последующий контроль</th>
         </tr>
     </thead>
     <tbody>
-        <?php foreach ($rows as $r): ?>
+        <?php foreach ($rows as $r): $isRecheck = (int) $r['is_recheck'] === 1; ?>
             <tr>
                 <td><strong><?= e($r['reg_number']) ?></strong></td>
                 <td data-label="Страна"><?= e($r['country_code']) ?></td>
                 <td data-label="Дата проверки"><?= e($r['checked_day']) ?></td>
+                <td data-label="Вид">
+                    <?php if ($isRecheck): ?>
+                        <span class="tag" style="background:#fff4e5;color:#93590c" title="Эта анкета — переделка брака, найденного у другого специалиста<?= $r['src_name'] ? ' (' . e($r['src_name']) . ($r['src_checked_day'] ? ', ' . e($r['src_checked_day']) : '') . ')' : '' ?>">🔁 повтор<?= $r['src_name'] ? ' после ' . e($r['src_name']) : '' ?></span>
+                    <?php else: ?>
+                        <span class="tag" style="background:#eef2ff;color:#3730a3">первичная</span>
+                        <?php if ((int) $r['spawned_recheck'] === 1): ?>
+                            <div class="muted" style="font-size:.72rem;margin-top:2px">брак — ушла на переделку другому специалисту</div>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </td>
                 <td data-label="Доработка">
                     <?php if ((int) $r['has_dorabotka'] === 1): ?>
                         <span class="tag">доработка<?= $r['comment_text'] ? ': ' . e($r['comment_text']) : '' ?></span>
                     <?php else: ?>
-                        <span class="muted">—</span>
+                        <span class="muted">без замечаний</span>
                     <?php endif; ?>
                 </td>
                 <td data-label="Контроль">

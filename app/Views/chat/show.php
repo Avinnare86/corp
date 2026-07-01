@@ -1,7 +1,16 @@
 <div class="chat-head">
     <a href="/chat" class="btn btn-mini">← Беседы</a>
     <h1><?= e($title) ?></h1>
-    <span class="muted"><?= count($members) ?> участн.</span>
+    <?php if ($conv['type'] === 'group'): ?>
+        <details class="chat-members">
+            <summary class="muted"><?= count($members) ?> участн.</summary>
+            <ul>
+                <?php foreach ($members as $m): ?><li><?= e($m['full_name']) ?></li><?php endforeach; ?>
+            </ul>
+        </details>
+    <?php else: ?>
+        <span class="muted"><?= count($members) ?> участн.</span>
+    <?php endif; ?>
 </div>
 
 <section class="panel chat-panel">
