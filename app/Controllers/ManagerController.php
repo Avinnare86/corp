@@ -164,12 +164,20 @@ class ManagerController extends Controller
         ]);
     }
 
+    /** Условие фильтра «проводился ли последующий контроль» (завершённая инспекция, is_correct IS NOT NULL). */
+    private function controlCondition(string $control): string
+    {
+        if ($control === 'yes') { return " AND ai.id IN (SELECT dossier_id FROM inspections WHERE is_correct IS NOT NULL)"; }
+        if ($control === 'no')  { return " AND ai.id NOT IN (SELECT dossier_id FROM inspections WHERE is_correct IS NOT NULL)"; }
+        return '';
+    }
+
     /**
      * Строки отчёта «качество проверки» в разрезе специалистов: ошибки, выявленные при проверке
      * (анкеты с доработками), и ошибки, выявленные при последующем контроле (inspections.is_correct=0),
-     * с фильтром по периоду (месяц checked_at) и по стране (country_code).
+     * с фильтром по периоду (месяц checked_at), по стране (country_code) и по наличию контроля.
      */
-    private function qualityRows(string $period, string $country, string $from = '', string $to = ''): array
+    private function qualityRows(string $period, string $country, string $from = '', string $to = '', string $control = ''): array
     {
         $where = 'ai.checked_at IS NOT NULL AND ai.assigned_to IS NOT NULL';
         $params = [];
@@ -179,6 +187,7 @@ class ManagerController extends Controller
             if ($to !== '')   { $where .= ' AND ai.checked_at <= ?'; $params[] = $to . ' 23:59:59'; }
         } elseif ($period !== '') { $where .= ' AND substr(ai.checked_at,1,7)=?'; $params[] = $period; }
         if ($country !== '') { $where .= ' AND ai.country_code=?'; $params[] = $country; }
+        $where .= $this->controlCondition($control);
         $rows = Database::all(
             "SELECT ai.assigned_to AS uid, u.full_name,
                     COUNT(*) AS checked,
@@ -216,7 +225,9 @@ class ManagerController extends Controller
         $country = (string) $this->input('country', '');
         $from = (string) $this->input('from', '');
         $to = (string) $this->input('to', '');
-        $rows = $this->qualityRows($period, $country, $from, $to);
+        $control = (string) $this->input('control', '');
+        if (!in_array($control, ['yes', 'no'], true)) { $control = ''; }
+        $rows = $this->qualityRows($period, $country, $from, $to, $control);
         $tot = ['checked' => 0, 'check_err' => 0, 'inspected' => 0, 'ctrl_err' => 0];
         foreach ($rows as $r) { foreach (['checked', 'check_err', 'inspected', 'ctrl_err'] as $k) { $tot[$k] += (int) $r[$k]; } }
         $tot['check_pct'] = $tot['checked'] > 0 ? round($tot['check_err'] / $tot['checked'] * 100, 1) : 0.0;
@@ -229,6 +240,7 @@ class ManagerController extends Controller
             'country'   => $country,
             'from'      => $from,
             'to'        => $to,
+            'control'   => $control,
             'periods'   => array_column(Database::all("SELECT DISTINCT substr(checked_at,1,7) AS p FROM assignment_items WHERE checked_at IS NOT NULL ORDER BY p DESC"), 'p'),
             'countries' => Database::all("SELECT ai.country_code AS code, c.name FROM assignment_items ai LEFT JOIN countries c ON c.code=ai.country_code WHERE ai.country_code IS NOT NULL AND ai.country_code<>'' GROUP BY ai.country_code, c.name ORDER BY c.name, ai.country_code"),
             'countryName' => $country !== '' ? (string) Database::scalar('SELECT name FROM countries WHERE code=?', [$country]) : '',
@@ -249,10 +261,12 @@ class ManagerController extends Controller
         $country = (string) $this->input('country', '');
         $from = (string) $this->input('from', '');
         $to = (string) $this->input('to', '');
+        $control = (string) $this->input('control', '');
+        if (!in_array($control, ['yes', 'no'], true)) { $control = ''; }
 
         // --- Лист 1: сводка по специалистам ---
         $summary = [];
-        foreach ($this->qualityRows($period, $country, $from, $to) as $r) {
+        foreach ($this->qualityRows($period, $country, $from, $to, $control) as $r) {
             $summary[] = [
                 $r['full_name'], (int) $r['checked'], (int) $r['check_err'], $r['check_pct'] . '%',
                 (int) $r['inspected'], (int) $r['ctrl_err'], $r['ctrl_pct'] === null ? '—' : $r['ctrl_pct'] . '%',
@@ -261,7 +275,7 @@ class ManagerController extends Controller
 
         // --- Лист 2: детально по каждой анкете ---
         $detail = [];
-        foreach ($this->qualityDetailRows($period, $country, $from, $to) as $d) {
+        foreach ($this->qualityDetailRows($period, $country, $from, $to, $control) as $d) {
             $ctrl = $d['insp_id'] === null ? 'Не контролировалась'
                   : ($d['ctrl_correct'] === null ? 'На контроле (не завершён)'
                   : ((int) $d['ctrl_correct'] === 1 ? 'Корректно' : 'Ошибка'));
@@ -303,7 +317,7 @@ class ManagerController extends Controller
      * Детально по каждой проверенной анкете для выгрузки (те же фильтры, что и сводка).
      * Одна инспекция на досье (inspections.dossier_id UNIQUE) — прямой LEFT JOIN.
      */
-    private function qualityDetailRows(string $period, string $country, string $from = '', string $to = ''): array
+    private function qualityDetailRows(string $period, string $country, string $from = '', string $to = '', string $control = ''): array
     {
         $where = 'ai.checked_at IS NOT NULL AND ai.assigned_to IS NOT NULL';
         $params = [];
@@ -312,6 +326,7 @@ class ManagerController extends Controller
             if ($to !== '')   { $where .= ' AND ai.checked_at <= ?'; $params[] = $to . ' 23:59:59'; }
         } elseif ($period !== '') { $where .= ' AND substr(ai.checked_at,1,7)=?'; $params[] = $period; }
         if ($country !== '') { $where .= ' AND ai.country_code=?'; $params[] = $country; }
+        $where .= $this->controlCondition($control);
         return Database::all(
             "SELECT u.full_name, ai.reg_number, ai.country_code, c.name AS country_name,
                     substr(ai.checked_at,1,10) AS checked_day,
@@ -347,6 +362,8 @@ class ManagerController extends Controller
         $country = (string) $this->input('country', '');
         $from = (string) $this->input('from', '');
         $to = (string) $this->input('to', '');
+        $control = (string) $this->input('control', '');
+        if (!in_array($control, ['yes', 'no'], true)) { $control = ''; }
         $where = 'ai.assigned_to = ? AND ai.checked_at IS NOT NULL';
         $p = [$uid];
         if ($from !== '' || $to !== '') {
@@ -354,6 +371,7 @@ class ManagerController extends Controller
             if ($to !== '')   { $where .= ' AND ai.checked_at <= ?'; $p[] = $to . ' 23:59:59'; }
         } elseif ($period !== '') { $where .= ' AND substr(ai.checked_at,1,7)=?'; $p[] = $period; }
         if ($country !== '') { $where .= ' AND ai.country_code=?'; $p[] = $country; }
+        $where .= $this->controlCondition($control);
         $rows = Database::all(
             "SELECT ai.reg_number, ai.country_code, substr(ai.checked_at,1,10) AS checked_day, ai.comment_text,
                     CASE WHEN ai.comment_id IS NOT NULL OR EXISTS(SELECT 1 FROM item_comments ic WHERE ic.item_id=ai.id) THEN 1 ELSE 0 END AS has_dorabotka,

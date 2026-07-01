@@ -67,14 +67,18 @@ class OrderController extends Controller
                  ORDER BY CASE WHEN o.status IN ('new','work','review') THEN 0 ELSE 1 END, o.due_date IS NULL, o.due_date, o.id DESC", [$uid, $uid]);
         }
 
-        // подчинённые для формы (руководителю — его отдел; manager/admin — все)
-        $subordinates = [];
+        // подчинённые для формы (руководителю — его отдел; manager/admin — все), с отделом — для окна выбора
+        // (и ответственного, и соисполнителей — общий список людей).
+        $peoplePick = [];
         if ($this->isBoss($me)) {
             if (in_array($me['role'], ['admin', 'manager'], true)) {
-                $subordinates = Database::all('SELECT id, full_name FROM users WHERE is_active = 1 AND id <> ? ORDER BY full_name', [$uid]);
+                $peoplePick = Database::all(
+                    "SELECT u.id, u.full_name, COALESCE(d.name, 'Без отдела') AS dept_name
+                       FROM users u LEFT JOIN departments d ON d.id = u.department_id
+                      WHERE u.is_active = 1 AND u.id <> ? ORDER BY dept_name, u.full_name", [$uid]);
             } else {
-                $subordinates = Database::all(
-                    'SELECT u.id, u.full_name FROM users u JOIN departments d ON d.id = u.department_id
+                $peoplePick = Database::all(
+                    'SELECT u.id, u.full_name, d.name AS dept_name FROM users u JOIN departments d ON d.id = u.department_id
                       WHERE d.head_id = ? AND u.is_active = 1 AND u.id <> ? ORDER BY u.full_name', [$uid, $uid]);
             }
         }
@@ -84,7 +88,7 @@ class OrderController extends Controller
             'tab' => $tab,
             'rows' => $rows,
             'isBoss' => $this->isBoss($me),
-            'subordinates' => $subordinates,
+            'peoplePickList' => $peoplePick,
             'meId' => $uid,
         ]);
     }

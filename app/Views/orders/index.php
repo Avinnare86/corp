@@ -23,7 +23,7 @@ $today = date('Y-m-d');
 <?php if ($isBoss && $tab === 'out'): ?>
 <section class="panel">
     <h2>Дать поручение</h2>
-    <form method="post" action="/orders" class="grid-form">
+    <form method="post" action="/orders" class="grid-form" id="orderForm">
         <?= csrf_field() ?>
         <label style="grid-column:span 2">Поручение<input type="text" name="title" required></label>
         <label>Вид
@@ -32,20 +32,74 @@ $today = date('Y-m-d');
             </select>
         </label>
         <label>Ответственный
-            <select name="assignee_id" required>
-                <?php foreach ($subordinates as $sub): ?><option value="<?= (int)$sub['id'] ?>"><?= e($sub['full_name']) ?></option><?php endforeach; ?>
-            </select>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px">
+                <button type="button" class="btn btn-mini" onclick="openPeoplePicker('assignee', window.assigneeId ? [window.assigneeId] : [], true)">👤 Выбрать ответственного</button>
+                <span id="assigneeChip"><span class="muted">не выбран</span></span>
+            </div>
+            <input type="hidden" name="assignee_id" id="assigneeHidden">
         </label>
-        <label>Соисполнители (Ctrl+клик)
-            <select name="coexecutors[]" multiple size="3">
-                <?php foreach ($subordinates as $sub): ?><option value="<?= (int)$sub['id'] ?>"><?= e($sub['full_name']) ?></option><?php endforeach; ?>
-            </select>
+        <label style="grid-column:span 2">Соисполнители
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px">
+                <button type="button" class="btn btn-mini" onclick="openPeoplePicker('coexec', window.coexecIds)">👥 Выбрать соисполнителей</button>
+                <span id="coexecChips" style="display:flex;gap:6px;flex-wrap:wrap"><span class="muted">не выбраны</span></span>
+            </div>
+            <span id="coexecHidden"></span>
         </label>
         <label>Срок<input type="date" name="due_date"></label>
         <label style="grid-column:1/-1">Подробности<textarea name="body" rows="2"></textarea></label>
         <button class="btn btn-primary">Дать поручение</button>
     </form>
 </section>
+
+<?php include __DIR__ . '/../partials/people_picker.php'; ?>
+<script>
+(function(){
+  window.coexecIds = [];
+  window.assigneeId = null;
+
+  function renderCoexecChips(){
+    var box = document.getElementById('coexecChips');
+    var hidden = document.getElementById('coexecHidden');
+    box.innerHTML = ''; hidden.innerHTML = '';
+    if (!window.coexecIds.length) { box.innerHTML = '<span class="muted">не выбраны</span>'; return; }
+    window.coexecIds.forEach(function(id){
+      var name = (window.__peopleIndex && window.__peopleIndex[id]) ? window.__peopleIndex[id] : ('#' + id);
+      var chip = document.createElement('span'); chip.className = 'tag';
+      chip.appendChild(document.createTextNode(name + ' '));
+      var x = document.createElement('a'); x.href = '#'; x.textContent = '×'; x.style.marginLeft = '4px';
+      x.onclick = function (e) { e.preventDefault(); window.coexecIds = window.coexecIds.filter(function (v) { return v !== id; }); renderCoexecChips(); };
+      chip.appendChild(x);
+      box.appendChild(chip);
+      var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'coexecutors[]'; inp.value = id;
+      hidden.appendChild(inp);
+    });
+  }
+
+  function renderAssignee(){
+    var chip = document.getElementById('assigneeChip');
+    var hidden = document.getElementById('assigneeHidden');
+    chip.innerHTML = '';
+    if (!window.assigneeId) { chip.innerHTML = '<span class="muted">не выбран</span>'; hidden.value = ''; return; }
+    var name = (window.__peopleIndex && window.__peopleIndex[window.assigneeId]) ? window.__peopleIndex[window.assigneeId] : ('#' + window.assigneeId);
+    var tag = document.createElement('span'); tag.className = 'tag';
+    tag.appendChild(document.createTextNode(name + ' '));
+    var x = document.createElement('a'); x.href = '#'; x.textContent = '×'; x.style.marginLeft = '4px';
+    x.onclick = function (e) { e.preventDefault(); window.assigneeId = null; renderAssignee(); };
+    tag.appendChild(x);
+    chip.appendChild(tag);
+    hidden.value = window.assigneeId;
+  }
+
+  window.applyPeople = function (target, ids) {
+    if (target === 'coexec') { window.coexecIds = ids; renderCoexecChips(); }
+    else if (target === 'assignee') { window.assigneeId = ids[0] || null; renderAssignee(); }
+  };
+
+  document.getElementById('orderForm').addEventListener('submit', function (e) {
+    if (!window.assigneeId) { e.preventDefault(); alert('Выберите ответственного.'); }
+  });
+})();
+</script>
 <?php endif; ?>
 
 <section class="panel">

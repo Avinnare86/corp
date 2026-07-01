@@ -22,13 +22,21 @@
             <?php endforeach; ?>
         </select>
     </label>
+    <label>Последующий контроль<br>
+        <select name="control">
+            <option value="" <?= $control === '' ? 'selected' : '' ?>>Все</option>
+            <option value="yes" <?= $control === 'yes' ? 'selected' : '' ?>>Проводился</option>
+            <option value="no" <?= $control === 'no' ? 'selected' : '' ?>>Не проводился</option>
+        </select>
+    </label>
     <button class="btn primary" type="submit">Показать</button>
-    <a class="btn" href="/manager/quality/export?period=<?= urlencode($period) ?>&country=<?= urlencode($country) ?>&from=<?= urlencode($from ?? '') ?>&to=<?= urlencode($to ?? '') ?>">⤓ Excel</a>
+    <a class="btn" href="/manager/quality/export?period=<?= urlencode($period) ?>&country=<?= urlencode($country) ?>&from=<?= urlencode($from ?? '') ?>&to=<?= urlencode($to ?? '') ?>&control=<?= urlencode($control) ?>">⤓ Excel</a>
 </form>
 
 <p class="muted" style="margin-top:0">
     Выбрано: период — <strong><?= $period !== '' ? e($period) : 'все' ?></strong>,
-    страна — <strong><?= $country !== '' ? e(($countryName ?: $country)) : 'все' ?></strong>.
+    страна — <strong><?= $country !== '' ? e(($countryName ?: $country)) : 'все' ?></strong>,
+    последующий контроль — <strong><?= $control === 'yes' ? 'проводился' : ($control === 'no' ? 'не проводился' : 'все') ?></strong>.
 </p>
 
 <?php
@@ -102,7 +110,7 @@ $ctlUrl = fn($emp) => '/inspect/manual?from=' . urlencode($cFrom) . '&to=' . url
 
 <script>
 (function () {
-    var f = { period: <?= json_encode($period) ?>, country: <?= json_encode($country) ?>, from: <?= json_encode($from ?? '') ?>, to: <?= json_encode($to ?? '') ?> };
+    var f = { period: <?= json_encode($period) ?>, country: <?= json_encode($country) ?>, from: <?= json_encode($from ?? '') ?>, to: <?= json_encode($to ?? '') ?>, control: <?= json_encode($control) ?> };
     Array.prototype.forEach.call(document.querySelectorAll('.qd-row'), function (row) {
         row.addEventListener('click', function () {
             var arrow = row.querySelector('.qd-arrow');
@@ -123,7 +131,8 @@ $ctlUrl = fn($emp) => '/inspect/manual?from=' . urlencode($cFrom) . '&to=' . url
             if (arrow) arrow.textContent = '▾';
             var qs = 'uid=' + encodeURIComponent(row.getAttribute('data-uid'))
                 + '&period=' + encodeURIComponent(f.period) + '&country=' + encodeURIComponent(f.country)
-                + '&from=' + encodeURIComponent(f.from) + '&to=' + encodeURIComponent(f.to);
+                + '&from=' + encodeURIComponent(f.from) + '&to=' + encodeURIComponent(f.to)
+                + '&control=' + encodeURIComponent(f.control);
             fetch('/manager/quality/dossiers?' + qs, { credentials: 'same-origin' })
                 .then(function (r) { return r.text(); })
                 .then(function (html) { td.innerHTML = html; if (window.enhanceTables) window.enhanceTables(td); })
