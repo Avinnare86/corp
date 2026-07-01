@@ -1,18 +1,20 @@
 <?php
-/** @var array $stages year|camp|stage|isHr|isHead|myDepts|memos|years|csrf */
+/** @var array $stages year|camp|stage|isHr|isHead|myDepts|memos|deptsAgreed|allAgreed|orgSchedule|years|csrf */
 use App\Services\VacationCampaignService as VC;
 $order = ['balances', 'blackouts', 'booking', 'signing', 'closed'];
 $curIdx = $camp ? array_search($stage, $order, true) : -1;
 $next = $curIdx !== false && $curIdx >= 0 && $curIdx < count($order) - 1 ? $order[$curIdx + 1] : null;
 $memoStatus = [
-    'new' => 'не начата', 'draft' => 'черновик/на доработке', 'head_signed' => 'подписана начальником',
-    'deputy_signed' => 'утверждена замом', 'approved' => 'утверждена директором', 'rejected' => 'отклонена',
+    'new' => 'не начата', 'draft' => 'черновик/на доработке', 'head_signed' => 'подписана начальником (ожидает зама)',
+    'deputy_signed' => 'согласована замом (сдан)', 'rejected' => 'отклонена',
 ];
+$deptsAgreed = $deptsAgreed ?? [];
+$orgSchedule = $orgSchedule ?? null;
 ?>
 <h1><?= e($title) ?></h1>
 <p class="muted" style="margin-top:0">Годовая кампания по отпускам: кадры открывают её и утверждают остатки, начальники/замы задают
-    запретные периоды, сотрудники сами вписывают даты (с контролем непересечения), затем по отделам подписывается служебка
-    (начальник → зам → директор), и кадры формируют итоговый график отпусков.</p>
+    запретные периоды, сотрудники сами вписывают даты. Начальник блокирует отдел и подписывает график ЭП, зам согласует;
+    после согласования всех отделов кадры формируют один сводный график по форме Т-7, который утверждает директор.</p>
 
 <form method="get" action="/vacation-campaign" style="margin-bottom:12px">
     <label>Год кампании
@@ -81,6 +83,42 @@ $memoStatus = [
         </div>
     </section>
 
+    <?php if ($isHr): ?>
+    <section class="panel">
+        <h2>Контроль отделов и сводный график (Т-7)</h2>
+        <p class="muted" style="margin-top:0">Все отделы должны согласовать свои графики (начальник → зам). После этого сформируйте
+            один сводный график по форме Т-7 — его утверждает директор своей ЭЦП, затем сотрудникам направляются уведомления.</p>
+        <table class="table tbl-cards">
+            <thead><tr><th>Отдел</th><th>Сотрудников</th><th>Статус</th></tr></thead>
+            <tbody>
+            <?php foreach ($deptsAgreed as $da): ?>
+                <tr>
+                    <td data-label="Отдел"><a href="/vacation-campaign/memo/<?= (int) $da['dept'] ?>?year=<?= (int) $year ?>"><?= e($da['name']) ?></a></td>
+                    <td data-label="Сотрудников"><?= (int) $da['employees'] ?></td>
+                    <td data-label="Статус">
+                        <?php if ($da['agreed']): ?><span class="tag ok">✓ согласован</span>
+                        <?php else: ?><span class="tag warn"><?= e($memoStatus[$da['status']] ?? $da['status']) ?></span><?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            <?php if (!$deptsAgreed): ?><tr><td colspan="3" class="muted">Нет отделов с активными сотрудниками.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+        <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <?php if ($orgSchedule): ?>
+                <a class="btn btn-primary" href="/vacation-schedule/<?= (int) $orgSchedule['id'] ?>/t7">
+                    Открыть сводный график Т-7 (<?= $orgSchedule['status'] === 'signed' ? 'утверждён директором' : 'черновик, на утверждении' ?>)</a>
+            <?php else: ?>
+                <form method="post" action="/vacation-schedule/consolidate" onsubmit="return confirm('Сформировать сводный график Т-7 по всем отделам?')">
+                    <input type="hidden" name="_csrf" value="<?= e($csrf) ?>"><input type="hidden" name="year" value="<?= (int) $year ?>">
+                    <button class="btn btn-primary" <?= $allAgreed ? '' : 'disabled' ?>>📋 Сформировать сводный график Т-7</button>
+                </form>
+                <?php if (!$allAgreed): ?><span class="muted">Кнопка станет доступна, когда все отделы согласуют графики.</span><?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </section>
+    <?php endif; ?>
+
     <?php if ($isHead): ?>
     <section class="panel">
         <h2>Служебки по отделам</h2>
@@ -100,7 +138,7 @@ $memoStatus = [
                 <tr>
                     <td data-label="Отдел"><?= e($dn) ?></td>
                     <td data-label="Статус">
-                        <?php if ($st === 'approved'): ?><span class="tag ok"><?= e($memoStatus[$st]) ?></span>
+                        <?php if ($st === 'deputy_signed'): ?><span class="tag ok"><?= e($memoStatus[$st]) ?></span>
                         <?php elseif ($st === 'new'): ?><span class="tag"><?= e($memoStatus[$st]) ?></span>
                         <?php else: ?><span class="tag warn"><?= e($memoStatus[$st] ?? $st) ?></span><?php endif; ?>
                     </td>

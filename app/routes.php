@@ -270,9 +270,14 @@ $router->get('/orders/{id}',         [OrderController::class, 'show']);
 // --- График отпусков (документ-сущность: отдел/организация, ревизии, подпись) ---
 $router->get('/vacation-schedule',                   [VacationScheduleController::class, 'index']);
 $router->get('/vacation-schedule/my',                [VacationScheduleController::class, 'my']);
+$router->get('/vacation-schedule/notices',           [VacationScheduleController::class, 'notices']);
+$router->post('/vacation-schedule/notices/sign',     [VacationScheduleController::class, 'signNotices']);
+$router->get('/vacation-schedule/notice/{id}',       [VacationScheduleController::class, 'noticeView']);
+$router->post('/vacation-schedule/consolidate',      [VacationScheduleController::class, 'consolidate']);
 $router->post('/vacation-schedule',                  [VacationScheduleController::class, 'create']);
 $router->get('/vacation-schedule/{id}/edit',         [VacationScheduleController::class, 'edit']);
 $router->get('/vacation-schedule/{id}/view',         [VacationScheduleController::class, 'show']);
+$router->get('/vacation-schedule/{id}/t7',           [VacationScheduleController::class, 't7']);
 $router->post('/vacation-schedule/{id}/row',         [VacationScheduleController::class, 'addRow']);
 $router->post('/vacation-schedule/{id}/row/{rowId}/delete', [VacationScheduleController::class, 'deleteRow']);
 $router->post('/vacation-schedule/{id}/row-status',  [VacationScheduleController::class, 'setRowStatus']);
@@ -302,6 +307,7 @@ $router->post('/vacation-campaign/picks',                  [VacationCampaignCont
 $router->post('/vacation-campaign/picks/{id}/delete',      [VacationCampaignController::class, 'deletePick']);
 $router->get('/vacation-campaign/map',                     [VacationCampaignController::class, 'map']);
 $router->get('/vacation-campaign/memo/{deptId}',           [VacationCampaignController::class, 'memo']);
+$router->post('/vacation-campaign/memo/{deptId}/lock',     [VacationCampaignController::class, 'lockDept']);
 $router->post('/vacation-campaign/memo/{deptId}/sign',     [VacationCampaignController::class, 'signMemo']);
 $router->post('/vacation-campaign/memo/{deptId}/reject',   [VacationCampaignController::class, 'rejectMemo']);
 $router->post('/vacation-campaign/memo/{deptId}/form-schedule', [VacationCampaignController::class, 'formSchedule']);

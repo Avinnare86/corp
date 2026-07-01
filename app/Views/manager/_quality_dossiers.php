@@ -27,7 +27,14 @@
                 </td>
                 <td data-label="Доработка">
                     <?php if ((int) $r['has_dorabotka'] === 1): ?>
-                        <span class="tag">доработка<?= $r['comment_text'] ? ': ' . e($r['comment_text']) : '' ?></span>
+                        <span class="tag" style="background:#fff4e5;color:#93590c">доработка</span>
+                        <?php if ($r['comment_text']): ?>
+                            <ul style="margin:4px 0 0;padding-left:16px;font-size:.8rem">
+                                <?php foreach (explode('; ', (string) $r['comment_text']) as $reason): ?>
+                                    <li><?= e($reason) ?></li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
                     <?php else: ?>
                         <span class="muted">без замечаний</span>
                     <?php endif; ?>

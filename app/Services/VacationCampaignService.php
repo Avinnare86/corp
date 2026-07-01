@@ -72,6 +72,57 @@ class VacationCampaignService
         return ['ok' => true];
     }
 
+    /**
+     * Организация «заблокировала» изменения — кампания на этапе подписания/завершена
+     * (stage ≥ signing). Пока идёт сбор (booking) — можно, если отдел не заблокирован.
+     */
+    public static function orgLocked(int $year): bool
+    {
+        $s = self::stageOf($year);
+        return $s === 'signing' || $s === 'closed';
+    }
+
+    /** Отдел заблокирован начальником для правки графика (самозапись/заявки заморожены). */
+    public static function deptLocked(int $year, int $deptId): bool
+    {
+        return (bool) Database::scalar(
+            'SELECT 1 FROM vacation_memos WHERE year=? AND department_id=? AND locked_at IS NOT NULL', [$year, $deptId]);
+    }
+
+    /**
+     * Начальник отдела блокирует изменения по отделу и приступает к правке графика.
+     * Создаёт (или помечает) служебку отдела vacation_memos с locked_at. После блокировки
+     * сотрудники этого отдела не могут менять свои даты самозаписью до утверждения графика.
+     */
+    public static function lockDept(int $year, int $deptId, int $by): array
+    {
+        if (!self::current($year)) { return ['ok' => false, 'error' => 'Кампания на ' . $year . ' не открыта.']; }
+        if (self::stageOf($year) !== 'booking') { return ['ok' => false, 'error' => 'Заблокировать можно только на этапе самозаписи.']; }
+        $memo = Database::one('SELECT id, locked_at FROM vacation_memos WHERE year=? AND department_id=?', [$year, $deptId]);
+        if ($memo && $memo['locked_at']) { return ['ok' => false, 'error' => 'Отдел уже заблокирован.']; }
+        $now = date('Y-m-d H:i:s');
+        if ($memo) {
+            Database::run('UPDATE vacation_memos SET locked_at=?, locked_by=? WHERE id=?', [$now, $by, (int) $memo['id']]);
+        } else {
+            Database::insert('INSERT INTO vacation_memos (year, department_id, status, locked_at, locked_by) VALUES (?,?,?,?,?)',
+                [$year, $deptId, 'draft', $now, $by]);
+        }
+        Audit::log('vacation_campaign.dept_lock', 'Отдел #' . $deptId . ' заблокирован для правки графика отпусков ' . $year);
+        return ['ok' => true];
+    }
+
+    /**
+     * Может ли сотрудник сейчас САМ менять свои даты (самозапись): кампания на этапе booking,
+     * его отдел не заблокирован и организация не заблокирована.
+     */
+    public static function canSelfBook(int $empId, int $year): bool
+    {
+        if (self::stageOf($year) !== 'booking') { return false; }
+        if (self::orgLocked($year)) { return false; }
+        $deptId = (int) (Database::scalar('SELECT department_id FROM users WHERE id=?', [$empId]) ?: 0);
+        return !($deptId && self::deptLocked($year, $deptId));
+    }
+
     /** Перевести кампанию на следующий этап (строго по порядку). */
     public static function advance(int $year, string $to, int $by): array
     {
@@ -223,5 +274,35 @@ class VacationCampaignService
     public static function plannedDays(int $empId, int $year): int
     {
         return (int) Database::scalar('SELECT COALESCE(SUM(days),0) FROM vacation_picks WHERE year=? AND employee_id=?', [$year, $empId]);
+    }
+
+    /**
+     * Состояние согласования отделов для сводного графика Т-7: по каждому отделу с активными
+     * сотрудниками — статус служебки (служебка согласована замом = отдел сдан).
+     * @return array<int,array{dept:int,name:string,status:string,agreed:bool,employees:int}>
+     */
+    public static function deptsAgreedState(int $year): array
+    {
+        $rows = Database::all(
+            "SELECT d.id, d.name, COUNT(u.id) AS emps,
+                    (SELECT status FROM vacation_memos m WHERE m.year=? AND m.department_id=d.id) AS memo_status
+               FROM departments d JOIN users u ON u.department_id=d.id AND u.is_active=1
+              GROUP BY d.id, d.name ORDER BY d.name", [$year]);
+        $out = [];
+        foreach ($rows as $r) {
+            $st = (string) ($r['memo_status'] ?? '');
+            $out[] = ['dept' => (int) $r['id'], 'name' => $r['name'], 'status' => $st !== '' ? $st : 'new',
+                      'agreed' => $st === 'deputy_signed', 'employees' => (int) $r['emps']];
+        }
+        return $out;
+    }
+
+    /** Все отделы (с активными сотрудниками) согласовали служебки — можно формировать сводный Т-7. */
+    public static function allDeptsAgreed(int $year): bool
+    {
+        $st = self::deptsAgreedState($year);
+        if (!$st) { return false; }
+        foreach ($st as $d) { if (!$d['agreed']) { return false; } }
+        return true;
     }
 }

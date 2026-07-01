@@ -65,16 +65,23 @@ class VacationCampaignController extends Controller
         $memos = Database::all(
             "SELECT m.*, d.name AS dept_name FROM vacation_memos m LEFT JOIN departments d ON d.id=m.department_id
               WHERE m.year=? ORDER BY d.name", [$year]);
+        $isHr = $this->isHr();
+        // Контроль кадров: сдача отделов + возможность сформировать сводный график Т-7.
+        $deptsAgreed = $isHr ? VC::deptsAgreedState($year) : [];
+        $orgSchedule = $isHr ? VS::current($year, null) : null;
         $this->view('vacation_campaign/index', [
             'title'   => 'Кампания по отпускам ' . $year,
             'year'    => $year,
             'camp'    => $camp,
             'stage'   => $camp ? (string) $camp['stage'] : '',
             'stages'  => VC::STAGES,
-            'isHr'    => $this->isHr(),
+            'isHr'    => $isHr,
             'isHead'  => $this->isHead(),
             'myDepts' => $myDepts,
-            'memos'   => array_filter($memos, fn($m) => $this->isHr() || in_array((int) $m['department_id'], $myDepts, true)),
+            'memos'   => array_filter($memos, fn($m) => $isHr || in_array((int) $m['department_id'], $myDepts, true)),
+            'deptsAgreed' => $deptsAgreed,
+            'allAgreed'   => $isHr && VC::allDeptsAgreed($year),
+            'orgSchedule' => $orgSchedule,
             'years'   => [(int) date('Y') + 1, (int) date('Y'), (int) date('Y') + 2],
             'csrf'    => Auth::csrf(),
         ]);
@@ -286,11 +293,24 @@ class VacationCampaignController extends Controller
         $uid = (int) Auth::id();
         $camp = VC::current($year);
         $stage = $camp ? (string) $camp['stage'] : '';
+        $deptId = (int) (Database::scalar('SELECT department_id FROM users WHERE id=?', [$uid]) ?: 0);
+        // Утверждённые даты сотрудника — из подписанного графика (сотрудник видит их всегда).
+        $approvedRows = Database::all(
+            "SELECT r.start_date, r.end_date, r.days FROM vacation_schedule_rows r
+               JOIN vacation_schedules s ON s.id = r.schedule_id
+              WHERE r.employee_id=? AND s.year=? AND s.status='signed' AND s.archived_at IS NULL
+              ORDER BY r.start_date", [$uid, $year]);
         $this->view('vacation_campaign/booking', [
             'title' => 'Моя запись на отпуск ' . $year, 'year' => $year, 'camp' => $camp, 'stage' => $stage,
             'picks' => VC::picksOf($uid, $year), 'balance' => VS::balanceBreakdown($uid, $year),
             'planned' => VC::plannedDays($uid, $year), 'carriedOut' => VS::carriedOut($uid, $year),
+            'canBook' => VC::canSelfBook($uid, $year),
+            'deptLocked' => $deptId && VC::deptLocked($year, $deptId),
+            'approvedRows' => $approvedRows,
             'myRequests' => Database::all('SELECT * FROM vacation_change_requests WHERE year=? AND employee_id=? ORDER BY created_at DESC', [$year, $uid]),
+            // Годы с открытыми кампаниями — выбор, куда подавать: самозапись (booking) либо заявки на
+            // изменение графика (signing/closed); балансы/запретные периоды — год открыт, но действий пока нет.
+            'campaignYears' => Database::all('SELECT year, stage FROM vacation_campaigns ORDER BY year DESC'),
             'csrf' => Auth::csrf(),
         ]);
     }
@@ -302,8 +322,12 @@ class VacationCampaignController extends Controller
         $uid = (int) Auth::id();
         $back = '/vacation-campaign/booking?year=' . $year;
         if (!VC::yearIsOpen($year)) { flash('Кампания на ' . $year . ' год не открыта — предложения по отпускам вводить нельзя.', 'error'); $this->redirect($back); }
-        if (VC::stageOf($year) !== 'booking') {
-            flash('Прямая самозапись закрыта (этап кампании прошёл). Подайте заявку на изменение графика — она пойдёт на утверждение начальнику отдела.', 'error');
+        if (!VC::canSelfBook($uid, $year)) {
+            $deptId = (int) (Database::scalar('SELECT department_id FROM users WHERE id=?', [$uid]) ?: 0);
+            $msg = ($deptId && VC::deptLocked($year, $deptId))
+                ? 'Отдел заблокирован начальником — самозапись закрыта. После утверждения графика можно подать заявку на изменение.'
+                : 'Прямая самозапись закрыта (этап кампании прошёл). После утверждения графика подайте заявку на изменение.';
+            flash($msg, 'error');
             $this->redirect($back);
         }
         $start = (string) $this->input('start_date'); $end = (string) $this->input('end_date');
@@ -325,10 +349,10 @@ class VacationCampaignController extends Controller
         if (!$p) { $this->redirect($back); }
         $isPriv = Auth::effectiveHas('admin', 'hr_manager');
         if (!$isPriv && (int) $p['employee_id'] !== $uid) { $this->redirect($back); }
-        // Прямое удаление — только пока идёт самозапись; позже (правки после кампании) — только
-        // заявкой (kind=remove) с утверждением начальника, либо напрямую кадрами/админом.
-        if (!$isPriv && VC::stageOf($year) !== 'booking') {
-            flash('Удалить период напрямую можно только на этапе самозаписи. Подайте заявку на изменение графика.', 'error');
+        // Прямое удаление — только пока идёт самозапись и отдел/организация не заблокированы;
+        // позже (правки после утверждения) — только заявкой (kind=remove), либо напрямую кадрами/админом.
+        if (!$isPriv && !VC::canSelfBook($uid, $year)) {
+            flash('Удалить период напрямую можно только на этапе самозаписи (до блокировки отдела). Подайте заявку на изменение графика.', 'error');
             $this->redirect($back);
         }
         Database::run('DELETE FROM vacation_picks WHERE id=?', [(int) $id]);
@@ -500,8 +524,23 @@ class VacationCampaignController extends Controller
             'memo' => Database::one('SELECT * FROM vacation_memos WHERE year=? AND department_id=?', [$year, $dept]),
             'signTypes' => self::SIGN_TYPES,
             'isHr' => $this->isHr(),
+            'locked' => VC::deptLocked($year, $dept),
+            'stage' => VC::stageOf($year),
             'csrf' => Auth::csrf(),
         ]);
+    }
+
+    /** Начальник блокирует изменения по отделу и приступает к правке графика (замораживает самозапись). */
+    public function lockDept(string $deptId): void
+    {
+        Auth::requireLogin(); Auth::verifyCsrf();
+        if (!$this->isHead()) { $this->redirect('/vacation-campaign'); }
+        $year = $this->year();
+        $dept = (int) $deptId;
+        if (!in_array($dept, $this->myDepts(), true)) { flash('Отдел вне вашей зоны.', 'error'); $this->redirect('/vacation-campaign'); }
+        $res = VC::lockDept($year, $dept, (int) Auth::id());
+        flash($res['ok'] ? 'Изменения по отделу заблокированы — можно править график и подписывать.' : $res['error'], $res['ok'] ? 'success' : 'error');
+        $this->redirect('/vacation-campaign/memo/' . $dept . '?year=' . $year);
     }
 
     public function signMemo(string $deptId): void
@@ -519,27 +558,24 @@ class VacationCampaignController extends Controller
         $memo = Database::one('SELECT * FROM vacation_memos WHERE year=? AND department_id=?', [$year, $dept]);
         $status = $memo['status'] ?? 'new';
 
-        // определить этап подписи и право на него
+        // Цепочка согласования отдела: начальник → зам (терминал). Директор подписывает уже
+        // сводный график Т-7 по организации (VacationScheduleController), а не служебку отдела.
         $isAdmin = Auth::effectiveHas('admin');
         if ($status === 'new' || $status === 'draft') {
             $action = 'head';
             if (!$isAdmin && !Auth::effectiveHas('hr_manager') && !in_array($dept, Org::headedDeptIds($uid), true) && !Org::isSuperiorOfDept($uid, $dept)) {
                 flash('Подписать служебку отдела может его начальник.', 'error'); $this->redirect($back);
             }
+            if (!VC::deptLocked($year, $dept)) { flash('Сначала заблокируйте изменения по отделу, затем подпишите график.', 'error'); $this->redirect($back); }
             $issues = $this->deptCompleteness($year, $dept);
             if ($issues) { flash('Нельзя подписать — не заполнено: ' . implode('; ', $issues) . '.', 'error'); $this->redirect($back); }
         } elseif ($status === 'head_signed') {
             $action = 'deputy';
             if (!$isAdmin && !(Auth::effectiveHas('deputy_director') && Org::isSuperiorOfDept($uid, $dept))) {
-                flash('Утвердить служебку на этом этапе может курирующий заместитель.', 'error'); $this->redirect($back);
-            }
-        } elseif ($status === 'deputy_signed') {
-            $action = 'director';
-            if (!$isAdmin && !Auth::effectiveHas('director')) {
-                flash('Утвердить служебку на этом этапе может директор.', 'error'); $this->redirect($back);
+                flash('Согласовать служебку на этом этапе может курирующий заместитель.', 'error'); $this->redirect($back);
             }
         } else {
-            flash('Служебка уже утверждена.', 'error'); $this->redirect($back);
+            flash('Служебка отдела уже согласована.', 'error'); $this->redirect($back);
         }
 
         // 1) аутентификация подписанта (без записи в журнал — id служебки нужен для записи)
@@ -568,19 +604,26 @@ class VacationCampaignController extends Controller
                     'Начальник подписал график отпусков отдела «' . $deptName . '» на ' . $year . ' — ожидает вашего утверждения.');
             }
             flash('Служебка отдела подписана и направлена на утверждение.');
-        } elseif ($action === 'deputy') {
+        } else { // deputy — терминал согласования отдела; кадры включают отдел в сводный график Т-7
             Database::run('UPDATE vacation_memos SET status=?, deputy_id=?, deputy_signed_at=?, deputy_sign_type=?, deputy_sign_hash=? WHERE id=?',
                 ['deputy_signed', $uid, $d['signed_at'], $d['sign_type'], $d['sign_hash'], $entityId]);
             SignService::recordSignature('vacation_memo', $entityId, $uid, $d);
-            if ($dir = Org::directorUserId()) { NotificationService::create($dir, 'Отпуска: служебка на утверждение директором', 'Зам утвердил график отпусков отдела — ожидает вашего утверждения.'); }
-            flash('Служебка утверждена — ожидает директора.');
-        } else { // director
-            Database::run('UPDATE vacation_memos SET status=?, director_id=?, director_signed_at=?, director_sign_type=?, director_sign_hash=? WHERE id=?',
-                ['approved', $uid, $d['signed_at'], $d['sign_type'], $d['sign_hash'], $entityId]);
-            SignService::recordSignature('vacation_memo', $entityId, $uid, $d);
-            flash('Служебка отдела утверждена директором — кадры могут сформировать график.');
+            $deptName = (string) Database::scalar('SELECT name FROM departments WHERE id=?', [$dept]);
+            foreach (self::hrUserIds() as $hr) {
+                NotificationService::create($hr, 'Отпуска: отдел согласован',
+                    'График отпусков отдела «' . $deptName . '» на ' . $year . ' согласован замом — можно включать в сводный график Т-7.');
+            }
+            flash('Служебка отдела согласована замом. Кадры включат отдел в сводный график.');
         }
         $this->redirect($back);
+    }
+
+    /** Пользователи кадров (роли hr/hr_manager/admin) — для уведомлений о готовности отделов. */
+    private static function hrUserIds(): array
+    {
+        return array_map(fn($r) => (int) $r['id'], Database::all(
+            "SELECT DISTINCT u.id FROM users u LEFT JOIN user_roles ur ON ur.user_id=u.id
+              WHERE u.is_active=1 AND (u.role='admin' OR ur.role_slug IN ('admin','hr_manager','hr'))"));
     }
 
     public function rejectMemo(string $deptId): void

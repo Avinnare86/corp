@@ -140,6 +140,38 @@ class VacationScheduleService
         return null;
     }
 
+    /**
+     * Сформировать СВОДНЫЙ график по организации (форма Т-7) из самозаписей кампании
+     * (vacation_picks) за год — все активные сотрудники, сгруппированные по подразделениям.
+     * Строки создаются сразу «согласованными» (отделы/замы уже согласовали служебки).
+     * Возвращает id нового графика (черновик, ждёт подписи директора).
+     */
+    public static function formFromCampaign(int $year, int $by): int
+    {
+        $rev = self::nextRevision($year, null);
+        $sid = (int) Database::insert(
+            'INSERT INTO vacation_schedules (year, department_id, revision, status, created_by, created_at) VALUES (?,NULL,?,?,?,?)',
+            [$year, $rev, self::ST_DRAFT, $by, date('Y-m-d H:i:s')]);
+        foreach (Database::all(
+            'SELECT vp.employee_id, vp.start_date, vp.end_date, vp.days FROM vacation_picks vp
+               JOIN users u ON u.id = vp.employee_id
+              WHERE vp.year = ? AND u.is_active = 1 ORDER BY u.department_id, u.full_name, vp.start_date', [$year]) as $p) {
+            Database::insert('INSERT INTO vacation_schedule_rows (schedule_id, employee_id, start_date, end_date, days, status) VALUES (?,?,?,?,?,?)',
+                [$sid, (int) $p['employee_id'], $p['start_date'], $p['end_date'],
+                 (int) $p['days'] ?: self::calDays($p['start_date'], $p['end_date']), self::ROW_APPROVED]);
+        }
+        return $sid;
+    }
+
+    /** Табельный номер сотрудника (если ведётся) — для формы Т-7. */
+    public static function tabNumber(int $employeeId): string
+    {
+        foreach (['tab_number', 'personnel_number', 'staff_number'] as $col) {
+            try { $v = Database::scalar("SELECT $col FROM users WHERE id=?", [$employeeId]); if ($v !== false && $v !== null && $v !== '') { return (string) $v; } } catch (\Throwable $e) {}
+        }
+        return (string) $employeeId;
+    }
+
     /** Строки графика (с ФИО), упорядоченные по сотруднику и дате. */
     public static function rows(int $scheduleId): array
     {

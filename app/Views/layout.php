@@ -76,6 +76,7 @@ if ($uid) {
     if ($isHrMgr || $isTimekeeper || $canSeeStaff || $can('dept_head', 'deputy_director', 'director', 'accountant', 'finance_manager')) {
         $g = [];
         if ($isHrMgr || $can('director', 'deputy_director')) { $g[] = ['/vacation-schedule', 'График отпусков', 0]; }
+        if ($isHrMgr || $can('director', 'deputy_director')) { $g[] = ['/vacation-schedule/notices', 'Уведомления об отпуске', 0]; }
         if ($isHrMgr || $isTimekeeper || $can('dept_head', 'deputy_director', 'director')) { $g[] = ['/vacation-campaign', 'Кампания отпусков', $vacInbox]; }
         $canShift = \App\Controllers\ShiftController::canSee((int) $uid);
         if ($isTimekeeper || $canShift) { $g[] = ['/timesheet2', 'Электронный табель', 0]; }

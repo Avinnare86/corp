@@ -117,6 +117,30 @@
 </section>
 
 <section class="panel">
+    <h2>Начальник отдела кадров (уведомления об отпуске)</h2>
+    <form method="post" action="/admin/settings" class="grid-form">
+        <?= csrf_field() ?>
+        <input type="hidden" name="inspection_percent" value="<?= e($inspectionPercent) ?>">
+        <input type="hidden" name="daily_norm" value="<?= e($dailyNorm) ?>">
+        <input type="hidden" name="penalty_step" value="<?= e($penaltyStep) ?>">
+        <input type="hidden" name="penalty_max_multiplier" value="<?= e($penaltyMaxMultiplier) ?>">
+        <label style="grid-column:1/-1">Сотрудник — начальник отдела кадров
+            <select name="vacation_hr_head">
+                <option value="0">— не задан —</option>
+                <?php foreach ($hrCandidates as $u): ?>
+                    <option value="<?= (int) $u['id'] ?>" <?= (int) $u['id'] === (int) $vacationHrHeadId ? 'selected' : '' ?>>
+                        <?= e($u['full_name']) ?><?= $u['position'] ? ' — ' . e($u['position']) : '' ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <button class="btn btn-primary">Сохранить начальника отдела кадров</button>
+    </form>
+    <p class="muted">Указанный сотрудник подписывает своей ЭП пакет уведомлений об отпуске (ст. 123 ТК РФ) после утверждения
+        сводного графика Т-7 директором. Только после его подписи уведомления автоматически направляются сотрудникам
+        в личный кабинет и на почту. Подписать пакет может лично этот сотрудник в разделе «Уведомления об отпуске».</p>
+</section>
+
+<section class="panel">
     <h2>Электронная подпись (сервис УКЭП)</h2>
     <form method="post" action="/admin/settings" class="grid-form">
         <?= csrf_field() ?>

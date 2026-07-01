@@ -1,10 +1,13 @@
 <?php
-/** @var array $rows memo signTypes isHr year dept csrf */
+/** @var array $rows memo signTypes isHr locked stage year dept csrf */
 $status = $memo['status'] ?? 'new';
 $statusLabel = [
     'new' => 'не начата', 'draft' => 'на доработке', 'head_signed' => 'подписана начальником (ожидает зама)',
-    'deputy_signed' => 'утверждена замом (ожидает директора)', 'approved' => 'утверждена директором',
+    'deputy_signed' => 'согласована замом', 'approved' => 'утверждена директором',
 ][$status] ?? $status;
+$locked = !empty($locked);
+// Пока отдел не заблокирован начальником — самозапись сотрудников открыта; подписывать нельзя.
+$needLock = in_array($status, ['new', 'draft'], true) && !$locked;
 // полнота: можно ли подписывать (у всех распределён остаток + длинная часть)
 $blocked = [];
 foreach ($rows as $r) {
@@ -14,8 +17,8 @@ foreach ($rows as $r) {
 ?>
 <h1><?= e($title) ?></h1>
 <p class="muted" style="margin-top:0"><a href="/vacation-campaign?year=<?= (int) $year ?>">← к кампании</a> &nbsp;
-    Служебная записка о графике отпусков отдела на <?= (int) $year ?> год. Маршрут: начальник → курирующий зам → директор.
-    После утверждения директором кадры формируют итоговый график.</p>
+    Служебная записка о графике отпусков отдела на <?= (int) $year ?> год. Маршрут: начальник → курирующий зам.
+    После согласования всеми отделами кадры формируют один сводный график по форме Т-7 — его утверждает директор.</p>
 
 <section class="panel">
     <strong>Статус: </strong>
@@ -25,7 +28,29 @@ foreach ($rows as $r) {
     <?php if (!empty($memo['reject_reason']) && $status === 'draft'): ?>
         <div class="muted" style="margin-top:6px">Причина возврата: <?= e($memo['reject_reason']) ?></div>
     <?php endif; ?>
+    <div style="margin-top:8px">
+        <?php if ($locked): ?><span class="tag" style="background:#fff4e5;color:#93590c">🔒 изменения по отделу заблокированы</span>
+        <?php else: ?><span class="tag ok">🔓 самозапись сотрудников открыта</span><?php endif; ?>
+    </div>
 </section>
+
+<?php if ($needLock): ?>
+<section class="panel" style="border-left:4px solid #26368B">
+    <h2 style="margin-top:0">Блокировка изменений по отделу</h2>
+    <p class="muted" style="margin-top:0">Пока идёт самозапись, сотрудники сами вносят предпочтения. Чтобы приступить к
+        правке графика и подписанию — <strong>заблокируйте изменения</strong>: после этого сотрудники отдела не смогут
+        менять свои даты, а вы отредактируете график в разделе «График отпусков» и подпишете эту служебку.</p>
+    <?php if ($stage !== 'booking'): ?>
+        <p class="tag warn">Заблокировать можно только на этапе «Самозапись» (текущий этап кампании другой).</p>
+    <?php else: ?>
+    <form method="post" action="/vacation-campaign/memo/<?= (int) $dept ?>/lock?year=<?= (int) $year ?>"
+          onsubmit="return confirm('Заблокировать изменения по отделу? Сотрудники больше не смогут менять свои даты самозаписью.')">
+        <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
+        <button class="btn btn-primary">🔒 Заблокировать изменения и приступить к правке</button>
+    </form>
+    <?php endif; ?>
+</section>
+<?php endif; ?>
 
 <section class="panel">
     <h2 style="margin-top:0">Предложения сотрудников</h2>
@@ -52,22 +77,18 @@ foreach ($rows as $r) {
 </section>
 
 <?php
-// показать панель подписи, если есть следующий этап
-$canSignStage = in_array($status, ['new', 'draft', 'head_signed', 'deputy_signed'], true);
+// панель подписи: начальник (new/draft, после блокировки) → зам (head_signed). deputy_signed — терминал.
+$canSignStage = in_array($status, ['new', 'draft', 'head_signed'], true) && !$needLock;
 ?>
 <?php if ($canSignStage): ?>
-    <?php if ($status === 'new' || $status === 'draft'): ?>
-        <?php if ($blocked): ?>
-            <section class="panel" style="border-left:4px solid #e0a800">
-                <strong>Нельзя подписать — отпуск распределён не у всех:</strong>
-                <ul style="margin:6px 0 0"><?php foreach ($blocked as $b): ?><li class="muted"><?= e($b) ?></li><?php endforeach; ?></ul>
-            </section>
-        <?php endif; ?>
+    <?php if (($status === 'new' || $status === 'draft') && $blocked): ?>
+        <section class="panel" style="border-left:4px solid #e0a800">
+            <strong>Нельзя подписать — отпуск распределён не у всех:</strong>
+            <ul style="margin:6px 0 0"><?php foreach ($blocked as $b): ?><li class="muted"><?= e($b) ?></li><?php endforeach; ?></ul>
+        </section>
     <?php endif; ?>
     <section class="panel">
-        <h2 style="margin-top:0">
-            <?= $status === 'new' || $status === 'draft' ? 'Подписать служебку (начальник)' : ($status === 'head_signed' ? 'Утвердить (зам)' : 'Утвердить (директор)') ?>
-        </h2>
+        <h2 style="margin-top:0"><?= $status === 'head_signed' ? 'Согласовать график отдела (зам директора)' : 'Подписать график отдела (начальник)' ?></h2>
         <form method="post" action="/vacation-campaign/memo/<?= (int) $dept ?>/sign?year=<?= (int) $year ?>" class="grid-form">
             <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
             <label>Вид подписи
@@ -76,28 +97,23 @@ $canSignStage = in_array($status, ['new', 'draft', 'head_signed', 'deputy_signed
                 </select>
             </label>
             <label>Пароль <input type="password" name="password" required></label>
-            <button class="btn btn-primary" <?= ($status === 'new' || $status === 'draft') && $blocked ? 'disabled' : '' ?>>Подписать</button>
+            <button class="btn btn-primary" <?= ($status === 'new' || $status === 'draft') && $blocked ? 'disabled' : '' ?>>Подписать ЭП</button>
         </form>
     </section>
-    <?php if (in_array($status, ['head_signed', 'deputy_signed'], true)): ?>
+    <?php if ($status === 'head_signed'): ?>
         <section class="panel">
-            <form method="post" action="/vacation-campaign/memo/<?= (int) $dept ?>/reject?year=<?= (int) $year ?>" onsubmit="return confirm('Вернуть служебку начальнику на доработку?')" class="grid-form">
+            <form method="post" action="/vacation-campaign/memo/<?= (int) $dept ?>/reject?year=<?= (int) $year ?>" onsubmit="return confirm('Вернуть график начальнику на доработку?')" class="grid-form">
                 <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
                 <label>Причина возврата <input type="text" name="reason" maxlength="500"></label>
-                <button class="btn btn-mini btn-danger">Вернуть на доработку</button>
+                <button class="btn btn-mini btn-danger">Вернуть начальнику на доработку</button>
             </form>
         </section>
     <?php endif; ?>
 <?php endif; ?>
 
-<?php if ($status === 'approved' && $isHr): ?>
+<?php if ($status === 'deputy_signed'): ?>
     <section class="panel" style="border-left:4px solid #2a7">
-        <h2 style="margin-top:0">Формирование графика</h2>
-        <p class="muted" style="margin-top:0">Служебка утверждена директором. Сформируйте документ «График отпусков» отдела
-            из распределённых периодов — затем подпишите его в разделе «График отпусков».</p>
-        <form method="post" action="/vacation-campaign/memo/<?= (int) $dept ?>/form-schedule?year=<?= (int) $year ?>">
-            <input type="hidden" name="_csrf" value="<?= e($csrf) ?>">
-            <button class="btn btn-primary">Сформировать график отпусков отдела</button>
-        </form>
+        <p style="margin:0"><span class="tag ok">✓ отдел согласован</span> &nbsp;
+            График отдела согласован замом. Кадры включат его в сводный график по форме Т-7 и передадут на утверждение директору.</p>
     </section>
 <?php endif; ?>

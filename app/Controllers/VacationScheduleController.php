@@ -86,14 +86,14 @@ class VacationScheduleController extends Controller
             'INSERT INTO vacation_schedules (year, department_id, revision, status, created_by, created_at) VALUES (?,?,?,?,?,?)',
             [$year, $deptId, $rev, VS::ST_DRAFT, (int) $me['id'], date('Y-m-d H:i:s')]);
 
-        // Предзаполнение из утверждённых заявок на отпуск этого года (по сотрудникам охвата).
+        // Предзаполнение из самозаписей кампании этого года (vacation_picks) по сотрудникам охвата.
         $emps = VS::scopeEmployees($deptId);
         $ids  = array_map(fn($e) => (int) $e['id'], $emps);
         if ($ids) {
             $in = implode(',', array_fill(0, count($ids), '?'));
             $reqs = Database::all(
-                "SELECT employee_id, start_date, end_date, days FROM vacation_requests
-                  WHERE year = ? AND status = 'approved' AND employee_id IN ($in) ORDER BY employee_id, start_date",
+                "SELECT employee_id, start_date, end_date, days FROM vacation_picks
+                  WHERE year = ? AND employee_id IN ($in) ORDER BY employee_id, start_date",
                 array_merge([$year], $ids));
             foreach ($reqs as $r) {
                 Database::insert(
@@ -104,6 +104,30 @@ class VacationScheduleController extends Controller
         Audit::log('vacation_schedule.create', 'График отпусков ' . $year . ' / ' . VS::scopeLabel($deptId) . ' (рев. ' . $rev . ')');
         flash('Создан ' . ($rev === 0 ? 'основной' : 'корректировочный (рев. ' . $rev . ')') . ' график отпусков на ' . $year . ' — ' . VS::scopeLabel($deptId) . '.');
         $this->redirect('/vacation-schedule/' . $newId . '/edit');
+    }
+
+    /**
+     * Кадры: сформировать СВОДНЫЙ график по организации (форма Т-7) из самозаписей кампании —
+     * после того как все отделы согласовали служебки (начальник → зам). Затем документ
+     * передаётся директору на утверждение ЭЦП.
+     */
+    public function consolidate(): void
+    {
+        $me = $this->requireHr();
+        Auth::verifyCsrf();
+        $year = (int) $this->input('year', (int) date('Y') + 1);
+        if (!\App\Services\VacationCampaignService::allDeptsAgreed($year)) {
+            flash('Не все отделы согласовали графики — служебки должны быть согласованы замами.', 'error');
+            $this->redirect('/vacation-campaign?year=' . $year);
+        }
+        if ($open = VS::openDraft($year, null)) {
+            flash('Сводный график на ' . $year . ' уже создан — продолжите его.', 'error');
+            $this->redirect('/vacation-schedule/' . $open['id'] . '/edit');
+        }
+        $sid = VS::formFromCampaign($year, (int) $me['id']);
+        Audit::log('vacation_schedule.consolidate', 'Сформирован сводный график отпусков (Т-7) на ' . $year . ' из кампании');
+        flash('Сформирован сводный график отпусков (форма Т-7) на ' . $year . '. Проверьте и передайте директору на утверждение.');
+        $this->redirect('/vacation-schedule/' . $sid . '/t7');
     }
 
     /** Рабочий экран графика: сотрудники охвата, остатки, периоды, проверка, подпись. */
@@ -218,8 +242,14 @@ class VacationScheduleController extends Controller
         Auth::verifyCsrf();
         $s = $this->load($id);
         if ($s['status'] === VS::ST_SIGNED) { $this->redirect('/vacation-schedule/' . $id . '/view'); }
+        $isOrg = $s['department_id'] === null;
+        // Сводный график по организации (форма Т-7) утверждает директор своей ЭЦП.
+        if ($isOrg && !Auth::effectiveHas('director', 'admin')) {
+            flash('Сводный график отпусков (форма Т-7) утверждает директор.', 'error');
+            $this->redirect('/vacation-schedule/' . $id . '/t7');
+        }
         $type = strtoupper((string) $this->input('sign_type'));
-        if (!isset(self::SIGN_TYPES[$type])) { flash('Выберите вид подписи.', 'error'); $this->redirect('/vacation-schedule/' . $id . '/edit'); }
+        if (!isset(self::SIGN_TYPES[$type])) { flash('Выберите вид подписи.', 'error'); $this->redirect('/vacation-schedule/' . $id . '/' . ($isOrg ? 't7' : 'edit')); }
 
         $check = VS::validate($s);
         if (!$check['ok']) {
@@ -248,6 +278,19 @@ class VacationScheduleController extends Controller
              $res['sign_type'], $res['signed_at'], $res['sign_hash'], $res['serial'], $payload, (int) $id]);
 
         Audit::log('vacation_schedule.sign', 'Подписан график отпусков #' . $id . ' (' . self::SIGN_TYPES[$type] . ')');
+
+        // Сводный график Т-7 утверждён директором → формируем черновики уведомлений об отпуске
+        // и просим начальника отдела кадров подписать пакет (уведомления уйдут сотрудникам после его ЭП).
+        if ($isOrg) {
+            $created = \App\Services\VacationNoticeService::generateForSchedule((int) $id);
+            $hrHead = self::hrHead();
+            if ($hrHead) {
+                \App\Services\NotificationService::create((int) $hrHead['id'], 'Отпуска: подпишите уведомления',
+                    'Сводный график отпусков ' . $s['year'] . ' утверждён директором. Сформировано уведомлений: ' . $created . ' — подпишите пакет и разошлите сотрудникам.');
+            }
+            flash('Сводный график Т-7 утверждён директором (' . self::SIGN_TYPES[$type] . '). Сформировано уведомлений: ' . $created . ' — начальник отдела кадров подписывает и рассылает их в разделе «Уведомления об отпуске».');
+            $this->redirect('/vacation-schedule/' . $id . '/t7');
+        }
         flash('График отпусков подписан (' . self::SIGN_TYPES[$type] . '). Сотрудникам показан их период.');
         $this->redirect('/vacation-schedule/' . $id . '/view');
     }
@@ -294,6 +337,103 @@ class VacationScheduleController extends Controller
         Audit::log('vacation_schedule.delete', 'Удалён черновик графика отпусков #' . $id);
         flash('Черновик графика удалён.');
         $this->redirect('/vacation-schedule');
+    }
+
+    /** Печатная форма Т-7 «График отпусков» (А4) со штампом ЭП директора; для сводного графика — форма подписи. */
+    public function t7(string $id): void
+    {
+        $this->requireHr();
+        $s = $this->load($id);
+        $rows = Database::all(
+            "SELECT r.*, u.full_name, u.position, u.department_id FROM vacation_schedule_rows r
+               JOIN users u ON u.id = r.employee_id WHERE r.schedule_id=? ORDER BY u.department_id, u.full_name, r.start_date", [(int) $id]);
+        $deptNames = [];
+        foreach (Database::all('SELECT id, name FROM departments') as $d) { $deptNames[(int) $d['id']] = $d['name']; }
+        $this->view('vacation_schedule/t7', [
+            'title'     => 'График отпусков (Т-7) на ' . $s['year'],
+            's'         => $s,
+            'rows'      => $rows,
+            'deptNames' => $deptNames,
+            'orgName'   => (string) \App\Services\Settings::get('org_name', 'ФГБУ «Интеробразование»'),
+            'hrHead'    => self::hrHead(),
+            'sig'       => SignService::lastSignature('vacation_schedule', (int) $id),
+            'canSignAsDirector' => $s['department_id'] === null && Auth::effectiveHas('director', 'admin'),
+            'signTypes' => self::SIGN_TYPES,
+            'csrf'      => Auth::csrf(),
+        ], false);
+    }
+
+    /** Начальник отдела кадров (подписант уведомлений об отпуске) — из настройки vacation_hr_head. */
+    public static function hrHead(): ?array
+    {
+        $uid = (int) (\App\Services\Settings::get('vacation_hr_head', 0));
+        if (!$uid) { return null; }
+        return Database::one('SELECT id, full_name, position FROM users WHERE id=? AND is_active=1', [$uid]) ?: null;
+    }
+
+    /** Кадры: очередь уведомлений об отпуске за год (черновики/подписаны/разосланы) + пакетная подпись нач. кадров. */
+    public function notices(): void
+    {
+        $me = $this->requireHr();
+        $year = (int) ($this->input('year') ?: (int) date('Y') + 1);
+        $rows = Database::all(
+            "SELECT n.*, u.full_name FROM vacation_notices n JOIN users u ON u.id=n.employee_id
+              WHERE n.year=? ORDER BY u.full_name, n.start_date", [$year]);
+        $hrHead = self::hrHead();
+        $draftCount = 0;
+        foreach ($rows as $r) { if ($r['status'] === 'draft') { $draftCount++; } }
+        $years = array_map('intval', array_column(Database::all("SELECT DISTINCT year FROM vacation_notices ORDER BY year DESC"), 'year'));
+        if (!in_array($year, $years, true)) { $years[] = $year; rsort($years); }
+        $this->view('vacation_schedule/notices', [
+            'title'      => 'Уведомления об отпуске ' . $year,
+            'year'       => $year, 'rows' => $rows, 'hrHead' => $hrHead,
+            'meIsHrHead' => $hrHead && (int) $hrHead['id'] === (int) $me['id'],
+            'draftCount' => $draftCount, 'years' => $years,
+            'signTypes'  => self::SIGN_TYPES, 'csrf' => Auth::csrf(),
+        ]);
+    }
+
+    /** Начальник отдела кадров подписывает весь пакет уведомлений своей ЭП и рассылает (кабинет + почта). */
+    public function signNotices(): void
+    {
+        $me = $this->requireHr();
+        Auth::verifyCsrf();
+        $year = (int) $this->input('year');
+        $back = '/vacation-schedule/notices?year=' . $year;
+        $hrHead = self::hrHead();
+        if (!$hrHead) { flash('Не задан начальник отдела кадров — укажите его в настройках (админ).', 'error'); $this->redirect($back); }
+        if ((int) $hrHead['id'] !== (int) $me['id']) {
+            flash('Подписать уведомления может только начальник отдела кадров (' . $hrHead['full_name'] . ') своей ЭП.', 'error'); $this->redirect($back);
+        }
+        $type = strtoupper((string) $this->input('sign_type'));
+        if (!isset(self::SIGN_TYPES[$type])) { flash('Выберите вид подписи.', 'error'); $this->redirect($back); }
+        $res = \App\Services\VacationNoticeService::signBatch($year, (int) $me['id'], $type, (string) $this->input('password'));
+        if (empty($res['ok'])) {
+            flash(($res['error'] ?? 'Ошибка подписи') . (!empty($res['signed']) ? ' (успело подписаться: ' . $res['signed'] . ')' : ''), 'error');
+            $this->redirect($back);
+        }
+        flash('Уведомления подписаны ЭП и разосланы сотрудникам: ' . $res['sent'] . ' (личный кабинет + почта).');
+        $this->redirect($back);
+    }
+
+    /** Печатное уведомление об отпуске (ст.123 ТК): шапка только ФИО, штамп ЭП начальника отдела кадров. */
+    public function noticeView(string $id): void
+    {
+        Auth::requireLogin();
+        $n = Database::one('SELECT n.*, u.full_name FROM vacation_notices n JOIN users u ON u.id=n.employee_id WHERE n.id=?', [(int) $id]);
+        if (!$n) { flash('Уведомление не найдено.', 'error'); $this->redirect('/vacation-schedule/notices'); }
+        $uid = (int) Auth::id();
+        if ((int) $n['employee_id'] !== $uid && !$this->isHr(Auth::user())) {
+            http_response_code(403); echo \App\Core\View::render('errors/403', ['title' => 'Нет доступа']); return;
+        }
+        $this->view('vacation_schedule/notice', [
+            'title'   => 'Уведомление об отпуске',
+            'n'       => $n,
+            'hrHead'  => self::hrHead(),
+            'orgName' => (string) \App\Services\Settings::get('org_name', 'ФГБУ «Интеробразование»'),
+            'sig'     => SignService::lastSignature('vacation_notice', (int) $id),
+            'signTypes' => self::SIGN_TYPES,
+        ], false);
     }
 
     /** Сотруднику: его периоды отпуска «В графике» (из подписанных графиков). */

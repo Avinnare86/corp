@@ -35,6 +35,7 @@ class AdminDataService
             'vacation_campaign' => 'Кампании по отпускам',
             'vacation_request' => 'Заявки на отпуск',
             'vacation_change_request' => 'Заявки на изменение графика',
+            'vacation_notice' => 'Уведомления об отпуске',
             'order'           => 'Поручения',
             'document'        => 'Документы СЭД',
             'nomenclature_case' => 'Дела номенклатуры',
@@ -324,6 +325,20 @@ class AdminDataService
                         'status' => $vcrStatus[$r['status']] ?? $r['status'],
                         'can_delete' => true, 'can_revert' => $r['status'] === 'approved',
                         'revert_hint' => 'отменить одобрение — вернуть заявку в «на рассмотрении» и отменить её эффект (снять запись/перенос)'];
+                }, $rows);
+
+            case 'vacation_notice':
+                $rows = Database::all(
+                    "SELECT n.*, u.full_name FROM vacation_notices n JOIN users u ON u.id=n.employee_id ORDER BY n.id DESC LIMIT 200");
+                $vnStatus = ['draft' => 'Черновик (не подписано)', 'signed' => 'Подписано', 'sent' => 'Подписано и направлено'];
+                return array_map(function ($r) use ($vnStatus) {
+                    $done = $r['status'] !== 'draft';
+                    return ['id' => (int) $r['id'],
+                        'title' => $r['full_name'] . ' · ' . date('d.m.Y', strtotime($r['start_date'])) . '–' . date('d.m.Y', strtotime($r['end_date'])),
+                        'sub' => 'уведомление ' . $r['year'] . ' · ' . (int) $r['days'] . ' дн.',
+                        'status' => $vnStatus[$r['status']] ?? $r['status'],
+                        'can_delete' => true, 'can_revert' => $done,
+                        'revert_hint' => 'снять подпись и отметку о рассылке → черновик (подпись погашена в журнале)'];
                 }, $rows);
 
             case 'nomenclature_case':
@@ -666,6 +681,12 @@ class AdminDataService
                     ? ' (это только запись о заявке — применённая правка графика/переноса дней сохраняется; чтобы отменить её эффект, используйте «Откатить» до удаления)'
                     : '') . '.');
 
+            case 'vacation_notice':
+                if (!Database::scalar('SELECT 1 FROM vacation_notices WHERE id=?', [$id])) { return self::err('Уведомление об отпуске не найдено.'); }
+                self::runSafe('DELETE FROM document_signatures WHERE entity_type=? AND entity_id=?', ['vacation_notice', $id]);
+                Database::run('DELETE FROM vacation_notices WHERE id=?', [$id]);
+                return self::ok('Уведомление об отпуске удалено (подпись снята). Полученное сотрудником уведомление в кабинете сохраняется.');
+
             case 'nomenclature_case':
                 if (!Database::scalar('SELECT 1 FROM nomenclature_cases WHERE id=?', [$id])) { return self::err('Дело не найдено.'); }
                 $pdo->beginTransaction();
@@ -894,6 +915,14 @@ class AdminDataService
                 Database::run("UPDATE vacation_schedules SET status='draft', signer_id=NULL, signer_name='', signer_position='', sign_type=NULL, signed_at=NULL, sign_hash='', cert_serial='', snapshot=NULL WHERE id=?", [$id]);
                 \App\Services\SignService::revoke('vacation_schedule', $id, (int) Auth::id());
                 return self::ok('Подпись графика отпусков снята — снова черновик (подпись погашена в журнале).');
+
+            case 'vacation_notice':
+                $vn = Database::one('SELECT * FROM vacation_notices WHERE id=?', [$id]);
+                if (!$vn) { return self::err('Уведомление об отпуске не найдено.'); }
+                if ($vn['status'] === 'draft') { return self::err('Уведомление не подписано — откатывать нечего.'); }
+                Database::run("UPDATE vacation_notices SET status='draft', signed_by=NULL, signed_at=NULL, sign_type=NULL, sign_hash='', cert_serial='', notified_at=NULL WHERE id=?", [$id]);
+                \App\Services\SignService::revoke('vacation_notice', $id, (int) Auth::id());
+                return self::ok('Подпись уведомления об отпуске снята — снова черновик, отметка о рассылке сброшена (подпись погашена в журнале).');
 
             case 'vacation_memo':
                 $m = Database::one('SELECT * FROM vacation_memos WHERE id=?', [$id]);

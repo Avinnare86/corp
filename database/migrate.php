@@ -1552,12 +1552,35 @@ $extra['budget_year_settings'] = "CREATE TABLE IF NOT EXISTS budget_year_setting
     start_month INT NOT NULL DEFAULT 1
 ) $ENGINE";
 
+// Уведомление об отпуске (ст.123 ТК РФ) на сотрудника: формируется по подписанному директором
+// графику Т-7, подписывается ЭП начальника отдела кадров (vacation_hr_head), после подписи
+// направляется в личный кабинет и на почту (VacationNoticeService). Шапка уведомления — только ФИО.
+$extra['vacation_notices'] = "CREATE TABLE IF NOT EXISTS vacation_notices (
+    id          $ID,
+    year        INT NOT NULL,
+    employee_id INT NOT NULL,
+    schedule_id INT NOT NULL,            -- график Т-7, по которому сформировано
+    start_date  DATE NOT NULL,
+    end_date    DATE NOT NULL,
+    days        INT NOT NULL DEFAULT 0,  -- календарные дни периода
+    status      VARCHAR(10) NOT NULL DEFAULT 'draft', -- draft | signed | sent
+    signed_by   INT NULL,               -- начальник отдела кадров (подписант)
+    signed_at   TIMESTAMP NULL,
+    sign_type   VARCHAR(10) NULL,
+    sign_hash   VARCHAR(64) NOT NULL DEFAULT '',
+    cert_serial VARCHAR(100) NOT NULL DEFAULT '',
+    notified_at TIMESTAMP NULL,          -- когда направлено в кабинет/на почту
+    created_at  TIMESTAMP DEFAULT $NOW
+) $ENGINE";
+
 foreach ($extra as $name => $sql) {
     $pdo->exec($ddlFix($sql));
     echo "OK  таблица {$name}\n";
 }
 try { $pdo->exec('CREATE INDEX IF NOT EXISTS ix_vcr_year_emp ON vacation_change_requests(year, employee_id)'); } catch (\Throwable $e) {}
 try { $pdo->exec('CREATE INDEX IF NOT EXISTS ix_vcr_status ON vacation_change_requests(status)'); } catch (\Throwable $e) {}
+try { $pdo->exec('CREATE INDEX IF NOT EXISTS ix_vnotice_year_emp ON vacation_notices(year, employee_id)'); } catch (\Throwable $e) {}
+try { $pdo->exec('CREATE INDEX IF NOT EXISTS ix_vnotice_sched ON vacation_notices(schedule_id)'); } catch (\Throwable $e) {}
 
 // Разовый перенос старых СЭД-замещений (users.deputy_*) в acting_assignments (единый источник).
 if (\App\Core\Database::scalar("SELECT sval FROM settings WHERE skey='acting_migrated_deputies'") === false) {
@@ -1828,6 +1851,15 @@ if ((int) \App\Core\Database::scalar('SELECT COUNT(*) FROM nomenclature_cases') 
 if (!columnExists('vacation_balances', 'carried_out')) {
     $pdo->exec('ALTER TABLE vacation_balances ADD COLUMN carried_out INT NOT NULL DEFAULT 0');
     echo "OK  колонка vacation_balances.carried_out добавлена\n";
+}
+
+// Блокировка изменений по отделу: начальник отдела «замораживает» самозапись/заявки и приступает
+// к правке графика (VacationCampaignService::lockDept). Строка vacation_memos создаётся при блокировке.
+foreach (['locked_at' => 'TIMESTAMP NULL', 'locked_by' => 'INT NULL'] as $col => $ddl) {
+    if (!columnExists('vacation_memos', $col)) {
+        $pdo->exec("ALTER TABLE vacation_memos ADD COLUMN $col $ddl");
+        echo "OK  колонка vacation_memos.$col добавлена\n";
+    }
 }
 
 // Факт использования бюджета ФОТ по окладу/стимулу ДО месяца начала расчёта (budget_year_settings,

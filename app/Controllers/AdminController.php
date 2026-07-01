@@ -723,6 +723,8 @@ class AdminController extends Controller
             'visaSignerPosition' => (string) Settings::get('visa_signer_position', \App\Services\VisaDocs::DEFAULT_POSITION),
             'stimulDirectorName'     => (string) Settings::get('stimul_director_name', ''),
             'stimulDirectorPosition' => (string) Settings::get('stimul_director_position', ''),
+            'vacationHrHeadId'   => (int) Settings::get('vacation_hr_head', 0),
+            'hrCandidates'       => Database::all("SELECT id, full_name, position FROM users WHERE is_active=1 ORDER BY full_name"),
             'dss' => [
                 'url'     => \App\Services\SignService::baseUrl(),
                 'enabled' => (string) Settings::get('sign_dss_enabled', '1') !== '0',
@@ -787,6 +789,10 @@ class AdminController extends Controller
         if (array_key_exists('stimul_director_name', $_POST)) {
             Settings::set('stimul_director_name', trim((string) $this->input('stimul_director_name')));
             Settings::set('stimul_director_position', trim((string) $this->input('stimul_director_position')));
+        }
+        // Начальник отдела кадров — подписант уведомлений об отпуске (только если отправлена его форма)
+        if (array_key_exists('vacation_hr_head', $_POST)) {
+            Settings::set('vacation_hr_head', (string) (int) $this->input('vacation_hr_head'));
         }
         // Подписант описей/ГП — только если отправлена его форма (есть поле visa_signer_position)
         if (array_key_exists('visa_signer_position', $_POST)) {
