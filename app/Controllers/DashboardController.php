@@ -22,12 +22,15 @@ class DashboardController extends Controller
         ]);
     }
 
-    /** Расчётный листок (доступен некрупной ссылкой с дашборда). */
+    /** Расчётный листок (доступен некрупной ссылкой с дашборда). Период переключается через ?period=YYYY-MM. */
     public function payroll(): void
     {
         Auth::requireLogin();
         $user = Auth::user();
-        $period = PayrollService::currentPeriod();
+        $period = (string) $this->input('period', PayrollService::currentPeriod());
+        if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
+            $period = PayrollService::currentPeriod();
+        }
         $payroll = PayrollService::calculate((int) $user['id'], $period);
 
         // Позиция в рейтинге.
@@ -40,6 +43,7 @@ class DashboardController extends Controller
         $this->view('dashboard/payslip', [
             'title'    => 'Расчётный листок',
             'user'     => $user,
+            'period'   => $period,
             'payroll'  => $payroll,
             'penaltyRows' => !empty($payroll['penalty_details_flag']) ? PayrollService::penaltyDetails((int) $user['id'], $period) : [],
             'myRank'   => $myRank,

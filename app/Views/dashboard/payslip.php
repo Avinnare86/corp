@@ -9,9 +9,12 @@ $over = round((float) $p['total'] - (float) $p['min_total'], 2); // сверх �
 $penaltyRows = $penaltyRows ?? [];
 $hnum = fn($v) => rtrim(rtrim(number_format((float) $v, 2, '.', ' '), '0'), '.'); // часы без лишних нулей
 ?>
-<div class="chat-head">
+<div class="chat-head" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <a class="btn btn-mini" href="/">← Главная</a>
     <h1 style="margin:0;font-size:1.2rem">Расчётный листок</h1>
+    <form method="get" action="/payroll" style="margin:0 0 0 auto">
+        <input type="month" name="period" value="<?= e($period) ?>" max="<?= e(date('Y-m')) ?>" onchange="this.form.submit()">
+    </form>
 </div>
 
 <div class="cards">
