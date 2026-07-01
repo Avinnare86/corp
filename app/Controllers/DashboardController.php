@@ -46,6 +46,7 @@ class DashboardController extends Controller
             'period'   => $period,
             'payroll'  => $payroll,
             'penaltyRows' => !empty($payroll['penalty_details_flag']) ? PayrollService::penaltyDetails((int) $user['id'], $period) : [],
+            'daily'    => PayrollService::dailyBreakdown((int) $user['id'], $period),
             'myRank'   => $myRank,
             'totalEmployees' => count($ranking),
             'unread'   => NotificationService::unreadCount((int) $user['id']),

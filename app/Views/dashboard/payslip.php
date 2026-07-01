@@ -104,6 +104,45 @@ $hnum = fn($v) => rtrim(rtrim(number_format((float) $v, 2, '.', ' '), '0'), '.')
         <tr class="total"><td>Итого сделка</td><td></td><td></td><td class="num"><?= money($p['piecework']) ?></td></tr>
         </tbody>
     </table>
+
+    <?php if (!empty($daily['rows'])): ?>
+    <h3 class="sub">Сделка — по дням</h3>
+    <p class="muted" style="margin:.2rem 0 .4rem">Тариф анкет меняется по дням (дневной коэффициент) — здесь видно, сколько заработано за каждый день.</p>
+    <table class="table">
+        <thead><tr><th>Дата</th><th class="num">Анкеты</th><th class="num">Операции</th><th class="num">Итого за день</th></tr></thead>
+        <tbody>
+        <?php foreach ($daily['rows'] as $d): ?>
+            <tr>
+                <td><?= e(date('d.m', strtotime($d['date']))) ?></td>
+                <td class="num">
+                    <?php if ($d['anketa_count']): ?>
+                        <?= (int) $d['anketa_count'] ?> шт · <?= money($d['anketa_sum']) ?>
+                        <?php if (abs($d['day_coeff'] - 1.0) > 0.001): ?>
+                            <div class="muted" style="font-size:.82em">к-т ×<?= rtrim(rtrim(number_format($d['day_coeff'], 2, '.', ''), '0'), '.') ?></div>
+                        <?php endif; ?>
+                        <?php if (count($d['anketa_tiers']) > 1): ?>
+                            <div class="muted" style="font-size:.82em"><?php foreach ($d['anketa_tiers'] as $t): ?><?= (int) $t['count'] ?>×<?= money($t['price']) ?> <?php endforeach; ?></div>
+                        <?php endif; ?>
+                    <?php else: ?>—<?php endif; ?>
+                </td>
+                <td class="num">
+                    <?php if ($d['ops_count']): ?>
+                        <?= money($d['ops_sum']) ?>
+                        <div class="muted" style="font-size:.82em"><?php foreach ($d['ops_breakdown'] as $ob): ?><?= e($ob['name']) ?> ×<?= (int) $ob['count'] ?><br><?php endforeach; ?></div>
+                    <?php else: ?>—<?php endif; ?>
+                </td>
+                <td class="num"><strong><?= money($d['total']) ?></strong></td>
+            </tr>
+        <?php endforeach; ?>
+        <tr class="total">
+            <td>Итого</td>
+            <td class="num"><?= money($daily['total_anketa']) ?></td>
+            <td class="num"><?= money($daily['total_ops']) ?></td>
+            <td class="num"><?= money($daily['total_all']) ?></td>
+        </tr>
+        </tbody>
+    </table>
+    <?php endif; ?>
     <?php endif; ?>
 
     <?php if ($p['fix_breakdown']): ?>

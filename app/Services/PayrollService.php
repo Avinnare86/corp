@@ -623,6 +623,91 @@ class PayrollService
         return ['anketa' => round($anketa, 2), 'ops' => round($ops, 2), 'total' => round($anketa + $ops, 2)];
     }
 
+    /**
+     * Дневная разбивка сделки (анкеты + операции) за период — для расчётного листка сдельщика:
+     * видно, сколько заработано КАЖДЫЙ день, с учётом дневного коэффициента тарифа анкет.
+     * В норматив-модели анкеты — только СВЕРХ норматива (те же данные, что в общей детализации).
+     * @return array{rows: array<int,array>, total_anketa: float, total_ops: float, total_all: float}
+     */
+    public static function dailyBreakdown(int $employeeId, string $period): array
+    {
+        $byDay = [];
+        $init = function (int $d) use (&$byDay, $period) {
+            if (!isset($byDay[$d])) {
+                $byDay[$d] = [
+                    'day' => $d, 'date' => sprintf('%s-%02d', $period, $d),
+                    'day_coeff' => \App\Services\Tariff::dayCoeff(sprintf('%s-%02d', $period, $d)),
+                    'anketa_count' => 0, 'anketa_sum' => 0.0, 'anketa_tiers' => [],
+                    'ops_count' => 0, 'ops_sum' => 0.0, 'ops_breakdown' => [],
+                ];
+            }
+        };
+
+        $hasNorm = Database::scalar('SELECT anketa_norm FROM users WHERE id = ?', [$employeeId]);
+        if ($hasNorm !== false && $hasNorm !== null) {
+            // Норматив-модель: сверхнормативные анкеты уже посчитаны по дням в NormService.
+            $norm = \App\Services\NormService::forEmployee($employeeId, $period);
+            foreach ($norm['above_items'] as $it) {
+                $d = max(1, min(31, (int) $it['day']));
+                $init($d);
+                $byDay[$d]['anketa_count']++;
+                $byDay[$d]['anketa_sum'] = round($byDay[$d]['anketa_sum'] + $it['price'], 2);
+                $key = (string) $it['price'];
+                if (!isset($byDay[$d]['anketa_tiers'][$key])) { $byDay[$d]['anketa_tiers'][$key] = ['price' => $it['price'], 'count' => 0]; }
+                $byDay[$d]['anketa_tiers'][$key]['count']++;
+            }
+        } else {
+            // Классика: все проверенные анкеты по тарифу страны × дневной коэффициент.
+            $countryRows = Database::all(
+                "SELECT country_code, CAST(substr(checked_at,9,2) AS INTEGER) AS day, COUNT(*) AS cnt
+                   FROM assignment_items
+                  WHERE assigned_to = ? AND checked_at IS NOT NULL AND substr(checked_at,1,7) = ?
+                  GROUP BY country_code, day",
+                [$employeeId, $period]
+            );
+            foreach ($countryRows as $r) {
+                $d = max(1, min(31, (int) $r['day']));
+                $init($d);
+                $cnt = (int) $r['cnt'];
+                $price = round(\App\Services\Tariff::priceForCountry($r['country_code']) * $byDay[$d]['day_coeff'], 2);
+                $byDay[$d]['anketa_count'] += $cnt;
+                $byDay[$d]['anketa_sum'] = round($byDay[$d]['anketa_sum'] + $cnt * $price, 2);
+                $key = (string) $price;
+                if (!isset($byDay[$d]['anketa_tiers'][$key])) { $byDay[$d]['anketa_tiers'][$key] = ['price' => $price, 'count' => 0]; }
+                $byDay[$d]['anketa_tiers'][$key]['count'] += $cnt;
+            }
+        }
+
+        // Операции (визы и пр.) по дням — фиксированная цена, дневной коэффициент тут не действует.
+        $opsRows = Database::all(
+            "SELECT CAST(substr(pw.work_date,9,2) AS INTEGER) AS day, o.name, o.unit_price, SUM(pw.quantity) AS qty
+               FROM piecework pw JOIN operations o ON o.id = pw.operation_id
+              WHERE pw.employee_id = ? AND substr(pw.work_date,1,7) = ?
+                AND (COALESCE(o.stage,0) NOT IN (1,3) OR pw.accepted_at IS NOT NULL)
+              GROUP BY day, o.id, o.name, o.unit_price",
+            [$employeeId, $period]
+        );
+        foreach ($opsRows as $r) {
+            $d = max(1, min(31, (int) $r['day']));
+            $init($d);
+            $qty = (int) $r['qty']; $price = (float) $r['unit_price']; $sub = round($qty * $price, 2);
+            $byDay[$d]['ops_count'] += $qty;
+            $byDay[$d]['ops_sum'] = round($byDay[$d]['ops_sum'] + $sub, 2);
+            $byDay[$d]['ops_breakdown'][] = ['name' => $r['name'], 'count' => $qty, 'price' => $price, 'subtotal' => $sub];
+        }
+
+        ksort($byDay, SORT_NUMERIC);
+        $rows = []; $totalAnketa = 0.0; $totalOps = 0.0;
+        foreach ($byDay as $row) {
+            $row['anketa_tiers'] = array_values($row['anketa_tiers']);
+            $row['total'] = round($row['anketa_sum'] + $row['ops_sum'], 2);
+            $rows[] = $row;
+            $totalAnketa += $row['anketa_sum'];
+            $totalOps += $row['ops_sum'];
+        }
+        return ['rows' => $rows, 'total_anketa' => round($totalAnketa, 2), 'total_ops' => round($totalOps, 2), 'total_all' => round($totalAnketa + $totalOps, 2)];
+    }
+
     /** Сумма штрафов контролёра за период с фильтром дня проверки DD от..до. */
     private static function penaltySum(int $employeeId, string $period, int $dayFrom, int $dayTo): float
     {
