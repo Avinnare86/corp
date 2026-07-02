@@ -169,10 +169,8 @@ class ShiftController extends Controller
             $eid = (int) $e['id'];
             $byDate = [];
             foreach (Database::all("SELECT * FROM shift_days WHERE employee_id=? AND substr(work_date,1,7)=?", [$eid, $month]) as $sd) { $byDate[$sd['work_date']] = $sd; }
-            $vac = [];
-            foreach (Database::all("SELECT start_date, end_date FROM vacation_requests WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?", [$eid, "$month-$lastDay", "$month-01"]) as $v) {
-                for ($ts = strtotime($v['start_date']); $ts <= strtotime($v['end_date']); $ts += 86400) { $vac[date('Y-m-d', $ts)] = true; }
-            }
+            // Отпуска — из подписанного сводного графика Т-7 (+ исторический fallback по старым заявкам).
+            $vac = \App\Services\VacationScheduleService::vacationDayMap($eid, "$month-01", "$month-$lastDay");
             $cells = []; $sumH = 0.0; $sumN = 0.0; $days = 0;
             for ($d = 1; $d <= $lastDay; $d++) {
                 $dte = sprintf('%s-%02d', $month, $d);
@@ -308,6 +306,8 @@ class ShiftController extends Controller
         foreach ($emps as $e) {
             $eid = (int) $e['id'];
             $cells = []; $days = 0; $hours = 0.0;
+            // Отпуска — из подписанного сводного графика Т-7 (+ исторический fallback), одной выборкой на сотрудника.
+            $vacMap = \App\Services\VacationScheduleService::vacationDayMap($eid, "$month-01", sprintf('%s-%02d', $month, $lastDay));
             for ($d = 1; $d <= $lastDay; $d++) {
                 $dte = sprintf('%s-%02d', $month, $d);
                 $cell = ['c' => '', 'h' => ''];
@@ -318,7 +318,7 @@ class ShiftController extends Controller
                     if ($pn > 0) { $cell = ['c' => 'Р/Н', 'h' => self::fmtH(max(0.0, $ph - $pn)) . '/' . self::fmtH($pn)]; }
                     else         { $cell = ['c' => 'Р', 'h' => self::fmtH($ph)]; }   // часы смены в каждой ячейке
                     $days++; $hours += $ph;
-                } elseif (Database::scalar("SELECT 1 FROM vacation_requests WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?", [$eid, $dte, $dte])) {
+                } elseif (isset($vacMap[$dte])) {
                     $cell = ['c' => 'О', 'h' => ''];
                 }
                 $cells[] = $cell;

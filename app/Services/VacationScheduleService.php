@@ -163,6 +163,52 @@ class VacationScheduleService
         return $sid;
     }
 
+    /**
+     * Утверждённые периоды отпуска сотрудника, пересекающие [from..to] — ЕДИНЫЙ источник
+     * для табеля/сменного графика (код «О»). Истина по каждому году диапазона:
+     *  - если за год есть ПОДПИСАННАЯ неархивная ревизия сводного графика Т-7
+     *    (department_id IS NULL, максимальная revision) — берём её approved-строки;
+     *  - иначе (годы до кампаний) — исторические approved-заявки старого потока (vacation_requests).
+     * @return array<int, array{start_date:string, end_date:string}>
+     */
+    public static function approvedPeriods(int $employeeId, string $from, string $to): array
+    {
+        $out = [];
+        // Год начала минус 1 — чтобы поймать период, начатый в декабре и переходящий в январь.
+        for ($year = (int) substr($from, 0, 4) - 1; $year <= (int) substr($to, 0, 4); $year++) {
+            $sched = Database::one(
+                "SELECT id FROM vacation_schedules
+                  WHERE year=? AND department_id IS NULL AND status=? AND archived_at IS NULL
+                  ORDER BY revision DESC, id DESC LIMIT 1", [$year, self::ST_SIGNED]);
+            if ($sched) {
+                $rows = Database::all(
+                    'SELECT start_date, end_date FROM vacation_schedule_rows
+                      WHERE schedule_id=? AND employee_id=? AND status=? AND start_date<=? AND end_date>=?',
+                    [(int) $sched['id'], $employeeId, self::ROW_APPROVED, $to, $from]);
+            } else {
+                $rows = Database::all(
+                    "SELECT start_date, end_date FROM vacation_requests
+                      WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?
+                        AND CAST(substr(start_date,1,4) AS INTEGER)=?",
+                    [$employeeId, $to, $from, $year]);
+            }
+            foreach ($rows as $r) { $out[] = ['start_date' => $r['start_date'], 'end_date' => $r['end_date']]; }
+        }
+        return $out;
+    }
+
+    /** Карта отпускных дат сотрудника в диапазоне: 'Y-m-d' => true (развёрнутые approvedPeriods, обрезано по [from..to]). */
+    public static function vacationDayMap(int $employeeId, string $from, string $to): array
+    {
+        $map = [];
+        foreach (self::approvedPeriods($employeeId, $from, $to) as $p) {
+            $a = max(strtotime($p['start_date']), strtotime($from));
+            $b = min(strtotime($p['end_date']), strtotime($to));
+            for ($ts = $a; $ts <= $b; $ts += 86400) { $map[date('Y-m-d', $ts)] = true; }
+        }
+        return $map;
+    }
+
     /** Табельный номер сотрудника (если ведётся) — для формы Т-7. */
     public static function tabNumber(int $employeeId): string
     {

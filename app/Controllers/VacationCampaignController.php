@@ -599,11 +599,13 @@ class VacationCampaignController extends Controller
             }
             SignService::recordSignature('vacation_memo', $entityId, $uid, $d);
             $deptName = (string) Database::scalar('SELECT name FROM departments WHERE id=?', [$dept]);
-            foreach (array_unique(array_filter(array_merge(Org::superiorUserIds($uid), [Org::directorUserId()]))) as $boss) {
-                NotificationService::create((int) $boss, 'Отпуска: служебка отдела на утверждение',
-                    'Начальник подписал график отпусков отдела «' . $deptName . '» на ' . $year . ' — ожидает вашего утверждения.');
+            // Следующий шаг — согласование курирующим замом (директор служебки отделов не утверждает —
+            // он подписывает только сводный Т-7), поэтому адресат — куратор(ы) отдела по цепочке вверх.
+            foreach (Org::curatorsOfDept($dept, $uid) as $boss) {
+                NotificationService::create((int) $boss, 'Отпуска: служебка отдела на согласование',
+                    'Начальник подписал график отпусков отдела «' . $deptName . '» на ' . $year . ' — ожидает вашего согласования.');
             }
-            flash('Служебка отдела подписана и направлена на утверждение.');
+            flash('Служебка отдела подписана и направлена на согласование заму.');
         } else { // deputy — терминал согласования отдела; кадры включают отдел в сводный график Т-7
             Database::run('UPDATE vacation_memos SET status=?, deputy_id=?, deputy_signed_at=?, deputy_sign_type=?, deputy_sign_hash=? WHERE id=?',
                 ['deputy_signed', $uid, $d['signed_at'], $d['sign_type'], $d['sign_hash'], $entityId]);

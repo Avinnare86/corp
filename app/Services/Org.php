@@ -62,6 +62,20 @@ class Org
         return array_keys($out);
     }
 
+    /** Курирующие замы подразделения: curator_id отдела и вышестоящих по parent_id (без $excludeUid). */
+    public static function curatorsOfDept(?int $deptId, int $excludeUid = 0): array
+    {
+        $out = []; $guard = 0;
+        while ($deptId && $guard++ < 20) {
+            $d = Database::one('SELECT curator_id, parent_id FROM departments WHERE id=?', [$deptId]);
+            if (!$d) { break; }
+            $cur = (int) ($d['curator_id'] ?? 0);
+            if ($cur && $cur !== $excludeUid) { $out[$cur] = true; }
+            $deptId = $d['parent_id'] ? (int) $d['parent_id'] : null;
+        }
+        return array_keys($out);
+    }
+
     /** Отделы, где $uid — начальник (head_id). */
     public static function headedDeptIds(int $uid): array
     {

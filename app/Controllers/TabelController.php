@@ -93,11 +93,13 @@ class TabelController extends Controller
         foreach ($emps as $e) {
             $eid = (int) $e['id'];
             $cells = []; $days = 0; $hoursSum = 0.0;
+            // Отпуска — из подписанного сводного графика Т-7 (+ исторический fallback), одной выборкой на сотрудника.
+            $vacMap = \App\Services\VacationScheduleService::vacationDayMap($eid, $start, $end);
             for ($i = 0; $i < $nDays; $i++) {
                 $dte = date('Y-m-d', strtotime($start) + $i * 86400);
                 $cell = ['c' => '', 'h' => ''];
                 $sd = Database::one('SELECT * FROM shift_days WHERE employee_id=? AND work_date=?', [$eid, $dte]);
-                $onVac = Database::scalar("SELECT 1 FROM vacation_requests WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?", [$eid, $dte, $dte]);
+                $onVac = isset($vacMap[$dte]);
                 $hours = 0.0; $night = 0.0;
                 if ($sd) {
                     $useFact = (float) $sd['fact_hours'] > 0;
@@ -137,12 +139,14 @@ class TabelController extends Controller
             $hire = ($e['hire_date'] ?? '') !== '' ? substr((string) $e['hire_date'], 0, 10) : null;
             $fire = ($e['fire_date'] ?? '') !== '' ? substr((string) $e['fire_date'], 0, 10) : null;
             $cells = []; $days = 0;
+            // Отпуска — из подписанного сводного графика Т-7 (+ исторический fallback), одной выборкой на сотрудника.
+            $vacMap = \App\Services\VacationScheduleService::vacationDayMap($eid, $start, $end);
             for ($i = 0; $i < $nDays; $i++) {
                 $dte = date('Y-m-d', strtotime($start) + $i * 86400);
                 $dow = (int) date('w', strtotime($dte));   // 0=вс, 6=сб
                 if (($hire !== null && $dte < $hire) || ($fire !== null && $dte > $fire)) {
                     $c = '';   // до приёма / после увольнения — нерабочий день, не в счёт отработанных
-                } elseif (Database::scalar("SELECT 1 FROM vacation_requests WHERE employee_id=? AND status='approved' AND start_date<=? AND end_date>=?", [$eid, $dte, $dte])) {
+                } elseif (isset($vacMap[$dte])) {
                     $c = 'О';
                 } elseif ($dow === 0 || $dow === 6) {
                     $c = 'В';
